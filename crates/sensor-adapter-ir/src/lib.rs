@@ -1,11 +1,14 @@
 mod emitter_xu;
 mod illumination;
 mod ioctl;
+mod lazy;
 mod msxu;
 mod v4l2_capture;
 
 use std::ffi::CStr;
 use std::os::raw::c_char;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use openhello_plugin_abi::{FrameView, SensorHandle, SensorInterface, Status, ABI_VERSION};
 use thiserror::Error;
@@ -15,6 +18,7 @@ pub use illumination::LitFrameFilter;
 pub use msxu::{MsxuEmitter, MsxuUnit};
 pub use v4l2_capture::V4l2Camera;
 
+use lazy::{LazyCapture, IDLE_RELEASE};
 use illumination::{mean_luma, MAX_CONSECUTIVE_UNLIT, MIN_LIT_MEAN, PROBE_FRAMES};
 
 const EMITTER_ENV: &str = "OPENHELLO_IR_EMITTER";
@@ -86,7 +90,7 @@ fn probe_illumination<S: FrameSource>(source: &mut S, filter: &mut LitFrameFilte
     Ok(lit)
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum EmitterPolicy {
     Auto { allow_write: bool },
     Vendor(EmitterControl),
@@ -119,16 +123,38 @@ impl EmitterPolicy {
 }
 
 struct SensorState {
-    session: CaptureSession<V4l2Camera>,
+    capture: LazyCapture<V4l2Camera>,
     last: Option<Frame>,
 }
 
-fn open_state(device_path: &str) -> Result<SensorState, SensorError> {
+type SharedState = Arc<Mutex<SensorState>>;
+
+fn open_state(device_path: &str) -> Result<SharedState, SensorError> {
     let policy = EmitterPolicy::from_env()?;
-    let camera = V4l2Camera::open(device_path)?;
-    let mut emitter = policy.emitter_for(device_path, camera.raw_fd());
-    let session = CaptureSession::begin(emitter.as_mut(), camera)?;
-    Ok(SensorState { session, last: None })
+    if !std::path::Path::new(device_path).exists() {
+        return Err(SensorError::Device(format!("{device_path} does not exist")));
+    }
+    let path = device_path.to_string();
+    let opener = Box::new(move || {
+        let camera = V4l2Camera::open(&path)?;
+        let mut emitter = policy.clone().emitter_for(&path, camera.raw_fd());
+        CaptureSession::begin(emitter.as_mut(), camera)
+    });
+    let state = Arc::new(Mutex::new(SensorState { capture: LazyCapture::new(opener, Instant::now()), last: None }));
+    spawn_idle_release(Arc::downgrade(&state));
+    Ok(state)
+}
+
+fn spawn_idle_release(state: std::sync::Weak<Mutex<SensorState>>) {
+    std::thread::spawn(move || {
+        while let Some(shared) = state.upgrade() {
+            if let Ok(mut guard) = shared.lock() {
+                guard.capture.release_if_idle(Instant::now(), IDLE_RELEASE);
+            }
+            drop(shared);
+            std::thread::sleep(Duration::from_millis(500));
+        }
+    });
 }
 
 fn status_of(error: &SensorError) -> Status {
@@ -160,8 +186,11 @@ unsafe extern "C" fn sensor_capture(handle: SensorHandle, out: *mut FrameView) -
     if handle.is_null() || out.is_null() {
         return Status::InvalidArgument;
     }
-    let state = &mut *(handle as *mut SensorState);
-    match state.session.next_frame() {
+    let shared = &*(handle as *const SharedState);
+    let Ok(mut state) = shared.lock() else {
+        return Status::Internal;
+    };
+    match state.capture.next_frame(Instant::now()) {
         Ok(frame) => {
             let stored = state.last.insert(frame);
             *out = FrameView {
@@ -181,7 +210,7 @@ unsafe extern "C" fn sensor_release_frame(_handle: SensorHandle, _frame: *const 
 
 unsafe extern "C" fn sensor_close(handle: SensorHandle) {
     if !handle.is_null() {
-        drop(Box::from_raw(handle as *mut SensorState));
+        drop(Box::from_raw(handle as *mut SharedState));
     }
 }
 
