@@ -2,9 +2,9 @@ import nbformat as nbf
 
 cells = [
     nbf.v4.new_markdown_cell(
-        "# Avaliação de acurácia\n\n"
-        "Mede aceitação da pessoa certa e rejeição de outras nos limiares de produção. "
-        "Pré-requisitos e comandos estão no `README.md` desta pasta."
+        "# Accuracy evaluation\n\n"
+        "Measures acceptance of the right person and rejection of others at the production thresholds. "
+        "Prerequisites and commands are in this folder's `README.md`."
     ),
     nbf.v4.new_code_cell(
         "import os\n"
@@ -21,30 +21,30 @@ cells = [
         "print(len(run.enrolled_names), 'enrolled,', len(run.stranger_names), 'strangers')\n"
         "print(run.parity(calibration))"
     ),
-    nbf.v4.new_markdown_cell("## Relatório nos limiares de produção"),
+    nbf.v4.new_markdown_cell("## Report at the production thresholds"),
     nbf.v4.new_code_cell("result = run.report(calibration)\nprint(format_report(result))"),
-    nbf.v4.new_markdown_cell("## Distribuição das pontuações"),
+    nbf.v4.new_markdown_cell("## Score distributions"),
     nbf.v4.new_code_cell(
         "fig, ax = plt.subplots(figsize=(8, 3.5))\n"
         "bins = np.linspace(-0.2, 1.0, 120)\n"
-        "ax.hist(result['impostor_scores'], bins=bins, density=True, alpha=0.6, label='outra pessoa')\n"
-        "ax.hist(result['genuine_scores'], bins=bins, density=True, alpha=0.6, label='mesma pessoa')\n"
+        "ax.hist(result['impostor_scores'], bins=bins, density=True, alpha=0.6, label='different person')\n"
+        "ax.hist(result['genuine_scores'], bins=bins, density=True, alpha=0.6, label='same person')\n"
         "for row in result['verify']:\n"
         "    ax.axvline(calibration.threshold(row['target_far'] / ENROLL_SHOTS), color='k', lw=0.6, ls='--')\n"
-        "ax.set_xlabel('similaridade de cosseno'); ax.set_ylabel('densidade'); ax.legend()\n"
+        "ax.set_xlabel('cosine similarity'); ax.set_ylabel('density'); ax.legend()\n"
         "plt.show()"
     ),
-    nbf.v4.new_markdown_cell("## FAR medido contra a meta\n\nPontos acima da diagonal indicam que o sistema aceita mais impostores do que promete."),
+    nbf.v4.new_markdown_cell("## Measured FAR against target\n\nPoints above the diagonal mean the system accepts more impostors than it promises."),
     nbf.v4.new_code_cell(
         "targets = np.array([row['target_far'] for row in result['verify']])\n"
         "measured = np.array([row['measured_far'] for row in result['verify']])\n"
         "fig, ax = plt.subplots(figsize=(4.5, 4.5))\n"
-        "ax.loglog(targets, measured, 'o-', label='medido')\n"
-        "ax.loglog(targets, targets, 'k--', lw=0.8, label='meta')\n"
-        "ax.set_xlabel('FAR alvo'); ax.set_ylabel('FAR medido'); ax.legend()\n"
+        "ax.loglog(targets, measured, 'o-', label='measured')\n"
+        "ax.loglog(targets, targets, 'k--', lw=0.8, label='target')\n"
+        "ax.set_xlabel('target FAR'); ax.set_ylabel('measured FAR'); ax.legend()\n"
         "plt.show()"
     ),
-    nbf.v4.new_markdown_cell("## Curva ROC empírica\n\nIndepende da calibração: mostra o melhor que o modelo permite."),
+    nbf.v4.new_markdown_cell("## Empirical ROC curve\n\nIndependent of calibration: shows the best the model allows."),
     nbf.v4.new_code_cell(
         "genuine, impostor = result['genuine_scores'], result['impostor_scores']\n"
         "cuts = np.quantile(impostor, 1 - np.logspace(-0.3, -np.log10(len(impostor)), 120))\n"
@@ -52,7 +52,7 @@ cells = [
         "tar = np.array([(genuine >= c).mean() for c in cuts])\n"
         "fig, ax = plt.subplots(figsize=(5, 4))\n"
         "ax.semilogx(far, tar)\n"
-        "ax.set_xlabel('FAR'); ax.set_ylabel('aceitação da pessoa certa'); ax.set_ylim(0.5, 1.0); ax.grid(alpha=0.3)\n"
+        "ax.set_xlabel('FAR'); ax.set_ylabel('genuine accept rate'); ax.set_ylim(0.5, 1.0); ax.grid(alpha=0.3)\n"
         "plt.show()"
     ),
 ]
