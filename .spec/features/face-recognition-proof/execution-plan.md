@@ -18,7 +18,7 @@
 | T-003 | Engine Adapter: detection + embedding (YuNet + AuraFace via ort) | `claude-sonnet-5` | high |
 | T-004 | Engine Adapter: enrollment quality gate | `claude-sonnet-5` | medium |
 | T-005 | Engine Adapter: FAR-calibrated Verify/Identify matching | `claude-sonnet-5` | high |
-| T-006 | Engine Adapter: micro-motion + focus-variance liveness heuristic | `claude-sonnet-5` | medium |
+| T-006 | Engine Adapter: micro-motion liveness heuristic | `claude-sonnet-5` | medium |
 | T-007 | Storage Adapter: TPM-sealed AEAD template store | `claude-sonnet-5` | high |
 | T-008 | Storage Adapter: purge (crypto-shred) | `claude-sonnet-5` | medium |
 | T-009 | openhellod: D-Bus service, plugin loading, dispatch | `claude-sonnet-5` | high |

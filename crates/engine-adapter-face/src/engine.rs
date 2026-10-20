@@ -166,7 +166,7 @@ impl Engine {
                 observed.push((image, detection));
             }
         }
-        let samples: Vec<LivenessSample> = observed.iter().map(|(i, d)| LivenessSample::observe(i, d)).collect();
+        let samples: Vec<LivenessSample> = observed.iter().map(|(_, d)| LivenessSample::observe(d)).collect();
         if samples.len() < self.liveness.min_frames {
             return Err(EngineError::NoFace);
         }

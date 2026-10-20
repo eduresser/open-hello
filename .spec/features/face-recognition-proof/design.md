@@ -37,7 +37,7 @@ crates/
   cameras are out of scope.
 - **`engine-adapter-face`** — YuNet detection + AuraFace (`glintr100`) embedding via `ort` (ONNX Runtime),
   pose-bucket/blur/occlusion quality gating for enrollment (AC-001–AC-004), FAR-calibrated match decision
-  (AC-005/AC-006/P-007), 1:N identify (AC-007/AC-008), and the micro-motion + focus-variance liveness
+  (AC-005/AC-006/P-007), 1:N identify (AC-007/AC-008), and the micro-motion liveness
   heuristic (AC-012).
 - **`storage-adapter-templates`** — per-UID template file store under AEAD (AC-009/AC-010/P-006). The
   encryption key is sealed by a dedicated TPM2 object created directly via `tpm2-tools`/`tss-esapi`, scoped
