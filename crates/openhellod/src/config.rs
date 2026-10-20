@@ -3,6 +3,12 @@ use std::path::PathBuf;
 use crate::core::DEFAULT_TARGET_FAR;
 
 #[derive(Debug, PartialEq)]
+pub enum AuthMode {
+    Polkit,
+    RootOnly,
+}
+
+#[derive(Debug, PartialEq)]
 pub enum BusKind {
     System,
     Session,
@@ -17,6 +23,7 @@ pub struct Config {
     pub state_dir: PathBuf,
     pub engine_config: PathBuf,
     pub bus: BusKind,
+    pub auth: AuthMode,
     pub target_far: f64,
 }
 
@@ -41,6 +48,11 @@ impl Config {
             Some("session") => BusKind::Session,
             Some(other) => return Err(format!("--bus must be `system` or `session`, got `{other}`")),
         };
+        let auth = match values.remove("auth").as_deref() {
+            None | Some("polkit") => AuthMode::Polkit,
+            Some("root-only") => AuthMode::RootOnly,
+            Some(other) => return Err(format!("--auth must be `polkit` or `root-only`, got `{other}`")),
+        };
         let target_far = match values.remove("target-far") {
             None => DEFAULT_TARGET_FAR,
             Some(text) => text.parse::<f64>().map_err(|_| format!("--target-far must be a number in (0, 1), got `{text}`"))?,
@@ -56,7 +68,7 @@ impl Config {
                 return Err(format!("--{label} {} is not a file", path.display()));
             }
         }
-        Ok(Self { sensor_lib, engine_lib, storage_lib, device, state_dir, engine_config, bus, target_far })
+        Ok(Self { sensor_lib, engine_lib, storage_lib, device, state_dir, engine_config, bus, auth, target_far })
     }
 }
 
@@ -78,6 +90,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let config = Config::parse(args(&[], dir.path())).unwrap();
         assert_eq!(config.bus, BusKind::System);
+        assert_eq!(config.auth, AuthMode::Polkit);
         assert_eq!(config.target_far, DEFAULT_TARGET_FAR);
         assert_eq!(config.device, "/dev/video2");
     }
@@ -87,6 +100,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         for (extra, needle) in [
             (vec!["--bus", "mars"], "--bus"),
+            (vec!["--auth", "none"], "--auth"),
             (vec!["--target-far", "2"], "--target-far"),
             (vec!["--target-far", "abc"], "--target-far"),
             (vec!["--bogus", "1"], "--bogus"),
