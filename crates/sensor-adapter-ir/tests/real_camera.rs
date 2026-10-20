@@ -2,7 +2,7 @@ use openhello_plugin_abi::{FrameView, SensorHandle, Status};
 use sensor_adapter_ir::openhello_sensor_interface;
 
 const DEVICE_ENV: &str = "OPENHELLO_DEVICE";
-const FRAMES: usize = 20;
+const FRAMES: usize = 300;
 const LIT_MEAN: f64 = 20.0;
 
 fn mean(frame: &FrameView) -> f64 {
@@ -24,7 +24,9 @@ fn real_ir_camera_returns_only_lit_frames() {
     for _ in 0..FRAMES {
         let mut frame = std::mem::MaybeUninit::<FrameView>::uninit();
         assert_eq!(unsafe { (interface.capture)(handle, frame.as_mut_ptr()) }, Status::Ok);
-        means.push(mean(unsafe { &*frame.as_ptr() }));
+        let frame = unsafe { &*frame.as_ptr() };
+        assert_eq!(frame.len, (frame.width * frame.height) as usize, "truncated frame");
+        means.push(mean(frame));
     }
     unsafe { (interface.close)(handle) };
 
