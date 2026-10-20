@@ -106,6 +106,7 @@ ensure_rust
 run cargo build --release --manifest-path "$REPO/Cargo.toml" \
   -p openhellod -p openhello-cli -p sensor-adapter-ir -p engine-adapter-face -p storage-adapter-templates
 
+if [ -n "${SUDO_USER:-}" ] && [ "$DRY_RUN" = 0 ]; then chown -R "$SUDO_USER" "$REPO/target"; fi
 T="$REPO/target/release"
 run install -d -m 0755 "$LIB_DIR" "$BIN_DIR" "$CONF_DIR"
 run install -d -m 0700 /var/lib/openhello
