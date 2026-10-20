@@ -7,6 +7,8 @@ use crate::{Frame, FrameSource, SensorError};
 const BUF_TYPE_VIDEO_CAPTURE: u32 = 1;
 const MEMORY_MMAP: u32 = 1;
 const BUFFER_COUNT: u32 = 4;
+const BUF_FLAG_ERROR: u32 = 0x40;
+const MAX_CONSECUTIVE_BAD_FRAMES: usize = 30;
 const FOURCC_GREY: u32 = u32::from_le_bytes(*b"GREY");
 const FOURCC_YUYV: u32 = u32::from_le_bytes(*b"YUYV");
 
@@ -217,23 +219,36 @@ impl FrameSource for V4l2Camera {
     }
 
     fn next_frame(&mut self) -> Result<Frame, SensorError> {
-        let mut buffer: Buffer = zeroed();
-        buffer.type_ = BUF_TYPE_VIDEO_CAPTURE;
-        buffer.memory = MEMORY_MMAP;
-        if unsafe { libc::ioctl(self.fd, VIDIOC_DQBUF, &mut buffer) } < 0 {
-            return Err(os_error("VIDIOC_DQBUF"));
+        for _ in 0..MAX_CONSECUTIVE_BAD_FRAMES {
+            let mut buffer: Buffer = zeroed();
+            buffer.type_ = BUF_TYPE_VIDEO_CAPTURE;
+            buffer.memory = MEMORY_MMAP;
+            if unsafe { libc::ioctl(self.fd, VIDIOC_DQBUF, &mut buffer) } < 0 {
+                return Err(os_error("VIDIOC_DQBUF"));
+            }
+            let complete = is_complete(buffer.bytesused, buffer.flags, self.format.sizeimage);
+            let mapped = &self.buffers[buffer.index as usize];
+            let frame = complete.then(|| {
+                let raw = unsafe { std::slice::from_raw_parts(mapped.ptr, (buffer.bytesused as usize).min(mapped.len)) };
+                Frame {
+                    width: self.format.width,
+                    height: self.format.height,
+                    pixels: self.luma(raw),
+                    timestamp_us: buffer.timestamp.sec as u64 * 1_000_000 + buffer.timestamp.usec as u64,
+                }
+            });
+            self.enqueue(buffer.index)?;
+            if let Some(frame) = frame {
+                return Ok(frame);
+            }
         }
-        let mapped = &self.buffers[buffer.index as usize];
-        let raw = unsafe { std::slice::from_raw_parts(mapped.ptr, (buffer.bytesused as usize).min(mapped.len)) };
-        let frame = Frame {
-            width: self.format.width,
-            height: self.format.height,
-            pixels: self.luma(raw),
-            timestamp_us: buffer.timestamp.sec as u64 * 1_000_000 + buffer.timestamp.usec as u64,
-        };
-        self.enqueue(buffer.index)?;
-        Ok(frame)
+        Err(SensorError::Device("camera keeps delivering incomplete frames".into()))
     }
+}
+
+// USB cameras occasionally deliver a short frame; the engine rejects it and would abort the session
+fn is_complete(bytes_used: u32, flags: u32, size_image: u32) -> bool {
+    flags & BUF_FLAG_ERROR == 0 && bytes_used == size_image
 }
 
 impl Drop for V4l2Camera {
@@ -260,6 +275,14 @@ mod tests {
         assert_eq!(std::mem::size_of::<Format>(), 208);
         assert_eq!(std::mem::size_of::<RequestBuffers>(), 20);
         assert_eq!(std::mem::size_of::<Buffer>(), 88);
+    }
+
+    #[test]
+    fn only_full_error_free_buffers_count_as_frames() {
+        assert!(is_complete(230_400, 0, 230_400));
+        assert!(!is_complete(125_524, 0, 230_400));
+        assert!(!is_complete(230_400, BUF_FLAG_ERROR, 230_400));
+        assert!(!is_complete(0, 0, 230_400));
     }
 
     #[test]
