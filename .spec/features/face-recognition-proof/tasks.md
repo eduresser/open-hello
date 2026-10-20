@@ -72,7 +72,7 @@
 - Effort: medium
 - Notes: depends on T-007. Deletes the TPM key object, then unlinks the encrypted file.
 
-## T-009 — openhellod: D-Bus service, plugin loading, dispatch [pending]
+## T-009 — openhellod: D-Bus service, plugin loading, dispatch [done]
 
 - Refs: US-001, US-002, US-003, US-008, P-003
 - Files: crates/openhellod/Cargo.toml, crates/openhellod/src/main.rs, crates/openhellod/src/dbus_service.rs, crates/openhellod/src/plugin_loader.rs

@@ -1,0 +1,18 @@
+[package]
+name = "openhellod"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+openhello-plugin-abi.workspace = true
+thiserror.workspace = true
+libloading = "0.8"
+zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
+blocking = "1"
+async-io = "2"
+
+[dev-dependencies]
+async-io = "2"
+tempfile = "3"
+storage-adapter-templates = { path = "../storage-adapter-templates" }

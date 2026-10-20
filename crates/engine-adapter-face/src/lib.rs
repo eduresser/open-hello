@@ -1,8 +1,10 @@
 pub mod detect;
 pub mod embedding;
+pub mod engine;
 pub mod enrollment_quality;
 pub mod far_calibration;
 pub mod liveness;
+pub mod ffi;
 pub mod matching;
 
 use thiserror::Error;

@@ -35,13 +35,55 @@ pub struct FrameView {
     pub timestamp_us: u64,
 }
 
-#[repr(C)]
+#[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EnrollQualityVerdict {
+pub enum EnrollVerdict {
     Accepted = 0,
     Blurred = 1,
     Occluded = 2,
     NoFace = 3,
+    YawOutOfRange = 4,
+    BucketAlreadyFilled = 5,
+}
+
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnrollState {
+    InProgress = 0,
+    Complete = 1,
+    Failed = 2,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct EnrollProgress {
+    pub verdict: EnrollVerdict,
+    pub state: EnrollState,
+    pub filled: u32,
+    pub required: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MatchDecision {
+    pub live: bool,
+    pub accepted: bool,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct IdentifyDecision {
+    pub live: bool,
+    pub found: bool,
+    pub uid: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct TemplateRef {
+    pub uid: u32,
+    pub data: *const u8,
+    pub len: usize,
 }
 
 pub type SensorHandle = *mut c_void;
@@ -60,20 +102,40 @@ pub struct SensorInterface {
 #[repr(C)]
 pub struct EngineInterface {
     pub abi_version: u32,
-    pub create: unsafe extern "C" fn(config_json: *const c_char, out: *mut EngineHandle) -> Status,
-    pub extract_embedding: unsafe extern "C" fn(
+    pub create: unsafe extern "C" fn(config: *const c_char, out: *mut EngineHandle) -> Status,
+    pub enroll_begin: unsafe extern "C" fn(handle: EngineHandle, now_ms: u64, out_session: *mut u64) -> Status,
+    pub enroll_submit: unsafe extern "C" fn(
         handle: EngineHandle,
+        session: u64,
+        now_ms: u64,
         frame: *const FrameView,
-        out: *mut f32,
-        out_len: usize,
+        out: *mut EnrollProgress,
     ) -> Status,
-    pub match_score: unsafe extern "C" fn(
+    pub enroll_commit: unsafe extern "C" fn(
         handle: EngineHandle,
-        probe: *const f32,
-        template: *const f32,
-        len: usize,
+        session: u64,
+        out: *mut u8,
+        out_capacity: usize,
+        out_len: *mut usize,
+    ) -> Status,
+    pub enroll_discard: unsafe extern "C" fn(handle: EngineHandle, session: u64) -> Status,
+    pub verify: unsafe extern "C" fn(
+        handle: EngineHandle,
+        frames: *const FrameView,
+        frame_count: usize,
+        template: *const u8,
+        template_len: usize,
         target_far: f64,
-        accepted: *mut bool,
+        out: *mut MatchDecision,
+    ) -> Status,
+    pub identify: unsafe extern "C" fn(
+        handle: EngineHandle,
+        frames: *const FrameView,
+        frame_count: usize,
+        candidates: *const TemplateRef,
+        candidate_count: usize,
+        target_far: f64,
+        out: *mut IdentifyDecision,
     ) -> Status,
     pub destroy: unsafe extern "C" fn(handle: EngineHandle),
 }
@@ -94,6 +156,12 @@ pub struct StorageInterface {
         out: *mut u8,
         out_capacity: usize,
         out_len: *mut usize,
+    ) -> Status,
+    pub list_uids: unsafe extern "C" fn(
+        handle: StorageHandle,
+        out: *mut u32,
+        out_capacity: usize,
+        out_count: *mut usize,
     ) -> Status,
     pub purge: unsafe extern "C" fn(handle: StorageHandle, uid: u32) -> Status,
     pub close: unsafe extern "C" fn(handle: StorageHandle),

@@ -71,6 +71,30 @@ unsafe extern "C" fn storage_get(
     }
 }
 
+unsafe extern "C" fn storage_list_uids(
+    handle: StorageHandle,
+    out: *mut u32,
+    out_capacity: usize,
+    out_count: *mut usize,
+) -> Status {
+    let (Some(store), false) = (store(handle), out_count.is_null()) else {
+        return Status::InvalidArgument;
+    };
+    match store.enrolled_uids() {
+        Ok(uids) => {
+            *out_count = uids.len();
+            if uids.len() > out_capacity {
+                return Status::BufferTooSmall;
+            }
+            if !uids.is_empty() {
+                std::ptr::copy_nonoverlapping(uids.as_ptr(), out, uids.len());
+            }
+            Status::Ok
+        }
+        Err(error) => status_of(&error),
+    }
+}
+
 unsafe extern "C" fn storage_purge(handle: StorageHandle, uid: u32) -> Status {
     let Some(store) = store(handle) else {
         return Status::InvalidArgument;
@@ -92,6 +116,7 @@ static STORAGE_INTERFACE: StorageInterface = StorageInterface {
     open: storage_open,
     put_template: storage_put,
     get_template: storage_get,
+    list_uids: storage_list_uids,
     purge: storage_purge,
     close: storage_close,
 };
