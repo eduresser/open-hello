@@ -29,7 +29,7 @@
 - Notes: depends on T-001. Implements ASM-001 (AuraFace `glintr100` zero-shot on grayscale-as-RGB IR); the
   ~2-week SFace-fallback evaluation happens here before this task can be marked done.
 
-## T-004 — Engine Adapter: enrollment quality gate [pending]
+## T-004 — Engine Adapter: enrollment quality gate [done]
 
 - Refs: AC-001, AC-002, AC-003, AC-004, ASM-002
 - Files: crates/engine-adapter-face/src/enrollment_quality.rs

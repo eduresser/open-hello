@@ -1,5 +1,6 @@
 pub mod detect;
 pub mod embedding;
+pub mod enrollment_quality;
 
 use thiserror::Error;
 
