@@ -1,3 +1,4 @@
+pub mod calibrate;
 pub mod detect;
 pub mod embedding;
 pub mod engine;

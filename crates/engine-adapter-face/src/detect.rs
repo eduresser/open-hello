@@ -41,9 +41,38 @@ pub trait FaceDetector {
     fn detect(&self, image: &GrayImage) -> Result<Vec<Detection>, EngineError>;
 }
 
-pub fn detector_input_size(image: &GrayImage) -> (u32, u32) {
-    let round_up = |v: u32| v.div_ceil(32) * 32;
-    (round_up(image.width), round_up(image.height))
+pub const DETECTOR_INPUT_SIZE: u32 = 640;
+
+pub fn letterbox_scale(image: &GrayImage) -> f32 {
+    (DETECTOR_INPUT_SIZE as f32 / image.width as f32).min(DETECTOR_INPUT_SIZE as f32 / image.height as f32)
+}
+
+pub fn letterbox(image: &GrayImage) -> Vec<f32> {
+    let scale = letterbox_scale(image);
+    let side = DETECTOR_INPUT_SIZE as usize;
+    let (fit_w, fit_h) = ((image.width as f32 * scale) as usize, (image.height as f32 * scale) as usize);
+    let mut resized = GrayImage { width: DETECTOR_INPUT_SIZE, height: DETECTOR_INPUT_SIZE, pixels: vec![0; side * side] };
+    for y in 0..fit_h.min(side) {
+        for x in 0..fit_w.min(side) {
+            let value = image.sample((x as f32 + 0.5) / scale - 0.5, (y as f32 + 0.5) / scale - 0.5);
+            resized.pixels[y * side + x] = value.round().clamp(0.0, 255.0) as u8;
+        }
+    }
+    to_chw_bgr(&resized, DETECTOR_INPUT_SIZE, DETECTOR_INPUT_SIZE)
+}
+
+pub fn unscale(detections: Vec<Detection>, scale: f32) -> Vec<Detection> {
+    detections
+        .into_iter()
+        .map(|d| Detection {
+            x: d.x / scale,
+            y: d.y / scale,
+            width: d.width / scale,
+            height: d.height / scale,
+            score: d.score,
+            landmarks: d.landmarks.map(|(x, y)| (x / scale, y / scale)),
+        })
+        .collect()
 }
 
 pub fn decode_yunet(
@@ -143,8 +172,8 @@ pub mod ort_backend {
 
     impl FaceDetector for YunetDetector {
         fn detect(&self, image: &GrayImage) -> Result<Vec<Detection>, EngineError> {
-            let (width, height) = detector_input_size(image);
-            let input = Tensor::from_array(([1usize, 3, height as usize, width as usize], to_chw_bgr(image, width, height)))
+            let side = DETECTOR_INPUT_SIZE as usize;
+            let input = Tensor::from_array(([1usize, 3, side, side], letterbox(image)))
                 .map_err(|e| EngineError::Model(e.to_string()))?;
             let mut session = self.session.lock().map_err(|_| EngineError::Model("session lock poisoned".into()))?;
             let outputs = session
@@ -171,7 +200,8 @@ pub mod ort_backend {
                 bbox: &buffers[i][2],
                 kps: &buffers[i][3],
             };
-            decode_yunet(&[view(0), view(1), view(2)], width, height)
+            let found = decode_yunet(&[view(0), view(1), view(2)], DETECTOR_INPUT_SIZE, DETECTOR_INPUT_SIZE)?;
+            Ok(unscale(found, letterbox_scale(image)))
         }
     }
 }
@@ -257,6 +287,20 @@ mod tests {
         assert_eq!(chw.len(), 18);
         assert_eq!(&chw[0..3], &[10.0, 20.0, 0.0]);
         assert_eq!(&chw[6..9], &chw[12..15]);
-        assert_eq!(detector_input_size(&image), (32, 32));
+    }
+
+    #[test]
+    fn letterbox_fits_the_long_side_and_unscale_restores_coordinates() {
+        let wide = GrayImage::new(1280, 320, vec![200; 1280 * 320]).unwrap();
+        assert_eq!(letterbox_scale(&wide), 0.5);
+        let input = letterbox(&wide);
+        let side = DETECTOR_INPUT_SIZE as usize;
+        assert_eq!(input.len(), 3 * side * side);
+        assert_eq!(input[10 * side + 10], 200.0);
+        assert_eq!(input[300 * side + 10], 0.0);
+
+        let found = Detection { x: 100.0, y: 50.0, width: 40.0, height: 60.0, score: 0.9, landmarks: [(110.0, 60.0); 5] };
+        let restored = unscale(vec![found], 0.5);
+        assert_eq!((restored[0].x, restored[0].width, restored[0].landmarks[0]), (200.0, 80.0, (220.0, 120.0)));
     }
 }
