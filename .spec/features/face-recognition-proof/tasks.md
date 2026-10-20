@@ -64,7 +64,7 @@
   `openhello-keyd` user credential key, per design.md). `tpm_key.rs`'s public API never returns plaintext
   key bytes (P-004).
 
-## T-008 — Storage Adapter: purge (crypto-shred) [pending]
+## T-008 — Storage Adapter: purge (crypto-shred) [done]
 
 - Refs: AC-014, P-008
 - Files: crates/storage-adapter-templates/src/purge.rs
