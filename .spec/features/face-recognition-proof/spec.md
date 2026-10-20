@@ -97,15 +97,17 @@ that template data stays confidential and any tampering is detected rather than 
 
 ### US-005 — IR capture with the emitter active
 
-As the system, I want the Sensor Adapter to activate the IR illuminator before capturing frames, so that
-matching and liveness run against a trustworthy IR signal instead of one lit only by ambient light.
+As the system, I want the Sensor Adapter to return only IR-illuminated frames, whatever the camera model, so
+that matching and liveness run against a trustworthy IR signal instead of one lit only by ambient light.
 
-#### AC-011 — Capture activates the IR emitter before returning frames
+#### AC-011 — Capture returns only illuminated frames
 
 - **Given** the IR camera node is available
 - **When** a capture session begins
-- **Then** the emitter activation control is issued before the first frame is returned, and a failure to
-  activate it is surfaced as an explicit error rather than silently returning unlit frames
+- **Then** every frame returned is IR-illuminated: a camera that already illuminates (steadily or by
+  alternating lit/unlit frames) is left untouched and its unlit frames are dropped; a camera whose stream is
+  dark gets its emitter control activated (Microsoft face-auth control, or a configured vendor control) and
+  verified; if illumination cannot be established, an explicit error is surfaced rather than unlit frames
 
 ### US-006 — Basic liveness heuristic against flat-photo spoofing
 
@@ -172,7 +174,7 @@ logs, so that debugging or crash output cannot leak my biometric data.
 | ASM-001 | AuraFace (`glintr100`, IResNet100+ArcFace) run zero-shot on grayscale-as-3-channel IR input reaches acceptable accuracy on this camera without fine-tuning, within the ~2-week evaluation budget; SFace is the fallback before a Howdy-style approach. | open | — |
 | ASM-002 | The provisional enrollment protocol values (6 yaw buckets, 60s timeout, 3 attempts) are adjustable defaults, not final UX-tuned numbers. | confirmed | Accepted as provisional in the architecture grilling session; revisit after real usage data from this feature. |
 | ASM-003 | `Identify`/`Verify` match results are keyed by Linux UID, matching the Storage Adapter's per-UID template layout already decided in the architecture docs. | open | — |
-| ASM-004 | The IR emitter's UVC Extension Unit activation payload (GUID `63610682-5070-49ab-b8cc-b3855e8d221d`) for this camera will be discovered via `linux-enable-ir-emitter` before AC-011 is implemented; not yet executed. | open | — |
+| ASM-004 | Illumination of the IR emitter can be established generically, without a per-model payload. | confirmed | This camera (`2b7e:c757`) alternates lit/unlit frames by default (measured mean luma ~7 vs ~60); the Microsoft XU `{0f3f95dc-2632-4c4e-92c9-a04782f43bc8}` (selector 6, face-auth) reports mode 2 as current/default/maximum. The Sensor Adapter reads that control by GUID, writes it only when the stream is dark and `OPENHELLO_IR_EMITTER_ALLOW_WRITE=1`, and falls back to a vendor XU from `OPENHELLO_IR_EMITTER`. Vendor GUID `63610682-…` is not needed. Write path untested on hardware; some cameras are reported to hang on writes. |
 
 ## Open questions
 

@@ -129,7 +129,8 @@ if [ ! -e "$CONF_DIR/openhello.env" ]; then
     cat > "$CONF_DIR/openhello.env" <<ENV
 OPENHELLO_DEVICE=/dev/video2
 ORT_DYLIB_PATH=$LIB_DIR/libonnxruntime.so
-# OPENHELLO_IR_EMITTER=unit:selector:hexpayload   (find it with linux-enable-ir-emitter)
+# Emitter is detected automatically. Only for cameras that stay dark: OPENHELLO_IR_EMITTER=unit:selector:hexpayload
+# (find it with linux-enable-ir-emitter) or OPENHELLO_IR_EMITTER_ALLOW_WRITE=1 to let open-hello switch the Microsoft face-auth mode
 # OPENHELLO_TPM_TCTI=device:/dev/tpmrm0
 ENV
   fi
@@ -147,7 +148,7 @@ run systemctl reload dbus 2>/dev/null || true
 if [ "$CALIBRATED" = 1 ]; then
   run systemctl enable --now openhellod 2>/dev/null || true
   echo
-  echo "open-hello installed and started. Remaining manual input: OPENHELLO_IR_EMITTER / OPENHELLO_DEVICE in $CONF_DIR/openhello.env"
+  echo "open-hello installed and started. Check OPENHELLO_DEVICE (the IR camera node) in $CONF_DIR/openhello.env"
 else
   cat <<MSG
 
@@ -155,6 +156,6 @@ open-hello installed (binaries, ONNX Runtime, models). The daemon is NOT started
 Calibrate from a folder of face photos (one sub-folder per person) and start it:
   sudo scripts/install.sh --no-deps --calibration-images /path/to/photos
   (or --calibration-url URL of a .tar/.tgz/.zip archive with the same layout)
-Also set OPENHELLO_IR_EMITTER and OPENHELLO_DEVICE in $CONF_DIR/openhello.env.
+Also check OPENHELLO_DEVICE (the IR camera node) in $CONF_DIR/openhello.env.
 MSG
 fi

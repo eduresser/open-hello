@@ -14,11 +14,11 @@
 ## T-002 — Sensor Adapter: IR capture + emitter activation [done]
 
 - Refs: AC-011, ASM-004
-- Files: crates/sensor-adapter-ir/Cargo.toml, crates/sensor-adapter-ir/src/lib.rs, crates/sensor-adapter-ir/src/v4l2_capture.rs, crates/sensor-adapter-ir/src/emitter_xu.rs
+- Files: crates/sensor-adapter-ir/Cargo.toml, crates/sensor-adapter-ir/src/lib.rs, crates/sensor-adapter-ir/src/v4l2_capture.rs, crates/sensor-adapter-ir/src/emitter_xu.rs, crates/sensor-adapter-ir/src/msxu.rs, crates/sensor-adapter-ir/src/illumination.rs
 - Model: claude-sonnet-5
 - Effort: high
-- Notes: depends on T-001 (ABI). Emitter XU payload for GUID `63610682-5070-49ab-b8cc-b3855e8d221d` must be
-  resolved via `linux-enable-ir-emitter` before this task can be verified (ASM-004, still pending).
+- Notes: depends on T-001 (ABI). Illumination is probed from frame brightness; the Microsoft face-auth XU or a
+  configured vendor XU is used only when the stream is dark (ASM-004, confirmed on `2b7e:c757`).
 
 ## T-003 — Engine Adapter: detection + embedding (YuNet + AuraFace via ort) [done]
 
