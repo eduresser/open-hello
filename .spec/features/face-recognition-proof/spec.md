@@ -111,7 +111,7 @@ that matching and liveness run against a trustworthy IR signal instead of one li
 
 ### US-006 — Basic liveness heuristic against flat-photo spoofing
 
-As the system, I want a lightweight liveness check based on micro-motion and focus variance across a short
+As the system, I want a lightweight liveness check based on facial micro-motion across a short
 frame burst, so that a printed photo or a phone/monitor replay is rejected — a documented, intentionally
 weaker substitute for Windows' hardware-isolated "Enhanced Sign-in Security".
 
@@ -120,7 +120,7 @@ weaker substitute for Windows' hardware-isolated "Enhanced Sign-in Security".
 - **Given** liveness checking is enabled
 - **When** a flat photo (printed or shown on a screen) is presented instead of a live face, across a short
   capture burst
-- **Then** the liveness heuristic detects the lack of natural micro-motion/focus variance and rejects it,
+- **Then** the liveness heuristic detects the lack of natural micro-motion and rejects it,
   independent of the embedding match score
 
 ### US-007 — Authorization on sensitive biometric operations
@@ -180,4 +180,4 @@ logs, so that debugging or crash output cannot leak my biometric data.
 
 | ID | Question | Status | Answer |
 |---|---|---|---|
-| Q-001 | Which liveness heuristic should AC-012 implement? | answered | Micro-motion + focus-variance across a short frame burst (confirmed by product owner; reflectance-falloff and moiré-detection deferred to v2 hardening). |
+| Q-001 | Which liveness heuristic should AC-012 implement? | answered | Micro-motion across a short frame burst (confirmed by product owner; focus-variance dropped after measurement on the target IR camera showed it does not separate a held photo from a live face; reflectance-falloff, lit/unlit frame comparison and moiré-detection deferred to v2 hardening). |

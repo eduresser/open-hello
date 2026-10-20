@@ -46,13 +46,13 @@
 - Notes: depends on T-003. Public API takes a target FAR (default `1e-5`), never a raw distance cutoff.
   Calibration curve built offline from local, non-redistributed NIR dataset scores (see design.md).
 
-## T-006 — Engine Adapter: micro-motion + focus-variance liveness heuristic [done]
+## T-006 — Engine Adapter: micro-motion liveness heuristic [done]
 
 - Refs: AC-012
 - Files: crates/engine-adapter-face/src/liveness.rs
 - Model: claude-sonnet-5
 - Effort: medium
-- Notes: depends on T-003. Confirmed heuristic choice: frame-burst micro-motion + focus-variance (Q-001).
+- Notes: depends on T-003. Frame-burst micro-motion (Q-001); threshold 0.012 measured on the target camera (photo 0.004-0.020, live 0.005-0.059).
 
 ## T-007 — Storage Adapter: TPM-sealed AEAD template store [done]
 
