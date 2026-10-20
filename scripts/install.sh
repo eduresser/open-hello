@@ -43,7 +43,8 @@ install_deps() {
   . /etc/os-release
   case "${ID_LIKE:-$ID}" in
     *debian*|*ubuntu*)
-      run apt-get update
+      # A broken third-party index (e.g. a mirror mid-sync) must not block packages from the main archives
+      run apt-get update || echo "warning: apt-get update reported errors; continuing with the cached indexes" >&2
       run apt-get install -y build-essential pkg-config curl ca-certificates tpm2-tools swtpm \
         libtss2-tcti-swtpm0 dbus polkitd unzip ;;
     *fedora*|*rhel*|*centos*)
