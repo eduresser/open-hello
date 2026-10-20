@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1.0/policyconfig.dtd">
+<policyconfig>
+  <vendor>open-hello</vendor>
+  <vendor_url>https://github.com/eduresser/open-hello</vendor_url>
+
+  <action id="io.openhello.biometrics.enroll-begin">
+    <description>Start enrolling a face</description>
+    <message>Authentication is required to enroll a face for this account</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_self_keep</allow_active>
+    </defaults>
+  </action>
+
+  <action id="io.openhello.biometrics.enroll-capture">
+    <description>Capture a face sample during enrollment</description>
+    <message>Authentication is required to capture a face sample for this account</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_self_keep</allow_active>
+    </defaults>
+  </action>
+
+  <action id="io.openhello.biometrics.enroll-commit">
+    <description>Save an enrolled face</description>
+    <message>Authentication is required to save a face enrollment for this account</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_self_keep</allow_active>
+    </defaults>
+  </action>
+
+  <action id="io.openhello.biometrics.enroll-discard">
+    <description>Cancel a face enrollment</description>
+    <message>Authentication is required to cancel a face enrollment for this account</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_self_keep</allow_active>
+    </defaults>
+  </action>
+
+  <action id="io.openhello.biometrics.purge">
+    <description>Delete enrolled face data</description>
+    <message>Authentication is required to permanently delete face data for this account</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_self</allow_active>
+    </defaults>
+  </action>
+</policyconfig>

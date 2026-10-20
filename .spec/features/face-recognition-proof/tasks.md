@@ -81,7 +81,7 @@
 - Notes: depends on T-001, T-002, T-003, T-007 (loads their `.so` outputs via `dlopen`). D-Bus reply shapes
   never carry raw embeddings/templates (P-003) — only booleans, UIDs, and opaque session handles.
 
-## T-010 — openhellod: polkit authorization on sensitive calls [pending]
+## T-010 — openhellod: polkit authorization on sensitive calls [done]
 
 - Refs: AC-013, P-009
 - Files: crates/openhellod/src/polkit.rs, crates/openhellod/io.openhello.Biometrics1.policy

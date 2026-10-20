@@ -1,10 +1,12 @@
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use openhellod::backends::*;
 use openhellod::core::{Biometrics, BURST_FRAMES, DEFAULT_TARGET_FAR};
 use openhellod::dbus_service::{Action, AuthFuture, Authorizer, Caller, Service, BUS_NAME, OBJECT_PATH};
+use openhellod::polkit::{PolkitAuthorizer, PolkitClient, PolkitFuture};
 
 struct PrivateBus {
     daemon: Child,
@@ -47,10 +49,13 @@ impl SensorBackend for Sensor {
     }
 }
 
-struct Engine;
+struct Engine {
+    begins: Arc<AtomicUsize>,
+}
 
 impl EngineBackend for Engine {
     fn enroll_begin(&mut self, _: u64) -> Result<u64, DaemonError> {
+        self.begins.fetch_add(1, Ordering::SeqCst);
         Ok(1)
     }
 
@@ -99,9 +104,11 @@ impl StorageBackend for Storage {
     }
 }
 
-fn serve(bus: &PrivateBus, authorizer: Arc<dyn Authorizer>) {
+fn serve(bus: &PrivateBus, authorizer: Arc<dyn Authorizer>) -> Arc<AtomicUsize> {
     let address = bus.address.clone();
-    let core = Biometrics::new(Box::new(Sensor), Box::new(Engine), Box::new(Storage::default()), DEFAULT_TARGET_FAR);
+    let begins = Arc::new(AtomicUsize::new(0));
+    let engine = Engine { begins: begins.clone() };
+    let core = Biometrics::new(Box::new(Sensor), Box::new(engine), Box::new(Storage::default()), DEFAULT_TARGET_FAR);
     let service = Service::new(core, authorizer);
     let (ready_tx, ready_rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -120,6 +127,7 @@ fn serve(bus: &PrivateBus, authorizer: Arc<dyn Authorizer>) {
         })
     });
     ready_rx.recv_timeout(std::time::Duration::from_secs(10)).expect("service did not start");
+    begins
 }
 
 fn client(bus: &PrivateBus) -> zbus::blocking::Connection {
@@ -184,4 +192,95 @@ fn no_method_returns_embeddings_templates_or_byte_arrays() {
 
     let handle: String = proxy(&conn).call("EnrollBegin", &(1000u32,)).unwrap();
     assert!(!handle.contains("secret-template-bytes"));
+}
+
+struct ScriptedPolkit {
+    authorized: bool,
+    asked: std::sync::Mutex<Vec<String>>,
+}
+
+impl PolkitClient for ScriptedPolkit {
+    fn is_authorized<'a>(&'a self, action_id: &'a str, _: &'a str) -> PolkitFuture<'a> {
+        self.asked.lock().unwrap().push(action_id.to_string());
+        let answer = self.authorized;
+        Box::pin(async move { Ok(answer) })
+    }
+}
+
+fn my_uid() -> u32 {
+    std::fs::metadata("/proc/self").map(|m| std::os::unix::fs::MetadataExt::uid(&m)).unwrap()
+}
+
+// @spec:AC-013
+// @principle:P-009
+#[test]
+fn a_caller_that_is_neither_the_target_user_nor_root_cannot_start_enrollment() {
+    let bus = PrivateBus::start();
+    let polkit = Arc::new(ScriptedPolkit { authorized: true, asked: Default::default() });
+    let begins = serve(&bus, Arc::new(PolkitAuthorizer::new(polkit.clone())));
+    let conn = client(&bus);
+    let other_uid = my_uid() + 1;
+
+    let error = proxy(&conn).call::<_, _, String>("EnrollBegin", &(other_uid,)).unwrap_err();
+    assert!(error.to_string().contains("AuthFailed"), "{error}");
+    assert_eq!(begins.load(Ordering::SeqCst), 0);
+    assert!(polkit.asked.lock().unwrap().is_empty());
+}
+
+// @spec:AC-013
+// @principle:P-009
+#[test]
+fn polkit_denial_refuses_enrollment_and_creates_no_session() {
+    let bus = PrivateBus::start();
+    let polkit = Arc::new(ScriptedPolkit { authorized: false, asked: Default::default() });
+    let begins = serve(&bus, Arc::new(PolkitAuthorizer::new(polkit.clone())));
+    let conn = client(&bus);
+
+    let error = proxy(&conn).call::<_, _, String>("EnrollBegin", &(my_uid(),)).unwrap_err();
+    assert!(error.to_string().contains("AuthFailed"), "{error}");
+    assert!(error.to_string().contains("io.openhello.biometrics.enroll-begin"));
+    assert_eq!(begins.load(Ordering::SeqCst), 0);
+    assert_eq!(*polkit.asked.lock().unwrap(), vec!["io.openhello.biometrics.enroll-begin"]);
+}
+
+// @principle:P-009
+#[test]
+fn the_session_owner_is_served_when_polkit_agrees_and_every_enroll_call_is_gated() {
+    let bus = PrivateBus::start();
+    let polkit = Arc::new(ScriptedPolkit { authorized: true, asked: Default::default() });
+    let begins = serve(&bus, Arc::new(PolkitAuthorizer::new(polkit.clone())));
+    let conn = client(&bus);
+    let proxy = proxy(&conn);
+
+    let handle: String = proxy.call("EnrollBegin", &(my_uid(),)).unwrap();
+    assert_eq!(begins.load(Ordering::SeqCst), 1);
+    proxy.call::<_, _, (String, String, u32, u32)>("EnrollCapture", &(handle.as_str(),)).unwrap();
+    proxy.call::<_, _, bool>("EnrollCommit", &(handle.as_str(),)).unwrap();
+    let second: String = proxy.call("EnrollBegin", &(my_uid(),)).unwrap();
+    proxy.call::<_, _, ()>("EnrollDiscard", &(second.as_str(),)).unwrap();
+    proxy.call::<_, _, bool>("Purge", &(my_uid(),)).unwrap();
+
+    assert_eq!(
+        *polkit.asked.lock().unwrap(),
+        vec![
+            "io.openhello.biometrics.enroll-begin",
+            "io.openhello.biometrics.enroll-capture",
+            "io.openhello.biometrics.enroll-commit",
+            "io.openhello.biometrics.enroll-begin",
+            "io.openhello.biometrics.enroll-discard",
+            "io.openhello.biometrics.purge",
+        ]
+    );
+}
+
+// @principle:P-009
+#[test]
+fn an_unreachable_polkit_authority_fails_closed() {
+    let bus = PrivateBus::start();
+    std::env::set_var("DBUS_SYSTEM_BUS_ADDRESS", "unix:path=/nonexistent/openhello-system-bus");
+    let begins = serve(&bus, Arc::new(PolkitAuthorizer::new(Arc::new(openhellod::polkit::DbusPolkit))));
+    let conn = client(&bus);
+    let error = proxy(&conn).call::<_, _, String>("EnrollBegin", &(my_uid(),)).unwrap_err();
+    assert!(error.to_string().contains("AuthFailed"), "{error}");
+    assert_eq!(begins.load(Ordering::SeqCst), 0);
 }
