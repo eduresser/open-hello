@@ -1,84 +1,84 @@
 {
   "feature": "face-recognition-proof",
-  "timestamp": "2026-10-20T23:26:14.933Z",
-  "gitRev": "2458c60",
+  "timestamp": "2026-10-20T23:26:25.905Z",
+  "gitRev": "e30d0cd",
   "command": "cargo test",
   "reporter": "exitcode",
-  "exitCode": 101,
+  "exitCode": 0,
   "testsParsed": 0,
   "results": {
     "AC-001": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-002": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-003": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-004": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-005": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-006": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-007": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-008": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-009": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-010": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-011": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-012": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-013": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-014": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-015": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     }
