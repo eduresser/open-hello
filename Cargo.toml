@@ -3,6 +3,8 @@ resolver = "2"
 members = [
     "crates/openhello-plugin-abi",
     "crates/sensor-adapter-ir",
+    "crates/engine-adapter-face",
+    "crates/engine-adapter-face",
 ]
 
 [workspace.package]
