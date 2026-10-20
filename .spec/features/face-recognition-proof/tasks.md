@@ -97,7 +97,7 @@
 - Effort: low
 - Notes: depends on T-009. Structured logging layer that statically excludes frame/embedding/template fields.
 
-## T-012 — openhello-cli: v1a test harness [pending]
+## T-012 — openhello-cli: v1a test harness [done]
 
 - Refs: US-001, US-002, US-003, US-008
 - Files: crates/openhello-cli/Cargo.toml, crates/openhello-cli/src/main.rs

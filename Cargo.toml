@@ -6,9 +6,11 @@ members = [
     "crates/engine-adapter-face",
     "crates/storage-adapter-templates",
     "crates/openhellod",
+    "crates/openhello-cli",
     "crates/engine-adapter-face",
     "crates/storage-adapter-templates",
     "crates/openhellod",
+    "crates/openhello-cli",
 ]
 
 [workspace.package]
