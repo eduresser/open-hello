@@ -37,7 +37,7 @@
 - Effort: medium
 - Notes: depends on T-003. Yaw-bucket coverage, blur threshold, occlusion rejection, 60s/3-attempt timeout.
 
-## T-005 — Engine Adapter: FAR-calibrated Verify/Identify matching [pending]
+## T-005 — Engine Adapter: FAR-calibrated Verify/Identify matching [done]
 
 - Refs: AC-005, AC-006, AC-007, AC-008, P-007
 - Files: crates/engine-adapter-face/src/matching.rs, crates/engine-adapter-face/src/far_calibration.rs

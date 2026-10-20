@@ -1,6 +1,8 @@
 pub mod detect;
 pub mod embedding;
 pub mod enrollment_quality;
+pub mod far_calibration;
+pub mod matching;
 
 use thiserror::Error;
 
