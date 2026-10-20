@@ -1,0 +1,5 @@
+[package]
+name = "openhello-plugin-abi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true

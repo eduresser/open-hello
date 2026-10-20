@@ -1,6 +1,6 @@
 {
   "testCommand": "cargo test",
-  "reporter": "cargo-json",
+  "reporter": "exitcode",
   "testGlobs": [
     "**/tests/**",
     "**/src/**/*_test.rs",

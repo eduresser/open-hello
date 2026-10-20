@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/openhello-plugin-abi",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+openhello-plugin-abi = { path = "crates/openhello-plugin-abi" }
+thiserror = "2"
