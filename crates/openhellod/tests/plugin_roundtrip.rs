@@ -9,7 +9,7 @@ use openhellod::plugin_loader::{EnginePlugin, SensorPlugin, StoragePlugin};
 
 fn build_plugins() -> PathBuf {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let target = workspace.join("target/plugin-fixtures");
+    let target = Path::new(env!("CARGO_TARGET_TMPDIR")).join("plugin-fixtures");
     let status = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
         .args(["build", "-p", "sensor-adapter-ir", "-p", "engine-adapter-face", "-p", "storage-adapter-templates"])
         .arg("--target-dir")
