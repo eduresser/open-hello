@@ -99,6 +99,9 @@ pub struct V4l2Camera {
     streaming: bool,
 }
 
+// The mmap'd buffers are only touched through &mut self, and the camera lives behind a Mutex
+unsafe impl Send for V4l2Camera {}
+
 fn os_error(context: &str) -> SensorError {
     SensorError::Device(format!("{context}: {}", std::io::Error::last_os_error()))
 }

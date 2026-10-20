@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 pub const MIN_LIT_MEAN: f64 = 20.0;
-pub const PROBE_FRAMES: usize = 16;
+pub const PROBE_FRAMES: usize = 8;
 pub const MAX_CONSECUTIVE_UNLIT: usize = 60;
 const WINDOW: usize = 8;
 const UNLIT_RATIO: f64 = 0.5;
