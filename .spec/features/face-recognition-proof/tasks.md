@@ -2,7 +2,7 @@
 
 > feature: face-recognition-proof
 
-## T-001 — Workspace scaffolding + plugin ABI contract [pending]
+## T-001 — Workspace scaffolding + plugin ABI contract [done]
 
 - Refs: US-001, US-002, US-003
 - Files: Cargo.toml, crates/openhello-plugin-abi/Cargo.toml, crates/openhello-plugin-abi/src/lib.rs
