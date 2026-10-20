@@ -46,7 +46,7 @@
 - Notes: depends on T-003. Public API takes a target FAR (default `1e-5`), never a raw distance cutoff.
   Calibration curve built offline from local, non-redistributed NIR dataset scores (see design.md).
 
-## T-006 — Engine Adapter: micro-motion + focus-variance liveness heuristic [pending]
+## T-006 — Engine Adapter: micro-motion + focus-variance liveness heuristic [done]
 
 - Refs: AC-012
 - Files: crates/engine-adapter-face/src/liveness.rs

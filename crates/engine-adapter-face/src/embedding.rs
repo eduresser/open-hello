@@ -17,7 +17,7 @@ pub trait FaceEmbedder {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct Similarity {
+pub(crate) struct Similarity {
     scale_cos: f32,
     scale_sin: f32,
     tx: f32,
@@ -25,7 +25,7 @@ struct Similarity {
 }
 
 impl Similarity {
-    fn apply(&self, (x, y): (f32, f32)) -> (f32, f32) {
+    pub(crate) fn apply(&self, (x, y): (f32, f32)) -> (f32, f32) {
         (self.scale_cos * x - self.scale_sin * y + self.tx, self.scale_sin * x + self.scale_cos * y + self.ty)
     }
 
@@ -41,7 +41,7 @@ impl Similarity {
     }
 }
 
-fn estimate_similarity(from: &[(f32, f32); 5], to: &[(f32, f32); 5]) -> Similarity {
+pub(crate) fn estimate_similarity(from: &[(f32, f32); 5], to: &[(f32, f32); 5]) -> Similarity {
     let n = from.len() as f32;
     let centroid = |pts: &[(f32, f32); 5]| (pts.iter().map(|p| p.0).sum::<f32>() / n, pts.iter().map(|p| p.1).sum::<f32>() / n);
     let (fc, tc) = (centroid(from), centroid(to));
