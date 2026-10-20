@@ -39,6 +39,14 @@ impl Template {
         Self::new(values.chunks(dim).map(<[f32]>::to_vec).collect())
     }
 
+    pub fn len(&self) -> usize {
+        self.embeddings.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.embeddings.is_empty()
+    }
+
     fn best_score(&self, probe: &[f32]) -> f32 {
         self.embeddings
             .iter()
@@ -64,7 +72,7 @@ impl Matcher {
 
     pub fn verify(&self, probe: &[f32], template: &Template, target_far: f64) -> Result<bool, EngineError> {
         check_dimension(probe, template)?;
-        let threshold = self.calibration.score_threshold(target_far)?;
+        let threshold = self.calibration.score_threshold(target_far / template.len() as f64)?;
         Ok(f64::from(template.best_score(probe)) >= threshold)
     }
 
@@ -77,7 +85,8 @@ impl Matcher {
         if enrolled.is_empty() {
             return Ok(None);
         }
-        let per_comparison_far = target_far / enrolled.len() as f64;
+        let comparisons: usize = enrolled.iter().map(|(_, template)| template.len()).sum();
+        let per_comparison_far = target_far / comparisons as f64;
         let threshold = self.calibration.score_threshold(per_comparison_far)?;
         let mut best: Option<(u32, f32)> = None;
         for (uid, template) in enrolled {
@@ -90,7 +99,7 @@ impl Matcher {
         Ok(best.and_then(|(uid, score)| {
             (f64::from(score) >= threshold).then(|| IdentifyMatch {
                 uid,
-                achieved_far: self.calibration.far_at(f64::from(score)) * enrolled.len() as f64,
+                achieved_far: self.calibration.far_at(f64::from(score)) * comparisons as f64,
             })
         }))
     }
@@ -219,6 +228,28 @@ mod tests {
         let strict = matcher.verify(&noisy_probe, &template, 1e-12).unwrap();
         assert!(lenient && !strict);
         assert!(matcher.verify(&noisy_probe, &template, 0.0).is_err());
+    }
+
+    #[test]
+    fn target_far_is_split_across_every_embedding_in_the_template() {
+        let mut rng = Rng(29);
+        let matcher = calibrated_matcher(&mut rng);
+        let far = 1e-3;
+        let (single_cut, sixfold_cut) = (
+            matcher.calibration.score_threshold(far).unwrap(),
+            matcher.calibration.score_threshold(far / 6.0).unwrap(),
+        );
+        let score = ((single_cut + sixfold_cut) / 2.0) as f32;
+        let anchor = rng.identity();
+        let mut orthogonal = rng.identity();
+        let overlap = cosine_similarity(&orthogonal, &anchor);
+        orthogonal.iter_mut().zip(&anchor).for_each(|(o, a)| *o -= overlap * a);
+        let orthogonal = l2_normalize(orthogonal).unwrap();
+        let probe: Vec<f32> = anchor.iter().zip(&orthogonal).map(|(a, o)| score * a + (1.0 - score * score).sqrt() * o).collect();
+        let single = Template::new(vec![anchor.clone()]).unwrap();
+        let sixfold = Template::new(std::iter::once(anchor).chain((0..5).map(|_| rng.identity())).collect()).unwrap();
+        assert!(matcher.verify(&probe, &single, far).unwrap());
+        assert!(!matcher.verify(&probe, &sixfold, far).unwrap());
     }
 
     #[test]
