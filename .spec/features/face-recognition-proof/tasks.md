@@ -89,7 +89,7 @@
 - Effort: medium
 - Notes: depends on T-009. Covers `EnrollBegin`/`EnrollCapture`/`EnrollCommit`/`EnrollDiscard`.
 
-## T-011 — openhellod: logging redaction [pending]
+## T-011 — openhellod: logging redaction [done]
 
 - Refs: AC-015, P-010
 - Files: crates/openhellod/src/logging.rs
