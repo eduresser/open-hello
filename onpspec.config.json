@@ -3,8 +3,7 @@
   "reporter": "exitcode",
   "testGlobs": [
     "**/tests/**",
-    "**/src/**/*_test.rs",
-    "**/src/**/tests.rs"
+    "crates/**/src/**/*.rs"
   ],
   "srcGlobs": [
     "*/src/**",
