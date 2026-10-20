@@ -1,14 +1,14 @@
-# Avaliação de acurácia
+# Accuracy evaluation
 
-Mede, fora da aplicação, quantas vezes o reconhecimento aceita a pessoa certa e rejeita outras. A aplicação continua toda em Rust; esta pasta só lê o que ela produz (`openhello-calibrate`) e roda os mesmos modelos ONNX.
+Measures, outside the application, how often recognition accepts the right person and rejects others. The application stays entirely in Rust; this folder only reads what it produces (`openhello-calibrate`) and runs the same ONNX models.
 
-## Escopo
+## Scope
 
-- Roda YuNet e AuraFace em Python, com o mesmo pré-processamento do Rust (letterbox 640, alinhamento ArcFace de 5 pontos, cinza replicado em 3 canais).
-- Lê o arquivo de calibração gerado pelo Rust e aplica os limiares de produção: meta de FAR dividida pelo número de embeddings do template (verify) ou de todos os templates (identify).
-- Não calibra nada por conta própria. Quem calibra é o `openhello-calibrate`.
+- Runs YuNet and AuraFace in Python with the same preprocessing as the Rust engine (640 letterbox, 5-point ArcFace alignment, grayscale replicated to 3 channels).
+- Reads the calibration file produced by Rust and applies the production thresholds: the target FAR is divided by the number of embeddings in the template (verify) or in all templates (identify).
+- Does not calibrate anything itself. `openhello-calibrate` does.
 
-## Ambiente
+## Environment
 
 ```bash
 cd evaluation
@@ -16,9 +16,9 @@ uv sync
 uv run pytest
 ```
 
-## Fluxo com o LFW
+## LFW workflow
 
-Datasets ficam fora do repositório (`data/` está no `.gitignore`).
+Datasets stay outside the repository (`data/` is in `.gitignore`).
 
 ```bash
 uv run python -m openhello_eval prepare --parquet lfw.parquet --out data/people
@@ -29,28 +29,28 @@ uv run python -m openhello_eval parity --images-dir data/people --embeddings dat
 uv run python -m openhello_eval report --images-dir data/people --embeddings data/embeddings.npz --calibration data/calibration.bin
 ```
 
-`MODELS` é a pasta com `yunet.onnx` e `glintr100.onnx`. O ONNX Runtime do Python vem do `uv`; o `openhello-calibrate` precisa de `ORT_DYLIB_PATH`.
+`MODELS` is the folder holding `yunet.onnx` and `glintr100.onnx`. The Python ONNX Runtime comes from `uv`; `openhello-calibrate` needs `ORT_DYLIB_PATH`.
 
-## Divisão das identidades
+## Identity split
 
-- Com pelo menos `enroll-shots + 2` fotos: cadastradas. As primeiras `enroll-shots` fotos formam o template e as demais são tentativas.
-- Com menos fotos: estranhos. A primeira foto de cada um calibra o FAR e serve de rosto não cadastrado na identificação.
+- At least `enroll-shots + 2` photos: enrolled. The first `enroll-shots` photos form the template and the rest are probes.
+- Fewer photos: strangers. The first photo of each one calibrates the FAR and serves as the unenrolled face in identification.
 
-## Paridade com o Rust
+## Parity with Rust
 
-- `parity` compara os quantis da tabela de calibração gerada pelo Rust com os quantis que o Python calcula dos próprios embeddings. Diferença acima de 0,02 ou número de pares diferente falha o comando.
-- `tests/test_calibration.py` confere o cálculo de limiares contra `crates/engine-adapter-face/tests/fixtures/calibration_golden.json`, o mesmo arquivo que o teste Rust confere.
-- Regenerar o arquivo de referência: `cargo test -p engine-adapter-face --lib regenerate_golden -- --ignored`.
+- `parity` compares the quantiles in the calibration table written by Rust with the quantiles Python computes from its own embeddings. A difference above 0.02, or a different number of pairs, fails the command.
+- `tests/test_calibration.py` checks the threshold computation against `crates/engine-adapter-face/tests/fixtures/calibration_golden.json`, the same file the Rust test checks.
+- Regenerate the golden file: `cargo test -p engine-adapter-face --lib regenerate_golden -- --ignored`.
 
 ## Notebook
 
-`notebooks/evaluation.ipynb` usa as mesmas funções e plota distribuições, FAR medido contra a meta e curva ROC. Commitar sem saídas. Para regenerá-lo: `uv run python notebooks/build_notebook.py`.
+`notebooks/evaluation.ipynb` uses the same functions and plots score distributions, measured FAR against target, and the ROC curve. Commit it without outputs. Rebuild it with `uv run python notebooks/build_notebook.py`.
 
 ```bash
 OPENHELLO_EVAL_DATA=data uv run jupyter lab
 ```
 
-## Limites
+## Limits
 
-- O LFW é luz visível. Isto mede o pipeline, não o desempenho em infravermelho (ASM-001).
-- Há alguns erros de rótulo no LFW, que inflam levemente os impostores.
+- LFW is visible light. This measures the pipeline, not infrared performance (ASM-001).
+- LFW has a few label errors, which slightly inflate the impostor count.
