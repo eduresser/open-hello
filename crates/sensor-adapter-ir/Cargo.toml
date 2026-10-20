@@ -1,0 +1,13 @@
+[package]
+name = "sensor-adapter-ir"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+openhello-plugin-abi.workspace = true
+thiserror.workspace = true
+libc = "0.2"

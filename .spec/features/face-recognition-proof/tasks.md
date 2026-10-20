@@ -11,7 +11,7 @@
 - Notes: `#[repr(C)]` vtable structs (`SensorInterface`/`EngineInterface`/`StorageInterface`) and the three
   entry-point symbol names, mirroring WinBio's `WbioQuery<Layer>Interface`. Everything else depends on this.
 
-## T-002 — Sensor Adapter: IR capture + emitter activation [pending]
+## T-002 — Sensor Adapter: IR capture + emitter activation [done]
 
 - Refs: AC-011, ASM-004
 - Files: crates/sensor-adapter-ir/Cargo.toml, crates/sensor-adapter-ir/src/lib.rs, crates/sensor-adapter-ir/src/v4l2_capture.rs, crates/sensor-adapter-ir/src/emitter_xu.rs
