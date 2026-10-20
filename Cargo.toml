@@ -4,7 +4,9 @@ members = [
     "crates/openhello-plugin-abi",
     "crates/sensor-adapter-ir",
     "crates/engine-adapter-face",
+    "crates/storage-adapter-templates",
     "crates/engine-adapter-face",
+    "crates/storage-adapter-templates",
 ]
 
 [workspace.package]

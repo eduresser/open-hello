@@ -54,7 +54,7 @@
 - Effort: medium
 - Notes: depends on T-003. Confirmed heuristic choice: frame-burst micro-motion + focus-variance (Q-001).
 
-## T-007 — Storage Adapter: TPM-sealed AEAD template store [pending]
+## T-007 — Storage Adapter: TPM-sealed AEAD template store [done]
 
 - Refs: AC-009, AC-010, P-004, P-006
 - Files: crates/storage-adapter-templates/Cargo.toml, crates/storage-adapter-templates/src/lib.rs, crates/storage-adapter-templates/src/store.rs, crates/storage-adapter-templates/src/tpm_key.rs
