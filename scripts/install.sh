@@ -76,8 +76,8 @@ install_runtime_and_models() {
   local work
   work="$(mktemp -d)"
   fetch_verified "https://github.com/microsoft/onnxruntime/releases/download/v$ORT_VERSION/onnxruntime-linux-x64-$ORT_VERSION.tgz" "$ORT_SHA256" "$work/ort.tgz"
-  run tar -xzf "$work/ort.tgz" -C "$work"
-  run cp -a "$work/onnxruntime-linux-x64-$ORT_VERSION/lib/." "$LIB_DIR/"
+  run tar -xzf "$work/ort.tgz" --no-same-owner -C "$work"
+  run cp -a --no-preserve=ownership "$work/onnxruntime-linux-x64-$ORT_VERSION/lib/." "$LIB_DIR/"
   fetch_verified "$YUNET_URL" "$YUNET_SHA256" "$MODELS_DIR/yunet.onnx"
   fetch_verified "$AURAFACE_URL" "$AURAFACE_SHA256" "$MODELS_DIR/glintr100.onnx"
   rm -rf "$work"
