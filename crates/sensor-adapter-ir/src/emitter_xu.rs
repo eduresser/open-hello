@@ -2,7 +2,10 @@ use std::os::fd::RawFd;
 
 use crate::SensorError;
 
-const UVC_SET_CUR: u8 = 0x01;
+pub const UVC_SET_CUR: u8 = 0x01;
+pub const UVC_GET_CUR: u8 = 0x81;
+pub const UVC_GET_MAX: u8 = 0x83;
+pub const UVC_GET_LEN: u8 = 0x85;
 const UVCIOC_CTRL_QUERY: libc::c_ulong = crate::ioctl::iowr(b'u', 0x21, 16);
 
 #[repr(C)]
@@ -49,32 +52,62 @@ pub trait Emitter {
     fn activate(&mut self) -> Result<(), SensorError>;
 }
 
-pub struct XuEmitter {
-    fd: RawFd,
-    control: EmitterControl,
+pub trait XuTransport {
+    fn query(&mut self, unit: u8, selector: u8, request: u8, data: &mut [u8]) -> Result<(), SensorError>;
 }
 
-impl XuEmitter {
-    pub fn new(fd: RawFd, control: EmitterControl) -> Self {
-        Self { fd, control }
+pub struct UvcXu {
+    fd: RawFd,
+}
+
+impl UvcXu {
+    pub fn new(fd: RawFd) -> Self {
+        Self { fd }
     }
 }
 
-impl Emitter for XuEmitter {
-    fn activate(&mut self) -> Result<(), SensorError> {
-        let mut payload = self.control.payload.clone();
+impl XuTransport for UvcXu {
+    fn query(&mut self, unit: u8, selector: u8, request: u8, data: &mut [u8]) -> Result<(), SensorError> {
         let mut query = UvcXuControlQuery {
-            unit: self.control.unit,
-            selector: self.control.selector,
-            query: UVC_SET_CUR,
-            size: payload.len() as u16,
-            data: payload.as_mut_ptr(),
+            unit,
+            selector,
+            query: request,
+            size: data.len() as u16,
+            data: data.as_mut_ptr(),
         };
         let rc = unsafe { libc::ioctl(self.fd, UVCIOC_CTRL_QUERY, &mut query) };
         if rc < 0 {
             return Err(SensorError::EmitterActivation(std::io::Error::last_os_error().to_string()));
         }
         Ok(())
+    }
+}
+
+pub struct XuEmitter<T: XuTransport> {
+    transport: T,
+    control: EmitterControl,
+}
+
+impl<T: XuTransport> XuEmitter<T> {
+    pub fn new(transport: T, control: EmitterControl) -> Self {
+        Self { transport, control }
+    }
+}
+
+impl<T: XuTransport> Emitter for XuEmitter<T> {
+    fn activate(&mut self) -> Result<(), SensorError> {
+        let mut payload = self.control.payload.clone();
+        self.transport.query(self.control.unit, self.control.selector, UVC_SET_CUR, &mut payload)
+    }
+}
+
+pub struct NoEmitter;
+
+impl Emitter for NoEmitter {
+    fn activate(&mut self) -> Result<(), SensorError> {
+        Err(SensorError::EmitterActivation(
+            "the stream is dark and this camera has no known emitter control; set OPENHELLO_IR_EMITTER=unit:selector:hexpayload".into(),
+        ))
     }
 }
 
