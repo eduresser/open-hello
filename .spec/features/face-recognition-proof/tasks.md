@@ -105,7 +105,7 @@
 - Effort: medium
 - Notes: depends on T-009, T-010. Enroll/Verify/Identify/Purge over D-Bus — the v1a stand-in for PAM/login.
 
-## T-013 — swtpm + recorded-frame fixture test infrastructure [pending]
+## T-013 — swtpm + recorded-frame fixture test infrastructure [done]
 
 - Refs: AC-001, AC-005, AC-007, AC-009
 - Files: tests/fixtures/README.md, tests/support/swtpm_harness.rs, tests/support/frame_fixtures.rs
