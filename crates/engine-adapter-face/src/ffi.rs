@@ -48,8 +48,15 @@ pub fn build_engine(_: &EngineConfig) -> Result<Engine, EngineError> {
 
 fn status_of(error: &EngineError) -> Status {
     match error {
-        EngineError::Model(_) => Status::Internal,
-        EngineError::NoFace | EngineError::InvalidInput(_) => Status::InvalidArgument,
+        EngineError::Model(_) => {
+            eprintln!("engine-adapter-face: {error}");
+            Status::Internal
+        }
+        EngineError::InvalidInput(_) => {
+            eprintln!("engine-adapter-face: {error}");
+            Status::InvalidArgument
+        }
+        EngineError::NoFace => Status::InvalidArgument,
     }
 }
 
