@@ -1,0 +1,13 @@
+{
+  "testCommand": "cargo test",
+  "reporter": "cargo-json",
+  "testGlobs": [
+    "**/tests/**",
+    "**/src/**/*_test.rs",
+    "**/src/**/tests.rs"
+  ],
+  "srcGlobs": [
+    "*/src/**",
+    "crates/**/src/**"
+  ]
+}

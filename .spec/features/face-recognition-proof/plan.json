@@ -1,0 +1,215 @@
+{
+  "runId": "open-hello-face-recognition-proof-mvh3ejr2",
+  "feature": "face-recognition-proof",
+  "agent": "claude",
+  "mode": "sequential",
+  "parallelize": null,
+  "forcedModel": null,
+  "forcedEffort": null,
+  "generatedAt": "2026-10-20 19:45",
+  "workBranch": "spec/face-recognition-proof",
+  "baseDir": ".spec/features/face-recognition-proof",
+  "specDir": ".spec",
+  "repoName": "open-hello",
+  "logsDir": "../onp-worktrees/open-hello-face-recognition-proof-logs",
+  "waves": [],
+  "tracks": [],
+  "sequentialTasks": [
+    {
+      "id": "T-001",
+      "title": "Workspace scaffolding + plugin ABI contract",
+      "model": "claude-sonnet-5",
+      "effort": "low",
+      "files": [
+        "Cargo.toml",
+        "crates/openhello-plugin-abi/Cargo.toml",
+        "crates/openhello-plugin-abi/src/lib.rs"
+      ],
+      "refs": [
+        "US-001",
+        "US-002",
+        "US-003"
+      ]
+    },
+    {
+      "id": "T-002",
+      "title": "Sensor Adapter: IR capture + emitter activation",
+      "model": "claude-sonnet-5",
+      "effort": "high",
+      "files": [
+        "crates/sensor-adapter-ir/Cargo.toml",
+        "crates/sensor-adapter-ir/src/lib.rs",
+        "crates/sensor-adapter-ir/src/v4l2_capture.rs",
+        "crates/sensor-adapter-ir/src/emitter_xu.rs"
+      ],
+      "refs": [
+        "AC-011"
+      ]
+    },
+    {
+      "id": "T-003",
+      "title": "Engine Adapter: detection + embedding (YuNet + AuraFace via ort)",
+      "model": "claude-sonnet-5",
+      "effort": "high",
+      "files": [
+        "crates/engine-adapter-face/Cargo.toml",
+        "crates/engine-adapter-face/src/lib.rs",
+        "crates/engine-adapter-face/src/detect.rs",
+        "crates/engine-adapter-face/src/embedding.rs"
+      ],
+      "refs": [
+        "US-002",
+        "US-003"
+      ]
+    },
+    {
+      "id": "T-004",
+      "title": "Engine Adapter: enrollment quality gate",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "files": [
+        "crates/engine-adapter-face/src/enrollment_quality.rs"
+      ],
+      "refs": [
+        "AC-001",
+        "AC-002",
+        "AC-003",
+        "AC-004"
+      ]
+    },
+    {
+      "id": "T-005",
+      "title": "Engine Adapter: FAR-calibrated Verify/Identify matching",
+      "model": "claude-sonnet-5",
+      "effort": "high",
+      "files": [
+        "crates/engine-adapter-face/src/matching.rs",
+        "crates/engine-adapter-face/src/far_calibration.rs"
+      ],
+      "refs": [
+        "AC-005",
+        "AC-006",
+        "AC-007",
+        "AC-008"
+      ]
+    },
+    {
+      "id": "T-006",
+      "title": "Engine Adapter: micro-motion + focus-variance liveness heuristic",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "files": [
+        "crates/engine-adapter-face/src/liveness.rs"
+      ],
+      "refs": [
+        "AC-012"
+      ]
+    },
+    {
+      "id": "T-007",
+      "title": "Storage Adapter: TPM-sealed AEAD template store",
+      "model": "claude-sonnet-5",
+      "effort": "high",
+      "files": [
+        "crates/storage-adapter-templates/Cargo.toml",
+        "crates/storage-adapter-templates/src/lib.rs",
+        "crates/storage-adapter-templates/src/store.rs",
+        "crates/storage-adapter-templates/src/tpm_key.rs"
+      ],
+      "refs": [
+        "AC-009",
+        "AC-010"
+      ]
+    },
+    {
+      "id": "T-008",
+      "title": "Storage Adapter: purge (crypto-shred)",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "files": [
+        "crates/storage-adapter-templates/src/purge.rs"
+      ],
+      "refs": [
+        "AC-014"
+      ]
+    },
+    {
+      "id": "T-009",
+      "title": "openhellod: D-Bus service, plugin loading, dispatch",
+      "model": "claude-sonnet-5",
+      "effort": "high",
+      "files": [
+        "crates/openhellod/Cargo.toml",
+        "crates/openhellod/src/main.rs",
+        "crates/openhellod/src/dbus_service.rs",
+        "crates/openhellod/src/plugin_loader.rs"
+      ],
+      "refs": [
+        "US-001",
+        "US-002",
+        "US-003",
+        "US-008"
+      ]
+    },
+    {
+      "id": "T-010",
+      "title": "openhellod: polkit authorization on sensitive calls",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "files": [
+        "crates/openhellod/src/polkit.rs",
+        "crates/openhellod/io.openhello.Biometrics1.policy"
+      ],
+      "refs": [
+        "AC-013"
+      ]
+    },
+    {
+      "id": "T-011",
+      "title": "openhellod: logging redaction",
+      "model": "claude-sonnet-5",
+      "effort": "low",
+      "files": [
+        "crates/openhellod/src/logging.rs"
+      ],
+      "refs": [
+        "AC-015"
+      ]
+    },
+    {
+      "id": "T-012",
+      "title": "openhello-cli: v1a test harness",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "files": [
+        "crates/openhello-cli/Cargo.toml",
+        "crates/openhello-cli/src/main.rs"
+      ],
+      "refs": [
+        "US-001",
+        "US-002",
+        "US-003",
+        "US-008"
+      ]
+    },
+    {
+      "id": "T-013",
+      "title": "swtpm + recorded-frame fixture test infrastructure",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "files": [
+        "tests/fixtures/README.md",
+        "tests/support/swtpm_harness.rs",
+        "tests/support/frame_fixtures.rs"
+      ],
+      "refs": [
+        "AC-001",
+        "AC-005",
+        "AC-007",
+        "AC-009"
+      ]
+    }
+  ],
+  "doneTasks": [],
+  "warnings": []
+}
