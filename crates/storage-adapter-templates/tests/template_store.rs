@@ -125,3 +125,56 @@ fn overwriting_a_template_reuses_the_existing_key() {
     store.put(UID, b"second").unwrap();
     assert_eq!(store.get(UID).unwrap(), b"second");
 }
+
+// @spec:AC-014
+// @principle:P-008
+#[test]
+fn purge_destroys_the_tpm_key_and_removes_the_file() {
+    let tpm = SwTpm::start();
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(&tpm, &dir);
+    store.put(UID, &embedding_bytes()).unwrap();
+    store.put(1001, b"neighbour").unwrap();
+    let ciphertext_copy = std::fs::read(store.template_path(UID)).unwrap();
+    let handle = format!("0x{:X}", 0x8108_0000u32 | UID);
+    assert!(tpm.tpm2("tpm2_unseal", &["-c", &handle]).status.success());
+
+    store.purge(UID).unwrap();
+
+    assert!(!store.template_path(UID).exists());
+    assert!(!tpm.tpm2("tpm2_unseal", &["-c", &handle]).status.success());
+    let persistent = tpm.tpm2("tpm2_getcap", &["handles-persistent"]);
+    assert!(!String::from_utf8_lossy(&persistent.stdout).to_lowercase().contains(&handle.to_lowercase()));
+
+    std::fs::write(store.template_path(UID), &ciphertext_copy).unwrap();
+    assert!(matches!(store.get(UID), Err(StorageError::NotFound)));
+    assert_eq!(store.get(1001).unwrap(), b"neighbour");
+}
+
+// @principle:P-008
+#[test]
+fn purge_removes_the_file_even_if_only_the_key_survives_and_is_idempotent() {
+    let tpm = SwTpm::start();
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(&tpm, &dir);
+    store.put(UID, b"template").unwrap();
+    std::fs::remove_file(store.template_path(UID)).unwrap();
+    store.purge(UID).unwrap();
+    let handle = format!("0x{:X}", 0x8108_0000u32 | UID);
+    assert!(!tpm.tpm2("tpm2_unseal", &["-c", &handle]).status.success());
+    store.purge(UID).unwrap();
+}
+
+// @principle:P-008
+#[test]
+fn re_enrolling_after_purge_gets_a_fresh_key() {
+    let tpm = SwTpm::start();
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_in(&tpm, &dir);
+    store.put(UID, b"old template").unwrap();
+    let old_file = std::fs::read(store.template_path(UID)).unwrap();
+    store.purge(UID).unwrap();
+    store.put(UID, b"new template").unwrap();
+    std::fs::write(store.template_path(UID), &old_file).unwrap();
+    assert!(matches!(store.get(UID), Err(StorageError::AuthenticationFailed)));
+}

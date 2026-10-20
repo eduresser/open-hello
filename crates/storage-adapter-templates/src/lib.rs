@@ -1,3 +1,5 @@
+mod ffi;
+mod purge;
 mod store;
 mod tpm_key;
 
