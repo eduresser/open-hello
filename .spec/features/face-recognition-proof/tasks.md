@@ -20,7 +20,7 @@
 - Notes: depends on T-001 (ABI). Emitter XU payload for GUID `63610682-5070-49ab-b8cc-b3855e8d221d` must be
   resolved via `linux-enable-ir-emitter` before this task can be verified (ASM-004, still pending).
 
-## T-003 — Engine Adapter: detection + embedding (YuNet + AuraFace via ort) [pending]
+## T-003 — Engine Adapter: detection + embedding (YuNet + AuraFace via ort) [done]
 
 - Refs: US-002, US-003
 - Files: crates/engine-adapter-face/Cargo.toml, crates/engine-adapter-face/src/lib.rs, crates/engine-adapter-face/src/detect.rs, crates/engine-adapter-face/src/embedding.rs
