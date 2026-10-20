@@ -4,6 +4,7 @@ use std::time::Instant;
 use crate::backends::{
     DaemonError, EngineBackend, EnrollProgress, EnrollState, SensorBackend, StorageBackend,
 };
+use crate::logging::{Level, Logger, Value};
 
 pub const BURST_FRAMES: usize = 10;
 pub const DEFAULT_TARGET_FAR: f64 = 1e-5;
@@ -21,6 +22,7 @@ pub struct Biometrics {
     next_session: u64,
     started: Instant,
     target_far: f64,
+    logger: Logger,
 }
 
 impl Biometrics {
@@ -30,7 +32,16 @@ impl Biometrics {
         storage: Box<dyn StorageBackend>,
         target_far: f64,
     ) -> Self {
-        Self { sensor, engine, storage, sessions: HashMap::new(), next_session: 1, started: Instant::now(), target_far }
+        Self { sensor, engine, storage, sessions: HashMap::new(), next_session: 1, started: Instant::now(), target_far, logger: Logger::stderr(Level::Info) }
+    }
+
+    pub fn with_logger(mut self, logger: Logger) -> Self {
+        self.logger = logger;
+        self
+    }
+
+    pub fn logger(&self) -> &Logger {
+        &self.logger
     }
 
     pub fn enroll_begin(&mut self, uid: u32) -> Result<String, DaemonError> {
@@ -38,6 +49,7 @@ impl Biometrics {
         let handle = format!("enroll-{}", self.next_session);
         self.next_session += 1;
         self.sessions.insert(handle.clone(), EnrollSession { uid, engine_session });
+        self.logger.log(Level::Info, "enroll-begin", &[("uid", Value::Uid(uid))]);
         Ok(handle)
     }
 
@@ -45,6 +57,18 @@ impl Biometrics {
         let engine_session = self.session(handle)?.engine_session;
         let frame = self.sensor.capture()?;
         let progress = self.engine.enroll_submit(engine_session, self.now_ms(), &frame)?;
+        self.logger.log(
+            Level::Debug,
+            "enroll-frame",
+            &[
+                ("verdict", Value::Label(progress.verdict.as_str())),
+                ("filled", Value::Count(progress.filled.into())),
+                ("required", Value::Count(progress.required.into())),
+                ("width", Value::Count(frame.width.into())),
+                ("height", Value::Count(frame.height.into())),
+                ("frame_bytes", Value::Count(frame.pixels.len() as u64)),
+            ],
+        );
         if progress.state == EnrollState::Failed {
             self.sessions.remove(handle);
         }
@@ -54,6 +78,7 @@ impl Biometrics {
     pub fn enroll_commit(&mut self, handle: &str) -> Result<(), DaemonError> {
         let EnrollSession { uid, engine_session } = self.take_session(handle)?;
         let template = self.engine.enroll_commit(engine_session)?;
+        self.logger.log(Level::Debug, "enroll-commit", &[("uid", Value::Uid(uid)), ("template_bytes", Value::Count(template.len() as u64))]);
         self.storage.put(uid, &template)
     }
 
@@ -69,11 +94,19 @@ impl Biometrics {
     pub fn verify(&mut self, uid: u32) -> Result<bool, DaemonError> {
         let template = match self.storage.get(uid) {
             Ok(template) => template,
-            Err(DaemonError::NotFound | DaemonError::Tampered) => return Ok(false),
+            Err(error @ (DaemonError::NotFound | DaemonError::Tampered)) => {
+                self.logger.log(Level::Warn, "verify-template-unavailable", &[("uid", Value::Uid(uid)), ("reason", Value::reason(&error))]);
+                return Ok(false);
+            }
             Err(other) => return Err(other),
         };
         let frames = self.capture_burst()?;
         let decision = self.engine.verify(&frames, &template, self.target_far)?;
+        self.logger.log(
+            Level::Info,
+            "verify",
+            &[("uid", Value::Uid(uid)), ("live", Value::Flag(decision.live)), ("accepted", Value::Flag(decision.accepted))],
+        );
         Ok(decision.live && decision.accepted)
     }
 
@@ -82,7 +115,9 @@ impl Biometrics {
         for uid in self.storage.list_uids()? {
             match self.storage.get(uid) {
                 Ok(template) => candidates.push((uid, template)),
-                Err(DaemonError::NotFound | DaemonError::Tampered) => {}
+                Err(error @ (DaemonError::NotFound | DaemonError::Tampered)) => {
+                    self.logger.log(Level::Warn, "identify-template-unavailable", &[("uid", Value::Uid(uid)), ("reason", Value::reason(&error))]);
+                }
                 Err(other) => return Err(other),
             }
         }
@@ -91,11 +126,22 @@ impl Biometrics {
         }
         let frames = self.capture_burst()?;
         let decision = self.engine.identify(&frames, &candidates, self.target_far)?;
+        self.logger.log(
+            Level::Info,
+            "identify",
+            &[
+                ("candidates", Value::Count(candidates.len() as u64)),
+                ("live", Value::Flag(decision.live)),
+                ("found", Value::Flag(decision.matched_uid.is_some())),
+            ],
+        );
         Ok(decision.matched_uid.filter(|_| decision.live))
     }
 
     pub fn purge(&mut self, uid: u32) -> Result<(), DaemonError> {
-        self.storage.purge(uid)
+        self.storage.purge(uid)?;
+        self.logger.log(Level::Info, "purge", &[("uid", Value::Uid(uid))]);
+        Ok(())
     }
 
     fn capture_burst(&mut self) -> Result<Vec<crate::backends::CapturedFrame>, DaemonError> {

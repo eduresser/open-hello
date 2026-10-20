@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use crate::core::DEFAULT_TARGET_FAR;
+use crate::logging::Level;
 
 #[derive(Debug, PartialEq)]
 pub enum AuthMode {
@@ -24,6 +25,7 @@ pub struct Config {
     pub engine_config: PathBuf,
     pub bus: BusKind,
     pub auth: AuthMode,
+    pub log_level: Level,
     pub target_far: f64,
 }
 
@@ -53,6 +55,10 @@ impl Config {
             Some("root-only") => AuthMode::RootOnly,
             Some(other) => return Err(format!("--auth must be `polkit` or `root-only`, got `{other}`")),
         };
+        let log_level = match values.remove("log-level") {
+            None => Level::Info,
+            Some(text) => Level::parse(&text).ok_or_else(|| format!("--log-level must be error|warn|info|debug|trace, got `{text}`"))?,
+        };
         let target_far = match values.remove("target-far") {
             None => DEFAULT_TARGET_FAR,
             Some(text) => text.parse::<f64>().map_err(|_| format!("--target-far must be a number in (0, 1), got `{text}`"))?,
@@ -68,7 +74,7 @@ impl Config {
                 return Err(format!("--{label} {} is not a file", path.display()));
             }
         }
-        Ok(Self { sensor_lib, engine_lib, storage_lib, device, state_dir, engine_config, bus, auth, target_far })
+        Ok(Self { sensor_lib, engine_lib, storage_lib, device, state_dir, engine_config, bus, auth, log_level, target_far })
     }
 }
 
@@ -101,6 +107,7 @@ mod tests {
         for (extra, needle) in [
             (vec!["--bus", "mars"], "--bus"),
             (vec!["--auth", "none"], "--auth"),
+            (vec!["--log-level", "loud"], "--log-level"),
             (vec!["--target-far", "2"], "--target-far"),
             (vec!["--target-far", "abc"], "--target-far"),
             (vec!["--bogus", "1"], "--bogus"),

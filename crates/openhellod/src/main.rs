@@ -3,12 +3,13 @@ use std::sync::Arc;
 
 use openhellod::config::{AuthMode, BusKind, Config};
 use openhellod::core::Biometrics;
+use openhellod::logging::Logger;
 use openhellod::dbus_service::{Authorizer, RootOnlyAuthorizer, Service, BUS_NAME, OBJECT_PATH};
 use openhellod::plugin_loader::{EnginePlugin, SensorPlugin, StoragePlugin};
 use openhellod::polkit::{DbusPolkit, PolkitAuthorizer};
 
 const USAGE: &str = "usage: openhellod --sensor-lib PATH --engine-lib PATH --storage-lib PATH --device /dev/videoN \
---state-dir DIR --engine-config FILE.json [--bus system|session] [--auth polkit|root-only] [--target-far 1e-5]";
+--state-dir DIR --engine-config FILE.json [--bus system|session] [--auth polkit|root-only] [--log-level error|warn|info|debug|trace] [--target-far 1e-5]";
 
 fn run(config: Config) -> Result<(), String> {
     let engine_json = std::fs::read_to_string(&config.engine_config)
@@ -17,7 +18,8 @@ fn run(config: Config) -> Result<(), String> {
     let sensor = SensorPlugin::load(&config.sensor_lib, &config.device).map_err(|e| e.to_string())?;
     let engine = EnginePlugin::load(&config.engine_lib, &engine_json).map_err(|e| e.to_string())?;
     let storage = StoragePlugin::load(&config.storage_lib, state_dir).map_err(|e| e.to_string())?;
-    let core = Biometrics::new(Box::new(sensor), Box::new(engine), Box::new(storage), config.target_far);
+    let core = Biometrics::new(Box::new(sensor), Box::new(engine), Box::new(storage), config.target_far)
+        .with_logger(Logger::stderr(config.log_level));
     let authorizer: Arc<dyn Authorizer> = match config.auth {
         AuthMode::Polkit => Arc::new(PolkitAuthorizer::new(Arc::new(DbusPolkit))),
         AuthMode::RootOnly => Arc::new(RootOnlyAuthorizer),

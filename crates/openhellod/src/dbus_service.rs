@@ -7,6 +7,7 @@ use zbus::{fdo, interface, Connection};
 
 use crate::backends::DaemonError;
 use crate::core::Biometrics;
+use crate::logging::{Level, Logger, Value};
 
 pub const BUS_NAME: &str = "io.openhello.Biometrics1";
 pub const OBJECT_PATH: &str = "/io/openhello/Biometrics1";
@@ -61,11 +62,13 @@ impl Authorizer for RootOnlyAuthorizer {
 pub struct Service {
     core: Arc<Mutex<Biometrics>>,
     authorizer: Arc<dyn Authorizer>,
+    logger: Logger,
 }
 
 impl Service {
     pub fn new(core: Biometrics, authorizer: Arc<dyn Authorizer>) -> Self {
-        Self { core: Arc::new(Mutex::new(core)), authorizer }
+        let logger = core.logger().clone();
+        Self { core: Arc::new(Mutex::new(core)), authorizer, logger }
     }
 
     async fn with_core<T: Send + 'static>(
@@ -78,7 +81,7 @@ impl Service {
             operation(&mut guard)
         })
         .await;
-        outcome.map_err(failure)
+        outcome.map_err(|error| failure(&self.logger, error))
     }
 
     async fn authorize(&self, conn: &Connection, header: &Header<'_>, action: Action, target_uid: u32) -> fdo::Result<()> {
@@ -86,7 +89,14 @@ impl Service {
         self.authorizer
             .authorize(action, &caller, target_uid)
             .await
-            .map_err(|reason| fdo::Error::AuthFailed(format!("{}: {reason}", action.polkit_id())))
+            .map_err(|reason| {
+                self.logger.log(
+                    Level::Warn,
+                    "authorization-refused",
+                    &[("action", Value::Label(action.polkit_id())), ("caller_uid", Value::Uid(caller.uid)), ("target_uid", Value::Uid(target_uid))],
+                );
+                fdo::Error::AuthFailed(format!("{}: {reason}", action.polkit_id()))
+            })
     }
 
     async fn session_uid(&self, handle: &str) -> fdo::Result<u32> {
@@ -95,8 +105,8 @@ impl Service {
     }
 }
 
-fn failure(error: DaemonError) -> fdo::Error {
-    eprintln!("openhellod: operation failed: {error}");
+fn failure(logger: &Logger, error: DaemonError) -> fdo::Error {
+    logger.log(Level::Error, "operation-failed", &[("reason", Value::reason(&error))]);
     match error {
         DaemonError::InvalidRequest(_) => fdo::Error::InvalidArgs(error.user_message().to_string()),
         _ => fdo::Error::Failed(error.user_message().to_string()),
