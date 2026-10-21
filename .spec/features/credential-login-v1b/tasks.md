@@ -171,35 +171,37 @@
 - Effort: low
 - Notes: replaces the fixed list of directories from T-030 (portability-paths.md): order is `OPENHELLO_TPM2_PKCS11_MODULE`, the test prefix, `p11-kit list-modules` (entry whose `path:` ends in `libtpm2_pkcs11.so`), then `dlopen("libtpm2_pkcs11.so")` by name through the loader cache. Resolution stays pure and testable with injected lookups.
 
-## T-037 — Installer uses neutral locations and discovers third-party paths [pending]
+## T-037 — Installer uses neutral locations, discovers third-party paths and checks capabilities [pending]
 
 - Refs: AC-016
 - Files: scripts/install.sh, packaging/openhellod.service, packaging/openhello-keyd.service
 - Model: claude-sonnet-5
 - Effort: medium
-- Notes: units to `/usr/lib/systemd/system`, D-Bus policy to `/usr/share/dbus-1/system.d`, polkit actions to `/usr/share/polkit-1/actions`, daemon directory written into the units by template, PAM directory from `dirname $(ldconfig -p | awk '/libpam\.so\.0/{print $NF; exit}')/security`; no `/etc/systemd/system` or `/etc/dbus-1` branches; dependency lists drop `libpam-pkcs11`, `libnss3-tools` and the NSS paths (ASM-014); the sudo edit by `sed` is replaced by T-038.
+- Notes: owner rule (2026-10-21): no per-distro or per-desktop code unless unavoidable. Units to `/usr/lib/systemd/system`, D-Bus policy to `/usr/share/dbus-1/system.d`, polkit actions to `/usr/share/polkit-1/actions`, daemon directory written into the units by template, PAM directory from `dirname $(ldconfig -p | awk '/libpam\.so\.0/{print $NF; exit}')/security`; no `/etc/systemd/system` or `/etc/dbus-1` branches. The installer no longer installs packages: every `apt`, `dnf`, `zypper` and `pacman` branch goes, replaced by a capability check (`command -v tpm2_createprimary tpm2_ptool`, `python3 -c "import tpm2_pkcs11"`, a loader-cache probe for the TPM and PKCS#11 libraries, `polkitd` and a system bus) that prints what is missing as capabilities, never package names. The KDE-only `kde-face` code and the common-stack snippet (`openhello-common-auth`) are removed; the dependency lists drop `libpam-pkcs11`, `libnss3-tools` and the NSS paths (ASM-014); the `sed` edit of `/etc/pam.d/sudo` is replaced by T-038.
 
-## T-038 — PAM manager profiles instead of editing /etc/pam.d by hand [pending]
+
+## T-038 — One universal rule to enable the PAM module per service [pending]
 
 - Refs: AC-027
-- Files: packaging/pam/pam-auth-update/openhello, packaging/pam/authselect/openhello, packaging/pam/manual-snippet.md, scripts/install.sh
+- Files: crates/openhello-cli/src/pam_enable.rs, crates/openhello-cli/src/lib.rs, crates/openhello-cli/src/main.rs, crates/openhello-cli/tests/pam_enable.rs, scripts/install.sh
 - Model: claude-sonnet-5
 - Effort: medium
-- Notes: depends on T-035 and T-037. A `pam-auth-update` profile for the Debian family, an `authselect` custom feature for Fedora and RHEL, and a manual snippet with backup for openSUSE, Arch and the rest (portability.md). The profile applies the gated block with the service allowlist starting at `sudo` only. Nothing here may remove the password path; document how to remove the profile.
+- Notes: replaces the per-manager profiles (`pam-auth-update`, `authselect`, `pam-config`) that the portability research proposed, because they are one adapter per distribution (owner rule, 2026-10-21). New `openhello-cli pam enable <service>... | disable <service>... | status`: for each service name, insert `auth sufficient pam_openhello.so` before the first `auth` line of `/etc/pam.d/<service>` (the `auth` control syntax is valid in every Linux-PAM system, unlike `@include`), copying the vendor file first when the service only exists in `/usr/lib/pam.d`; keep one `.openhello.bak` backup, be idempotent, refuse and say why when the file is a symlink into a manager-owned tree, and `disable` removes exactly that line. The default service list is `sudo`; lockers and greeters are added by name as data (`kde`, `gdm-password`, `swaylock`, ...), with no code per desktop. The shared common stacks (`common-auth`, `system-auth`) are never edited. Tests run on temporary directories.
 
-## T-039 — Native deb and rpm packages from one definition [pending]
+
+## T-039 — Release artifacts: one tarball and thin package metadata [pending]
 
 - Refs: AC-016
-- Files: packaging/nfpm.yaml, packaging/scripts/postinstall.sh, packaging/scripts/preremove.sh, scripts/build-packages.sh
+- Files: packaging/nfpm.yaml, packaging/scripts/postinstall.sh, packaging/scripts/preremove.sh, scripts/build-release.sh
 - Model: claude-sonnet-5
-- Effort: high
-- Notes: depends on T-037. One definition with nfpm (portability-packaging.md), per-family dependency names through overrides, idempotent post-install scripts, models and ONNX Runtime fetched and verified after install, `install.sh` kept for development only. CI matrix (Ubuntu LTS, Fedora, openSUSE Tumbleweed) in containers with systemd, pam_wrapper and swtpm is a follow-up once the packages build.
+- Effort: medium
+- Notes: lowest priority and optional. One distribution-neutral tarball plus a single nfpm definition that emits deb and rpm; the only per-family content is the dependency names, kept as data in the metadata, never as code. Post-install scripts call the same neutral steps as the installer and `openhello-cli pam enable`; models and ONNX Runtime stay outside the package, fetched and verified. CI in containers (Ubuntu LTS, Fedora, openSUSE Tumbleweed) with systemd, pam_wrapper and swtpm is a follow-up.
 
-## T-040 — KDE lock screen adapter (kde-face) [pending]
+
+## T-040 — Lock screens use the same rule; no desktop adapter [pending]
 
 - Refs: AC-028
-- Files: scripts/install.sh, .spec/features/credential-login-v1b/lockscreen.md
+- Files: .spec/features/credential-login-v1b/lockscreen.md
 - Model: claude-sonnet-5
 - Effort: low
-- Notes: lowest priority, KDE only (kscreenlocker-face-diagnosis.md). The greeter starts `kde-face` only with `[Authenticators] Face=true` in `kscreenlockerrc` (`/etc/xdg/kscreenlockerrc` or per user), and the lock begins on Face only if `[Greeter] Authenticator=Face` in `~/.local/state/kscreenlockerrc`. The installer offers this as an explicit opt-in step, never silently, and the guide records the side effects.
-\n
+- Notes: replaces the KDE-only `kde-face` plan (owner rule, 2026-10-21). Observed on the VM: at lock the KDE greeter starts the `kde` password worker; with `pam_openhello` first in that service the face is tried before the password prompt and needs no `[Authenticators] Face=true`. Verify with `openhello-cli pam enable kde` on the VM and record: unlock without typing, what the greeter shows while the module waits, and what happens to a password typed during the wait. Other lockers use the identical command with their service name; anything the guide cannot confirm stays marked unverified.
