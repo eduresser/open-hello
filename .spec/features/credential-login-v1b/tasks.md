@@ -134,3 +134,11 @@
 - Effort: low
 - Notes: found on the VM: `cp -a` over the ONNX Runtime libraries mapped by the running `openhellod` crashed it with SEGV on the next call, and `enable --now` left the old `openhello-keyd` running the previous binary. The installer stops both services before replacing files, copies libraries without writing into mapped files (`cp --remove-destination`), then restarts both. Debian and Ubuntu use `libtpm2-pkcs11-tools`.
 
+## T-032 — Token proxy accepts the search templates of the OpenSSL build of pam_pkcs11 [pending]
+
+- Refs: AC-027
+- Files: crates/openhello-keyd/src/token_socket.rs, crates/openhello-keyd/tests/token_proxy.rs, crates/openhello-cli/tests/pam_sudo.rs
+- Model: claude-sonnet-5
+- Effort: medium
+- Notes: found on the KDE neon VM (2026-10-21), see `pam-pkcs11-0612-diagnosis.md`: Debian and Ubuntu build pam_pkcs11 with OpenSSL (openSUSE with NSS), and the OpenSSL build searches with `{CKA_CLASS=certificate, CKA_CERTIFICATE_TYPE=X509}` and `{CKA_CLASS=private key, CKA_SIGN=true[, CKA_ID]}`. `parse_template` in `token_socket.rs` rejected `CKA_CERTIFICATE_TYPE` (0x80) and `CKA_SIGN` (0x108), the proxy answered `CKR_ARGUMENTS_BAD`, and pam_pkcs11 ignores that error and reports "no valid certificate". Accept both attributes and keep refusing unknown ones. The tests so far ran only against the NSS build, so add template-level tests that mirror the OpenSSL build; the real proof is `sudo true` on the VM.
+
