@@ -1,3 +1,4 @@
+mod auth_keys;
 mod certificate;
 pub mod config;
 pub mod dbus_service;

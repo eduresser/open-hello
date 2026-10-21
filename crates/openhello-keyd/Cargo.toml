@@ -15,6 +15,7 @@ path = "src/main.rs"
 [dependencies]
 thiserror.workspace = true
 openhello-ticket = { path = "../openhello-ticket" }
+openhello-auth-proto = { path = "../openhello-auth-proto" }
 libc = "0.2"
 cryptoki = "0.12"
 cryptoki-sys = "0.5"

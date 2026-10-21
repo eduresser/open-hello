@@ -20,7 +20,8 @@ impl Protectors {
         self.remove_token(uid)?;
         let _guard = lock();
         crate::certificate::remove_trusted(&self.config, uid)?;
-        crate::certificate::remove_mapping(&self.config.mapfile, uid)
+        crate::certificate::remove_mapping(&self.config.mapfile, uid)?;
+        crate::auth_keys::remove_public_key(&self.config.auth_dir, uid)
     }
 
     fn shred_protectors(&self, uid: u32) -> Result<(), KeydError> {

@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/openhello-plugin-abi",
     "crates/openhello-ticket",
+    "crates/openhello-auth-proto",
     "crates/openhello-keyd",
     "crates/openhello-pkcs11",
     "crates/openhello-pam",

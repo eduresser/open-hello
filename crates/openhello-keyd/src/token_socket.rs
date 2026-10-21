@@ -28,6 +28,7 @@ pub const OP_TOKEN_FIND: u8 = 7;
 pub const OP_TOKEN_ATTRIBUTES: u8 = 8;
 pub const OP_TOKEN_SIGN_CHECK: u8 = 9;
 pub const OP_TOKEN_SIGN: u8 = 10;
+pub const OP_TOKEN_AUTH: u8 = 11;
 
 pub const TOKEN_OK: u8 = 0;
 pub const TOKEN_PIN_INCORRECT: u8 = 1;
@@ -250,6 +251,7 @@ struct Connection<'a> {
     session_requested: bool,
     present: Option<bool>,
     logins: u8,
+    auths: u8,
     open: Option<Open>,
     dead: bool,
 }
@@ -266,6 +268,7 @@ fn serve(protectors: &Protectors, mut stream: UnixStream, peer: u32) {
         session_requested: false,
         present: None,
         logins: 0,
+        auths: 0,
         open: None,
         dead: false,
     };
@@ -308,6 +311,7 @@ impl Connection<'_> {
             OP_TOKEN_ATTRIBUTES => self.attributes(payload),
             OP_TOKEN_SIGN_CHECK => self.sign_check(payload),
             OP_TOKEN_SIGN => self.sign(uid, payload),
+            OP_TOKEN_AUTH => self.auth(uid, payload),
             _ => Err(self.violation("unknown or malformed operation")),
         }
     }
@@ -553,6 +557,73 @@ impl Connection<'_> {
             .sign(&Mechanism::Ecdsa, key, data)
             .map_err(|e| failed("signing with the token key", &e))?;
         log(Level::Debug, "token-signed", &[("uid", Value::Uid(uid))]);
+        Ok(signature)
+    }
+}
+
+impl Connection<'_> {
+    fn auth(&mut self, uid: u32, payload: &[u8]) -> Reply {
+        let Some((service, challenge)) = openhello_auth_proto::parse_request(payload) else {
+            return Err(self.violation("malformed auth request"));
+        };
+        if self.open.is_some() || self.auths >= MAX_LOGINS {
+            return Err(self.violation("auth refused on this connection"));
+        }
+        self.auths += 1;
+        let Some(secret) = self.protectors.take_grant(uid) else {
+            log(
+                Level::Warn,
+                "token-auth-refused",
+                &[
+                    ("uid", Value::Uid(uid)),
+                    ("reason", Value::Label("no grant")),
+                ],
+            );
+            return Err(TOKEN_REFUSED);
+        };
+        let message = openhello_auth_proto::auth_message(uid, service, &challenge);
+        let signature = self.sign_with_grant(uid, &secret, &message)?;
+        log(
+            Level::Debug,
+            "token-auth-signed",
+            &[("uid", Value::Uid(uid))],
+        );
+        Ok(signature)
+    }
+
+    fn sign_with_grant(&self, uid: u32, secret: &crate::Secret, digest: &[u8; 32]) -> Reply {
+        let guard = lock();
+        guard.reset_module();
+        let token = self
+            .protectors
+            .config
+            .open_token(&guard, &crate::provision::token_label(uid))
+            .map_err(|e| match e {
+                KeydError::NotProvisioned => TOKEN_NO_TOKEN,
+                _ => TOKEN_FAILED,
+            })?;
+        token.login(secret).map_err(|e| match e {
+            KeydError::AuthenticationFailed => TOKEN_PIN_INCORRECT,
+            _ => TOKEN_FAILED,
+        })?;
+        let template = [
+            Attribute::Class(ObjectClass::PRIVATE_KEY),
+            Attribute::Sign(true),
+        ];
+        let keys = token
+            .session
+            .find_objects(&template)
+            .map_err(|e| failed("locating the signing key", &e))?;
+        let [key] = keys.as_slice() else {
+            return Err(TOKEN_FAILED);
+        };
+        let signature = token
+            .session
+            .sign(&Mechanism::Ecdsa, *key, digest)
+            .map_err(|e| failed("signing the PAM challenge", &e))?;
+        if signature.len() != openhello_auth_proto::SIGNATURE_LEN {
+            return Err(TOKEN_FAILED);
+        }
         Ok(signature)
     }
 }

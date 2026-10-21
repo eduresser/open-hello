@@ -113,6 +113,7 @@ impl Rig {
         ));
         config.prefix = Some(prefix.clone());
         config.mapfile = store.path().join("pkcs11-subject-map");
+        config.auth_dir = store.path().join("auth");
         config.user_name = Some(|uid| Some(format!("user{uid}")));
         config.env = vec![("DBUS_SESSION_BUS_ADDRESS".into(), address)];
         let rig = Self {

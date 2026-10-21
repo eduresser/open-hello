@@ -153,7 +153,7 @@
 ## T-034 — keyd: root-owned public key and a challenge-signing operation [pending]
 
 - Refs: AC-027
-- Files: crates/openhello-keyd/src/auth_keys.rs, crates/openhello-keyd/src/token_socket.rs, crates/openhello-keyd/src/provision.rs, crates/openhello-keyd/src/purge.rs, crates/openhello-keyd/src/lib.rs, crates/openhello-keyd/tests/auth_challenge.rs
+- Files: crates/openhello-keyd/src/auth_keys.rs, crates/openhello-keyd/src/token_socket.rs, crates/openhello-keyd/src/provision.rs, crates/openhello-keyd/src/purge.rs, crates/openhello-keyd/src/lib.rs, crates/openhello-keyd/src/tpm.rs, crates/openhello-keyd/src/config.rs, crates/openhello-keyd/tests/auth_challenge.rs, crates/openhello-keyd/tests/support/mod.rs, crates/openhello-auth-proto/Cargo.toml, crates/openhello-auth-proto/src/lib.rs, Cargo.toml
 - Model: claude-sonnet-5
 - Effort: high
 - Notes: first step of owner decision ASM-014. Provision writes the user's P-256 public key (SEC1 or SPKI PEM) to `/etc/openhello/auth/<uid>.pub` (root-owned, 0644, atomic, idempotent; directory configurable by `OPENHELLO_KEYD_AUTH_DIR` for tests); Purge removes it. New keyd operation: given a 32-byte challenge from the caller, keyd takes the grant that the ticket created for that uid, logs in to the token internally, signs a domain-separated hash (`"openhello-pam-v1" || uid || challenge`) with the TPM key and returns the 64-byte signature; no grant, no signature; one use per grant; private key and K never leave keyd. The challenge always comes from the verifier (the PAM module) and keyd signs only for the uid of the grant (the Windows counterpart is the registered key credential, `msDS-KeyCredentialLink` or the Entra registration). Include the PAM service name in the signed bytes.
