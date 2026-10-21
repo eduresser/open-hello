@@ -159,7 +159,11 @@ impl Service {
         self.authorize(conn, &header, Action::Provision, uid)
             .await?;
         let code = self
-            .run(Action::Provision, uid, move |p| p.provision_protectors(uid))
+            .run(Action::Provision, uid, move |p| {
+                let code = p.provision_protectors(uid)?;
+                p.keyd().backfill_auth_keys();
+                Ok(code)
+            })
             .await?;
         Ok(code.reveal().to_string())
     }

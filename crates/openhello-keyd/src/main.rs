@@ -24,6 +24,7 @@ fn run(config: DaemonConfig) -> Result<(), String> {
     protectors
         .apply_lockout_policy(&LockoutPolicy::RECOMMENDED)
         .map_err(|e| format!("cannot apply the TPM lockout policy: {e}"))?;
+    protectors.keyd().backfill_auth_keys();
     let _ticket_socket =
         TicketSocket::bind(protectors.clone(), config.ticket).map_err(|e| e.to_string())?;
     let _unlock_socket =
