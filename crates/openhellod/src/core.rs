@@ -5,6 +5,7 @@ use crate::backends::{
     AuthVerdict, DaemonError, EngineBackend, EnrollProgress, EnrollState, SensorBackend, StorageBackend,
 };
 use crate::logging::{Level, Logger, Value};
+use crate::ticket_client::{TicketClient, TicketDelivery};
 
 pub const MAX_SCORED_FRAMES: u32 = 16;
 pub const MAX_ATTEMPT_FRAMES: usize = 48;
@@ -29,6 +30,8 @@ pub struct Biometrics {
     started: Instant,
     target_far: f64,
     logger: Logger,
+    tickets: Option<TicketClient>,
+    last_delivery: Option<TicketDelivery>,
 }
 
 impl Biometrics {
@@ -38,12 +41,21 @@ impl Biometrics {
         storage: Box<dyn StorageBackend>,
         target_far: f64,
     ) -> Self {
-        Self { sensor, engine, storage, sessions: HashMap::new(), next_session: 1, started: Instant::now(), target_far, logger: Logger::stderr(Level::Info) }
+        Self { sensor, engine, storage, sessions: HashMap::new(), next_session: 1, started: Instant::now(), target_far, logger: Logger::stderr(Level::Info), tickets: None, last_delivery: None }
     }
 
     pub fn with_logger(mut self, logger: Logger) -> Self {
         self.logger = logger;
         self
+    }
+
+    pub fn with_ticket_client(mut self, client: Option<TicketClient>) -> Self {
+        self.tickets = client;
+        self
+    }
+
+    pub fn last_ticket_delivery(&self) -> Option<TicketDelivery> {
+        self.last_delivery
     }
 
     pub fn logger(&self) -> &Logger {
@@ -113,6 +125,9 @@ impl Biometrics {
             "verify",
             &[("uid", Value::Uid(uid)), ("frames", Value::Count(outcome.frames.into())), ("accepted", Value::Flag(accepted))],
         );
+        if accepted {
+            self.deliver_ticket(uid);
+        }
         Ok(accepted)
     }
 
@@ -140,6 +155,9 @@ impl Biometrics {
                 ("found", Value::Flag(outcome.uid.is_some())),
             ],
         );
+        if let Some(uid) = outcome.uid {
+            self.deliver_ticket(uid);
+        }
         Ok(outcome.uid)
     }
 
@@ -147,6 +165,14 @@ impl Biometrics {
         self.storage.purge(uid)?;
         self.logger.log(Level::Info, "purge", &[("uid", Value::Uid(uid))]);
         Ok(())
+    }
+
+    fn deliver_ticket(&mut self, uid: u32) {
+        self.last_delivery = None;
+        let Some(client) = self.tickets.as_mut() else { return };
+        let delivery = client.deliver(uid);
+        self.logger.log(Level::Info, "ticket", &[("uid", Value::Uid(uid)), ("delivery", Value::Label(delivery.as_str()))]);
+        self.last_delivery = Some(delivery);
     }
 
     fn authenticate(&mut self, candidates: &[(u32, Vec<u8>)]) -> Result<AuthOutcome, DaemonError> {
@@ -328,6 +354,7 @@ mod tests {
     use super::fakes::*;
     use super::*;
     use crate::backends::CapturedFrame;
+    use crate::ticket_client::test_keyd::TestKeyd;
 
     #[test]
     fn enrollment_commit_persists_the_engine_template_for_the_session_uid() {
@@ -450,5 +477,91 @@ mod tests {
         let (mut core, _) = core_with(storage.clone(), true, b"mine");
         core.purge(1000).unwrap();
         assert!(storage.files.lock().unwrap().is_empty());
+    }
+
+    fn keyd_core(storage: MemoryStorage, live: bool, template: &[u8], socket: &std::path::Path) -> Biometrics {
+        let (core, _) = core_with(storage, live, template);
+        core.with_ticket_client(Some(TicketClient::new(socket)))
+    }
+
+    fn storage_with(entries: &[(u32, &[u8])]) -> MemoryStorage {
+        let storage = MemoryStorage::default();
+        for (uid, template) in entries {
+            storage.files.lock().unwrap().insert(*uid, template.to_vec());
+        }
+        storage
+    }
+
+    // @spec:AC-019
+    #[test]
+    fn a_matching_verify_delivers_a_ticket_the_keyd_verifier_accepts() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("keyd.sock");
+        let keyd = TestKeyd::start(&socket, 3);
+        let mut core = keyd_core(storage_with(&[(1000, b"mine")]), true, b"mine", &socket);
+        assert!(core.verify(1000).unwrap());
+        assert_eq!(core.last_ticket_delivery(), Some(TicketDelivery::Delivered));
+        assert_eq!(*keyd.accepted_uids.lock().unwrap(), vec![1000]);
+    }
+
+    // @spec:AC-019
+    #[test]
+    fn identify_delivers_a_ticket_only_for_the_winning_uid() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("keyd.sock");
+        let keyd = TestKeyd::start(&socket, 3);
+        let storage = storage_with(&[(1000, b"a"), (1001, b"b")]);
+        let mut core = keyd_core(storage, true, b"b", &socket);
+        assert_eq!(core.identify().unwrap(), Some(1001));
+        assert_eq!(*keyd.accepted_uids.lock().unwrap(), vec![1001]);
+    }
+
+    // @spec:AC-023
+    #[test]
+    fn no_match_sends_nothing_to_the_keyd_socket() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("keyd.sock");
+        let keyd = TestKeyd::start(&socket, 3);
+        let storage = storage_with(&[(1000, b"mine")]);
+        let mut no_face = keyd_core(storage.clone(), false, b"mine", &socket);
+        assert!(!no_face.verify(1000).unwrap());
+        assert_eq!(no_face.identify().unwrap(), None);
+        let mut stranger = keyd_core(storage, true, b"someone-else", &socket);
+        assert!(!stranger.verify(1000).unwrap());
+        assert_eq!(stranger.identify().unwrap(), None);
+        assert_eq!(no_face.last_ticket_delivery(), None);
+        assert_eq!(stranger.last_ticket_delivery(), None);
+        assert_eq!(*keyd.connections.lock().unwrap(), 0);
+        assert!(keyd.accepted_uids.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_unavailable_keyd_does_not_change_the_verify_result() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut core = keyd_core(storage_with(&[(1000, b"mine")]), true, b"mine", &dir.path().join("missing.sock"));
+        assert!(core.verify(1000).unwrap());
+        assert_eq!(core.last_ticket_delivery(), Some(TicketDelivery::Unavailable));
+        assert_eq!(core.identify().unwrap(), Some(1000));
+    }
+
+    #[test]
+    fn without_a_ticket_client_verify_behaves_as_before() {
+        let (mut core, _) = core_with(storage_with(&[(1000, b"mine")]), true, b"mine");
+        assert!(core.verify(1000).unwrap());
+        assert_eq!(core.last_ticket_delivery(), None);
+    }
+
+    #[test]
+    fn a_keyd_restart_between_verifies_still_delivers() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("keyd.sock");
+        let first = TestKeyd::start(&socket, 3);
+        let mut core = keyd_core(storage_with(&[(1000, b"mine")]), true, b"mine", &socket);
+        assert!(core.verify(1000).unwrap());
+        first.stop();
+        let second = TestKeyd::start(&socket, 5);
+        assert!(core.verify(1000).unwrap());
+        assert_eq!(core.last_ticket_delivery(), Some(TicketDelivery::Delivered));
+        assert_eq!(*second.accepted_uids.lock().unwrap(), vec![1000]);
     }
 }
