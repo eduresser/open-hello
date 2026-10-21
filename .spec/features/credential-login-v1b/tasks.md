@@ -40,8 +40,7 @@
 - Effort: medium
 - Notes: depends on T-015. No match, no ticket.
 
-## T-019 — openhello-pkcs11: wrapper module overriding C_Login [pending]
-
+## T-019 — openhello-pkcs11: wrapper module overriding C_Login [done]
 - Refs: AC-019, AC-024, AC-025
 - Files: Cargo.toml, crates/openhello-pkcs11/Cargo.toml, crates/openhello-pkcs11/src/lib.rs, crates/openhello-pkcs11/tests/login.rs, crates/openhello-keyd/src/unlock_socket.rs, crates/openhello-keyd/src/lib.rs
 - Model: claude-sonnet-5
@@ -51,18 +50,18 @@
 ## T-020 — openhello-keyd: D-Bus service, polkit and systemd sandbox [pending]
 
 - Refs: AC-034
-- Files: crates/openhello-keyd/src/main.rs, crates/openhello-keyd/src/dbus_service.rs, crates/openhello-keyd/src/polkit.rs, packaging/io.openhello.Keyd1.conf, packaging/openhello-keyd.service
+- Files: crates/openhello-keyd/src/main.rs, crates/openhello-keyd/src/dbus_service.rs, crates/openhello-keyd/src/polkit.rs, crates/openhello-keyd/src/purge.rs, crates/openhello-keyd/tests/dbus_service.rs, packaging/io.openhello.Keyd1.conf, packaging/openhello-keyd.service
 - Model: claude-sonnet-5
 - Effort: high
-- Notes: depends on T-016, T-017. Same authorization pattern as `openhellod` (T-010).
+- Notes: depends on T-016, T-017. Same authorization pattern as `openhellod` (T-010). Methods Provision, SetPin and Purge; the keyd purge itself (evict the TPM key, delete Protectors, remove the token) lives in `purge.rs` so that AC-034 can be tested against a real Purge.
 
 ## T-021 — Purge integration and log redaction [pending]
 
 - Refs: AC-033, AC-035
-- Files: crates/openhello-keyd/src/purge.rs, crates/openhello-keyd/src/logging.rs, crates/openhellod/src/dbus_service.rs
+- Files: crates/openhello-keyd/src/logging.rs, crates/openhello-keyd/tests/purge_and_logs.rs, crates/openhellod/src/dbus_service.rs, crates/openhellod/src/core.rs
 - Model: claude-sonnet-5
 - Effort: medium
-- Notes: depends on T-020. `openhellod` Purge calls the keyd purge (extends P-008).
+- Notes: depends on T-020. `openhellod` Purge calls the keyd purge from T-020 (extends P-008); this task proves AC-033 end to end and adds log redaction for PINs, Protector secrets, tickets and recovery codes (AC-035).
 
 ## T-022 — PAM stack, installer and sudo end-to-end [pending]
 
