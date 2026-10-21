@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 mod challenge;
+mod debug;
+mod session;
 
 // Shared source, not a dependency: depending on the wrapper crate would export its PKCS#11 symbols from this module.
 #[allow(dead_code)]
@@ -14,6 +16,8 @@ mod config;
 
 use challenge::SignError;
 use config::Settings;
+use debug::Reason;
+use session::Locality;
 
 const PAM_SUCCESS: c_int = 0;
 const PAM_AUTH_ERR: c_int = 7;
@@ -69,39 +73,63 @@ pub unsafe extern "C" fn pam_sm_authenticate(
     argv: *const *const c_char,
 ) -> c_int {
     let args = arguments(argc, argv);
-    let started = Instant::now();
-    if !local_session_allowed(pamh, &args) {
-        return PAM_IGNORE;
-    }
-    let Some(user) = item_text(pamh, PAM_USER).filter(|u| !u.is_empty()) else {
-        return PAM_IGNORE;
-    };
-    let Some(uid) = uid_of(&user) else {
-        return PAM_IGNORE;
+    let (code, reason) = match authenticate(pamh, &args) {
+        Ok(()) => (PAM_SUCCESS, Reason::Success),
+        Err(Exit { code, reason }) => (code, reason),
     };
     let service = item_text(pamh, PAM_SERVICE).unwrap_or_default();
-    if !openhello_auth_proto::valid_service(&service) {
-        return PAM_IGNORE;
+    debug::report(
+        args.iter().any(|a| a == "debug"),
+        &debug::syslog,
+        reason,
+        &service,
+    );
+    code
+}
+
+struct Exit {
+    code: c_int,
+    reason: Reason,
+}
+
+fn ignore(reason: Reason) -> Exit {
+    Exit {
+        code: PAM_IGNORE,
+        reason,
     }
-    let Some(key) = registered_key(&args, uid) else {
-        return PAM_IGNORE;
-    };
+}
+
+fn refuse(reason: Reason) -> Exit {
+    Exit {
+        code: PAM_AUTH_ERR,
+        reason,
+    }
+}
+
+unsafe fn authenticate(pamh: *mut c_void, args: &[String]) -> Result<(), Exit> {
+    let started = Instant::now();
+    local_session_allowed(pamh, args).map_err(ignore)?;
+    let user = item_text(pamh, PAM_USER)
+        .filter(|u| !u.is_empty())
+        .ok_or(ignore(Reason::NoUser))?;
+    let uid = uid_of(&user).ok_or(ignore(Reason::NoUser))?;
+    let service = item_text(pamh, PAM_SERVICE).unwrap_or_default();
+    if !openhello_auth_proto::valid_service(&service) {
+        return Err(ignore(Reason::ServiceNotAllowed));
+    }
+    let key = registered_key(args, uid).map_err(ignore)?;
     let config = args
         .iter()
         .find_map(|a| a.strip_prefix("config=").map(PathBuf::from))
         .unwrap_or_else(|| PathBuf::from(config::DEFAULT_CONFIG));
-    let Ok(settings) = config::current(&config::process_env, &config) else {
-        return PAM_IGNORE;
-    };
-    let Some(socket) = settings.token_socket.clone() else {
-        return PAM_IGNORE;
-    };
-    if !service_available(&settings, started) {
-        return PAM_IGNORE;
-    }
-    let Some(challenge) = challenge::random_challenge() else {
-        return PAM_IGNORE;
-    };
+    let settings = config::current(&config::process_env, &config)
+        .map_err(|_| ignore(Reason::KeydUnavailable))?;
+    let socket = settings
+        .token_socket
+        .clone()
+        .ok_or(ignore(Reason::KeydUnavailable))?;
+    service_available(&settings, started).map_err(ignore)?;
+    let challenge = challenge::random_challenge().ok_or(ignore(Reason::KeydUnavailable))?;
     tell(pamh, LOOKING_FOR_FACE);
     let remaining = || BUDGET.saturating_sub(started.elapsed());
     match verify_face(
@@ -110,17 +138,18 @@ pub unsafe extern "C" fn pam_sm_authenticate(
         remaining().min(VERIFY_TIMEOUT),
     ) {
         Some(true) => {}
-        Some(false) => return PAM_AUTH_ERR,
-        None => return PAM_IGNORE,
+        Some(false) => return Err(refuse(Reason::FaceRefused)),
+        None => return Err(ignore(Reason::OpenhellodUnavailable)),
     }
     match challenge::request_signature(&socket, uid, &service, &challenge, remaining()) {
         Ok(signature)
             if challenge::signature_is_valid(&key, uid, &service, &challenge, &signature) =>
         {
-            PAM_SUCCESS
+            Ok(())
         }
-        Ok(_) | Err(SignError::Refused) => PAM_AUTH_ERR,
-        Err(SignError::Unavailable) => PAM_IGNORE,
+        Ok(_) => Err(refuse(Reason::SignatureInvalid)),
+        Err(SignError::Refused) => Err(refuse(Reason::FaceRefused)),
+        Err(SignError::Unavailable) => Err(ignore(Reason::KeydUnavailable)),
     }
 }
 
@@ -142,7 +171,7 @@ fn uid_of(user: &str) -> Option<u32> {
 }
 
 // trusted_uid exists for unprivileged test runs; a privileged caller always requires root.
-fn registered_key(args: &[String], uid: u32) -> Option<p256::ecdsa::VerifyingKey> {
+fn registered_key(args: &[String], uid: u32) -> Result<p256::ecdsa::VerifyingKey, Reason> {
     let dir = args
         .iter()
         .find_map(|a| a.strip_prefix("authdir=").map(PathBuf::from))
@@ -155,7 +184,16 @@ fn registered_key(args: &[String], uid: u32) -> Option<p256::ecdsa::VerifyingKey
             .find_map(|a| a.strip_prefix("trusted_uid=")?.parse().ok())
             .unwrap_or(ROOT_UID)
     };
-    challenge::load_public_key(&dir, uid, owner)
+    challenge::load_public_key(&dir, uid, owner).ok_or_else(|| {
+        if dir
+            .join(openhello_auth_proto::public_key_file_name(uid))
+            .exists()
+        {
+            Reason::CredentialFileUntrusted
+        } else {
+            Reason::NoCredentialFile
+        }
+    })
 }
 
 fn verify_face(uid: u32, bus_address: Option<String>, timeout: Duration) -> Option<bool> {
@@ -192,27 +230,30 @@ unsafe fn item_text(pamh: *mut c_void, item: c_int) -> Option<String> {
         .map(str::to_string)
 }
 
-unsafe fn local_session_allowed(pamh: *mut c_void, args: &[String]) -> bool {
-    let remote = item_text(pamh, PAM_RHOST).is_some_and(|h| !h.is_empty())
-        || std::env::var_os("SSH_CONNECTION").is_some();
-    let tty = item_text(pamh, PAM_TTY).is_some_and(|t| !t.is_empty());
-    let display = ["DISPLAY", "WAYLAND_DISPLAY"]
-        .iter()
-        .any(|v| std::env::var_os(v).is_some_and(|d| !d.is_empty()));
+unsafe fn local_session_allowed(pamh: *mut c_void, args: &[String]) -> Result<(), Reason> {
+    let probes = session::Probes {
+        rhost: item_text(pamh, PAM_RHOST).is_some_and(|h| !h.is_empty()),
+        tty: item_text(pamh, PAM_TTY).is_some_and(|t| !t.is_empty()),
+        env: &session::process_env,
+        cgroup: &session::process_cgroup,
+        session: &session::process_session,
+    };
     let service = item_text(pamh, PAM_SERVICE).unwrap_or_default();
     let allowlist = args
         .iter()
         .find_map(|a| a.strip_prefix("allowlist=").map(PathBuf::from));
-    permitted(remote, tty || display, &service, allowlist.as_deref())
+    permitted(session::locate(&probes), &service, allowlist.as_deref())
 }
 
 // A missing or untrusted allowlist denies: the common-stack placement must never reach the camera by default.
-fn permitted(remote: bool, local: bool, service: &str, allowlist: Option<&Path>) -> bool {
-    if remote || !local {
-        return false;
+fn permitted(locality: Locality, service: &str, allowlist: Option<&Path>) -> Result<(), Reason> {
+    match locality {
+        Locality::Remote => return Err(Reason::Remote),
+        Locality::Unknown => return Err(Reason::NotLocal),
+        Locality::Local => {}
     }
     let Some(path) = allowlist else {
-        return true;
+        return Ok(());
     };
     let (ruid, euid) = unsafe { (libc::getuid(), libc::geteuid()) };
     let text = if config::is_privileged(ruid, euid) {
@@ -220,11 +261,12 @@ fn permitted(remote: bool, local: bool, service: &str, allowlist: Option<&Path>)
     } else {
         std::fs::read_to_string(path).ok()
     };
-    text.is_some_and(|t| {
+    let listed = text.is_some_and(|t| {
         t.lines()
             .map(str::trim)
             .any(|l| !l.is_empty() && !l.starts_with('#') && l == service)
-    })
+    });
+    listed.then_some(()).ok_or(Reason::ServiceNotAllowed)
 }
 
 #[no_mangle]
@@ -244,13 +286,19 @@ unsafe fn arguments(argc: c_int, argv: *const *const c_char) -> Vec<String> {
         .collect()
 }
 
-fn service_available(settings: &Settings, started: Instant) -> bool {
-    let Some(socket) = settings.token_socket.as_deref() else {
-        return false;
-    };
+fn service_available(settings: &Settings, started: Instant) -> Result<(), Reason> {
+    let socket = settings
+        .token_socket
+        .as_deref()
+        .ok_or(Reason::KeydUnavailable)?;
     let remaining = || BUDGET.saturating_sub(started.elapsed());
-    unix_socket_accepts(socket, remaining())
-        && bus_name_owned(settings.bus_address.clone(), remaining())
+    if !unix_socket_accepts(socket, remaining()) {
+        return Err(Reason::KeydUnavailable);
+    }
+    if !bus_name_owned(settings.bus_address.clone(), remaining()) {
+        return Err(Reason::OpenhellodUnavailable);
+    }
+    Ok(())
 }
 
 fn unix_socket_accepts(path: &Path, timeout: Duration) -> bool {
@@ -355,13 +403,29 @@ unsafe fn tell(pamh: *mut c_void, text: &CStr) {
 
 #[cfg(test)]
 mod tests {
-    use super::permitted;
+    use super::{permitted, Locality, Reason};
 
     #[test]
     fn remote_or_headless_sessions_are_ignored_before_the_allowlist() {
-        assert!(!permitted(true, true, "sudo", None));
-        assert!(!permitted(false, false, "sudo", None));
-        assert!(permitted(false, true, "sudo", None));
+        assert_eq!(
+            permitted(Locality::Remote, "sudo", None),
+            Err(Reason::Remote)
+        );
+        assert_eq!(
+            permitted(Locality::Unknown, "sudo", None),
+            Err(Reason::NotLocal)
+        );
+        assert_eq!(permitted(Locality::Local, "sudo", None), Ok(()));
+    }
+
+    // @covers:AC-028-pam-local-session
+    #[test]
+    fn a_missing_allowlist_file_denies_with_service_not_allowed() {
+        let missing = std::path::Path::new("/nonexistent/openhello-allowlist");
+        assert_eq!(
+            permitted(Locality::Local, "sudo", Some(missing)),
+            Err(Reason::ServiceNotAllowed)
+        );
     }
 
     #[test]
