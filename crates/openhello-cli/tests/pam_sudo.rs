@@ -9,13 +9,12 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use openhello_keyd::{
-    KeyInfo, Protectors, TicketSocket, TicketSocketConfig, TokenSocket, TokenSocketConfig,
-    OP_TICKET, OP_TICKET_KEY, STATUS_ACCEPTED,
+    Protectors, TicketSocket, TicketSocketConfig, TokenSocket, TokenSocketConfig, OP_TICKET,
+    OP_TICKET_KEY, STATUS_ACCEPTED,
 };
 use openhello_ticket::{Issuer, TicketKey, KEY_LEN};
 use support::{rig, Rig};
 
-const PIN: &str = "482916";
 const OTHER_UID: u32 = 2999;
 const SERVICE: &str = "sudo";
 const INCLUDED: &str = "sudo-openhello";
@@ -25,9 +24,10 @@ const STACK: &str = include_str!("../../../packaging/pam/sudo-openhello");
 const LOCKSCREEN_SERVICE: &str = "openhello-lockscreen";
 const COMMON_STACK: &str = include_str!("../../../packaging/pam/openhello-common-auth");
 const LOCKSCREEN_STACK: &str = include_str!("../../../packaging/pam/openhello-lockscreen");
-const PAM_PKCS11_CONF: &str = include_str!("../../../packaging/pam/pam_pkcs11.conf");
 const WITHIN_BUDGET: Duration = Duration::from_secs(5);
-const STRICT_CLEAR: &str = "[ignore=ignore default=die]";
+const STRICT_CONTROL: &str = "[success=done ignore=ignore default=die]";
+const PAM_AUTH_ERR: i32 = 7;
+const AUTH_OP: u8 = 11;
 
 const CLIENT_C: &str = r#"
 #include <security/pam_appl.h>
@@ -99,6 +99,7 @@ int pam_sm_setcred(pam_handle_t *h, int flags, int argc, const char **argv) {
 enum Verify {
     Matches,
     NoMatch,
+    NoTicket,
     Hangs,
 }
 
@@ -123,6 +124,7 @@ impl FakeBiometrics {
         };
         match mode {
             Verify::NoMatch => false,
+            Verify::NoTicket => true,
             Verify::Hangs => {
                 async_io::Timer::after(Duration::from_secs(15)).await;
                 false
@@ -264,12 +266,6 @@ fn compile(rig: &Rig, dir: &Path, name: &str, source: &str, shared: bool) -> Pat
     output
 }
 
-fn wrapper_library() -> PathBuf {
-    static PATH: OnceLock<PathBuf> = OnceLock::new();
-    PATH.get_or_init(|| library("openhello-pkcs11", "libopenhello_pkcs11.so"))
-        .clone()
-}
-
 fn pam_module() -> PathBuf {
     static PATH: OnceLock<PathBuf> = OnceLock::new();
     PATH.get_or_init(|| library("openhello-pam", "libpam_openhello.so"))
@@ -301,10 +297,8 @@ struct Fixture {
     dir: tempfile::TempDir,
     config: openhello_keyd::KeydConfig,
     protectors: Arc<Protectors>,
-    key: KeyInfo,
     client: PathBuf,
     recorder: PathBuf,
-    pkcs11_conf: PathBuf,
 }
 
 static FIXTURE: Mutex<Option<Fixture>> = Mutex::new(None);
@@ -320,6 +314,10 @@ impl Fixture {
     fn etc(&self) -> PathBuf {
         self.dir.path().join("etc")
     }
+
+    fn public_key_file(&self) -> PathBuf {
+        self.config.auth_dir.join(format!("{}.pub", uid()))
+    }
 }
 
 fn with_fixture<R>(rig: &Rig, body: impl FnOnce(&Fixture) -> R) -> R {
@@ -333,49 +331,28 @@ fn with_fixture<R>(rig: &Rig, body: impl FnOnce(&Fixture) -> R) -> R {
 
 fn build_fixture(rig: &Rig) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
-    let etc = dir.path().join("etc");
-    for sub in ["cacerts", "crls"] {
-        std::fs::create_dir_all(etc.join(sub)).unwrap();
-    }
+    std::fs::create_dir_all(dir.path().join("etc")).unwrap();
     let mut config = rig.config.clone();
-    config.nss_dir = Some(etc.join("nssdb"));
-    config.mapfile = etc.join("pkcs11-subject-map");
     config.user_name = Some(user_name_for);
     let protectors = Arc::new(Protectors::new(config.clone()).unwrap());
     protectors.provision_protectors(OTHER_UID).unwrap();
     protectors.provision_protectors(uid()).unwrap();
-    protectors.set_pin(uid(), PIN).unwrap();
-    let key = protectors.keyd().key(uid()).unwrap();
 
     let client = compile(rig, dir.path(), "pamtest", CLIENT_C, false);
     let recorder = compile(rig, dir.path(), "recorder", RECORDER_C, true);
-    let pkcs11_conf = etc.join("pam_pkcs11.conf");
-    let text = PAM_PKCS11_CONF
-        .replace(
-            "/usr/lib/openhello/libopenhello_pkcs11.so",
-            wrapper_library().to_str().unwrap(),
-        )
-        .replace(
-            "/usr/lib64/pam_pkcs11",
-            rig.prefix.join("usr/lib64/pam_pkcs11").to_str().unwrap(),
-        )
-        .replace("/etc/openhello", etc.to_str().unwrap());
-    std::fs::write(&pkcs11_conf, text).unwrap();
     Fixture {
         dir,
         config,
         protectors,
-        key,
         client,
         recorder,
-        pkcs11_conf,
     }
 }
 
 struct Stack {
     verify: Verify,
-    pin_prompt: bool,
-    typed: &'static str,
+    strict: bool,
+    root_owned_keys_only: bool,
     token_socket: Option<PathBuf>,
     bus: Option<String>,
     lock_screen: bool,
@@ -389,8 +366,8 @@ impl Stack {
     fn face(verify: Verify) -> Self {
         Self {
             verify,
-            pin_prompt: false,
-            typed: "",
+            strict: true,
+            root_owned_keys_only: false,
             token_socket: None,
             bus: None,
             lock_screen: false,
@@ -406,6 +383,13 @@ impl Stack {
             common: true,
             allowed_services: Some(allowed),
             ..Self::face(verify)
+        }
+    }
+
+    fn lenient(self) -> Self {
+        Self {
+            strict: false,
+            ..self
         }
     }
 
@@ -430,6 +414,10 @@ impl Outcome {
         self.result == 0
     }
 
+    fn refused_outright(&self) -> bool {
+        self.result == PAM_AUTH_ERR && self.reached.is_empty()
+    }
+
     fn password_prompts(&self) -> usize {
         self.prompts
             .iter()
@@ -444,24 +432,19 @@ impl Outcome {
     }
 }
 
-fn service_text(
-    rig: &Rig,
-    stack: &Stack,
-    pkcs11_conf: &Path,
-    hooks_conf: &Path,
-    mapfile: &Path,
-) -> String {
-    let mut lines = Vec::new();
+fn service_text(stack: &Stack, hooks_conf: &Path, auth_dir: &Path, etc: &Path) -> String {
     let text = match (stack.lock_screen, stack.common) {
         (true, _) => LOCKSCREEN_STACK,
         (_, true) => COMMON_STACK,
         _ => STACK,
     };
+    let trust = if stack.root_owned_keys_only {
+        String::new()
+    } else {
+        format!(" trusted_uid={}", unsafe { libc::geteuid() })
+    };
+    let mut lines = Vec::new();
     for line in text.lines() {
-        let line = match line.strip_prefix("#auth") {
-            Some(rest) if stack.pin_prompt => format!("auth{rest}"),
-            _ => line.to_string(),
-        };
         let fields: Vec<&str> = line.split_whitespace().collect();
         if fields.first() != Some(&"auth") {
             continue;
@@ -475,33 +458,25 @@ fn service_text(
             fields[at],
             fields[at + 1..].join(" "),
         );
-        let control = match (module_name, rest.as_str()) {
-            ("pam_openhello.so", "clear") => STRICT_CLEAR.to_string(),
-            ("pam_openhello.so", _) => control.replace("default=ignore", "default=die"),
-            _ => control,
-        };
-        let module = match module_name {
+        let rest = rest.replace("/etc/openhello", etc.to_str().unwrap());
+        let line = match module_name {
             "pam_openhello.so" => {
+                let control = if stack.strict {
+                    STRICT_CONTROL
+                } else {
+                    &control
+                };
                 format!(
-                    "{} config={} mapfile={}",
+                    "auth {control} {} config={} authdir={}{trust} {rest}",
                     pam_module().display(),
                     hooks_conf.display(),
-                    mapfile.display()
+                    auth_dir.display()
                 )
             }
-            "pam_deny.so" => system_module("pam_deny.so"),
-            _ => pam_pkcs11_module(rig),
+            "pam_deny.so" => format!("auth {control} {} {rest}", system_module("pam_deny.so")),
+            other => panic!("unexpected module {other} in a packaged stack"),
         };
-        let rest = rest
-            .replace(
-                "/etc/openhello/pam_pkcs11.conf",
-                pkcs11_conf.to_str().unwrap(),
-            )
-            .replace(
-                "/etc/openhello",
-                pkcs11_conf.parent().unwrap().to_str().unwrap(),
-            );
-        lines.push(format!("auth {control} {module} {rest}"));
+        lines.push(line);
     }
     lines.join("\n") + "\n"
 }
@@ -519,16 +494,6 @@ fn system_module(name: &str) -> String {
     .unwrap_or_else(|| panic!("{name} not found: install the PAM modules to run the PAM tests"))
     .display()
     .to_string()
-}
-
-fn pam_pkcs11_module(rig: &Rig) -> String {
-    let module = rig.prefix.join("usr/lib64/security/pam_pkcs11.so");
-    assert!(
-        module.exists(),
-        "{} not found: the prefix built by scripts/spike-pkcs11.sh must hold pam_pkcs11",
-        module.display()
-    );
-    module.display().to_string()
 }
 
 fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
@@ -550,13 +515,7 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
     .unwrap();
     let services = fixture.dir.path().join("services");
     std::fs::create_dir_all(&services).unwrap();
-    let stack_text = service_text(
-        rig,
-        stack,
-        &fixture.pkcs11_conf,
-        &hooks_conf,
-        &fixture.config.mapfile,
-    );
+    let stack_text = service_text(stack, &hooks_conf, &fixture.config.auth_dir, &etc);
     let recorder = format!(
         "auth required {} path={}\n",
         fixture.recorder.display(),
@@ -605,7 +564,6 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
         .env_remove("TPM2_PKCS11_TCTI")
         .env_remove("TPM2_PKCS11_BACKEND")
         .env_remove("TPM2TOOLS_TCTI")
-        .env("PAMTEST_PIN", stack.typed)
         .output()
         .expect("the compiled PAM client must run");
     let elapsed = started.elapsed();
@@ -767,30 +725,47 @@ fn a_matching_face_authenticates_the_service_without_a_password_prompt() {
 
 // @spec:AC-029
 #[test]
-fn a_different_face_or_another_key_under_the_same_subject_is_not_accepted_and_the_stack_continues()
+fn a_different_face_or_another_key_in_the_public_key_file_is_not_accepted_and_the_stack_continues()
 {
     let rig = rig();
     with_fixture(&rig, |fixture| {
         let services = services(&rig, fixture);
 
-        let other_face = scenario(&rig, fixture, &services, Stack::face(Verify::NoMatch));
+        let other_face = scenario(
+            &rig,
+            fixture,
+            &services,
+            Stack::face(Verify::NoMatch).lenient(),
+        );
         assert!(!other_face.granted());
         assert_eq!(other_face.reached, ["authtok=unset"]);
         assert_eq!(other_face.verify_calls, 1);
         assert_eq!(other_face.password_prompts(), 0);
+        let refused = scenario(&rig, fixture, &services, Stack::face(Verify::NoMatch));
+        assert!(
+            refused.refused_outright(),
+            "a wrong face is a denial, not an ignore"
+        );
 
-        let rogue = RogueCertificate::install(&rig, fixture);
-        let other_key = scenario(&rig, fixture, &services, Stack::face(Verify::Matches));
-        drop(rogue);
+        let genuine = PublicKeyFile::replace_with_key(fixture, 7);
+        let other_key = scenario(
+            &rig,
+            fixture,
+            &services,
+            Stack::face(Verify::Matches).lenient(),
+        );
+        let strict = scenario(&rig, fixture, &services, Stack::face(Verify::Matches));
+        drop(genuine);
         assert!(
             !other_key.granted(),
-            "a certificate for another key must fail the signed challenge"
+            "a public key that is not the token's must fail the signed challenge"
         );
         assert_eq!(other_key.reached, ["authtok=unset"]);
         assert_eq!(other_key.verify_calls, 1);
+        assert!(strict.refused_outright());
 
         let again = scenario(&rig, fixture, &services, Stack::face(Verify::Matches));
-        assert!(again.granted(), "the genuine certificate works again");
+        assert!(again.granted(), "the genuine public key works again");
     });
 }
 
@@ -848,12 +823,12 @@ fn a_missing_keyd_or_openhellod_or_a_silent_camera_falls_through_within_five_sec
 
 // @covers:AC-030-no-credential
 #[test]
-fn a_user_without_an_open_hello_credential_is_ignored_silently_before_any_message_or_socket() {
+fn a_user_without_a_registered_public_key_is_ignored_silently_before_any_message_or_socket() {
     let rig = rig();
     with_fixture(&rig, |fixture| {
         let services = services(&rig, fixture);
 
-        let stranger = scenario(
+        let unknown_user = scenario(
             &rig,
             fixture,
             &services,
@@ -862,51 +837,108 @@ fn a_user_without_an_open_hello_credential_is_ignored_silently_before_any_messag
                 ..Stack::face(Verify::Matches)
             },
         );
-        assert!(!stranger.granted());
-        assert_eq!(stranger.reached, ["authtok=unset"]);
-        assert!(stranger.prompts.is_empty(), "{:?}", stranger.prompts);
-        assert_eq!(stranger.verify_calls, 0);
+        let no_key_file = scenario(
+            &rig,
+            fixture,
+            &services,
+            Stack {
+                user: Some("root"),
+                ..Stack::face(Verify::Matches)
+            },
+        );
+        for stranger in [&unknown_user, &no_key_file] {
+            assert!(!stranger.granted());
+            assert_eq!(stranger.reached, ["authtok=unset"]);
+            assert!(stranger.prompts.is_empty(), "{:?}", stranger.prompts);
+            assert_eq!(stranger.verify_calls, 0);
+        }
 
         let enrolled = scenario(&rig, fixture, &services, Stack::face(Verify::Matches));
         assert!(enrolled.granted());
     });
 }
 
+// @covers:AC-030-untrusted-public-key
 #[test]
-fn the_optional_pin_line_accepts_the_pin_after_a_face_miss_and_a_wrong_pin_falls_through() {
+fn a_public_key_file_not_owned_by_root_or_tampered_with_is_ignored_before_the_camera() {
     let rig = rig();
     with_fixture(&rig, |fixture| {
         let services = services(&rig, fixture);
 
-        let correct = scenario(
+        let not_root = scenario(
             &rig,
             fixture,
             &services,
             Stack {
-                pin_prompt: true,
-                typed: PIN,
-                ..Stack::face(Verify::NoMatch)
+                root_owned_keys_only: true,
+                ..Stack::face(Verify::Matches)
             },
         );
-        assert!(correct.granted(), "{:?}", correct.prompts);
-        assert_eq!(correct.password_prompts(), 1);
-        assert!(correct.reached.is_empty());
-        assert_eq!(correct.verify_calls, 1);
+        let genuine = PublicKeyFile::corrupt(fixture);
+        let tampered = scenario(&rig, fixture, &services, Stack::face(Verify::Matches));
+        drop(genuine);
+        for ignored in [&not_root, &tampered] {
+            assert!(!ignored.granted());
+            assert_eq!(ignored.reached, ["authtok=unset"]);
+            assert!(ignored.prompts.is_empty(), "{:?}", ignored.prompts);
+            assert_eq!(ignored.verify_calls, 0, "the camera must not be touched");
+        }
 
-        let wrong = scenario(
-            &rig,
-            fixture,
-            &services,
-            Stack {
-                pin_prompt: true,
-                typed: "000000",
-                ..Stack::face(Verify::NoMatch)
-            },
-        );
-        assert!(!wrong.granted());
-        assert_eq!(wrong.reached, ["authtok=unset"]);
-        assert_eq!(rig.lockout_counter(), 1);
-        rig.clear_lockout();
+        let restored = scenario(&rig, fixture, &services, Stack::face(Verify::Matches));
+        assert!(restored.granted());
+    });
+}
+
+// @covers:AC-029-signature-binding
+#[test]
+fn a_valid_signature_of_another_challenge_or_service_or_session_is_not_accepted() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        let relay = TokenRelay::start(&services.token_path);
+        let through = |mode: Relay| {
+            relay.set(mode);
+            scenario(
+                &rig,
+                fixture,
+                &services,
+                Stack {
+                    token_socket: Some(relay.path.clone()),
+                    ..Stack::face(Verify::Matches)
+                },
+            )
+        };
+
+        let relayed = through(Relay::Pass);
+        assert!(relayed.granted(), "the relay alone must not break signing");
+        for forged in [
+            through(Relay::Replay),
+            through(Relay::OtherService("su")),
+            through(Relay::FlippedChallenge),
+        ] {
+            assert!(
+                forged.refused_outright(),
+                "{:?} {:?}",
+                forged.result,
+                forged.reached
+            );
+            assert_eq!(forged.verify_calls, 1);
+        }
+        assert!(through(Relay::Pass).granted());
+    });
+}
+
+// @covers:AC-029-no-grant
+#[test]
+fn a_face_match_without_a_grant_at_keyd_is_refused_even_if_openhellod_says_yes() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+
+        let outcome = scenario(&rig, fixture, &services, Stack::face(Verify::NoTicket));
+
+        assert!(outcome.refused_outright(), "{:?}", outcome.reached);
+        assert_eq!(outcome.verify_calls, 1);
     });
 }
 
@@ -938,7 +970,7 @@ fn the_generic_lock_screen_service_authenticates_a_face_without_privilege_and_fa
             &rig,
             fixture,
             &services,
-            Stack::lock_screen(Verify::NoMatch),
+            Stack::lock_screen(Verify::NoMatch).lenient(),
         );
         assert!(!miss.granted());
         assert_eq!(miss.reached, ["authtok=unset"]);
@@ -1001,166 +1033,142 @@ fn the_common_stack_placement_acts_only_on_local_allowlisted_sessions() {
     });
 }
 
-struct RogueCertificate<'a> {
-    rig: &'a Rig,
-    fixture: &'a Fixture,
-    genuine_pem: String,
+struct PublicKeyFile {
+    path: PathBuf,
+    genuine: String,
 }
 
-impl<'a> RogueCertificate<'a> {
-    fn install(rig: &'a Rig, fixture: &'a Fixture) -> Self {
-        let genuine_der = fixture.protectors.keyd().certificate(uid()).unwrap();
-        let work = fixture.dir.path();
-        let key = work.join("rogue.key");
-        let pem = work.join("rogue.pem");
-        let genuine = work.join("genuine.pem");
-        let conf = work.join("rogue.cnf");
-        std::fs::write(
-            &conf,
-            "[req]\ndistinguished_name=dn\nprompt=no\nx509_extensions=plain\n[dn]\nCN=x\n[plain]\nsubjectKeyIdentifier=none\nauthorityKeyIdentifier=none\n",
-        )
-        .unwrap();
-        run_tool(
-            "openssl",
-            &[
-                "ecparam",
-                "-name",
-                "prime256v1",
-                "-genkey",
-                "-noout",
-                "-out",
-                key.to_str().unwrap(),
-            ],
-        );
-        let subject = format!("/CN=openhello-uid-{}", uid());
-        run_tool(
-            "openssl",
-            &[
-                "req",
-                "-x509",
-                "-new",
-                "-key",
-                key.to_str().unwrap(),
-                "-subj",
-                &subject,
-                "-days",
-                "3650",
-                "-config",
-                conf.to_str().unwrap(),
-                "-out",
-                pem.to_str().unwrap(),
-            ],
-        );
-        let genuine_pem = pem_of(&genuine_der);
-        std::fs::write(&genuine, &genuine_pem).unwrap();
-
-        let spec = format!("sql:{}", fixture.config.nss_dir.as_ref().unwrap().display());
-        let certutil = rig.prefix.join("usr/bin/certutil");
-        let lib64 = rig.prefix.join("usr/lib64");
-        let status = Command::new(&certutil)
-            .args(["-A", "-d", &spec, "-n", "rogue", "-t", "CT,C,C", "-i"])
-            .arg(&pem)
-            .env("LD_LIBRARY_PATH", &lib64)
-            .status()
-            .expect("certutil from the prefix must run");
-        assert!(status.success(), "importing the rogue certificate failed");
-
-        let rogue = Self {
-            rig,
+impl PublicKeyFile {
+    fn replace_with_key(fixture: &Fixture, seed: u8) -> Self {
+        let key = p256::ecdsa::SigningKey::from_slice(&[seed; 32]).unwrap();
+        let point = key.verifying_key().to_encoded_point(false);
+        Self::overwrite(
             fixture,
-            genuine_pem,
-        };
-        rogue.swap_token_certificate(&pem);
-        rogue
-    }
-
-    fn ptool(&self, args: &[&str]) -> String {
-        let site: Vec<String> = ["usr/lib", "usr/lib64"]
-            .iter()
-            .map(|d| format!("{}/{d}/python3.13/site-packages", self.rig.prefix.display()))
-            .collect();
-        run_env(
-            Command::new("python3")
-                .arg(self.rig.prefix.join("usr/bin/tpm2_ptool"))
-                .args(args)
-                .env("PYTHONPATH", site.join(":"))
-                .env("PYTHONWARNINGS", "ignore")
-                .env("LD_LIBRARY_PATH", self.rig.prefix.join("usr/lib64"))
-                .env("TPM2_PKCS11_STORE", &self.fixture.config.store_dir)
-                .env("TPM2TOOLS_TCTI", self.fixture.config.tcti.as_ref().unwrap())
-                .env("DBUS_SESSION_BUS_ADDRESS", &self.rig.config.env[0].1),
+            &openhello_auth_proto::encode_public_key(point.as_bytes()).unwrap(),
         )
     }
 
-    fn certificate_object(&self) -> String {
-        let label = format!("openhello-{}", uid());
-        let listing = self.ptool(&["listobjects", "--label", &label]);
-        let mut in_certificate = false;
-        for line in listing.lines() {
-            let line = line.trim().trim_start_matches("- ");
-            if line.starts_with("CKA_CLASS:") {
-                in_certificate = line.contains("CKO_CERTIFICATE");
+    fn corrupt(fixture: &Fixture) -> Self {
+        let path = fixture.public_key_file();
+        let mut text = std::fs::read_to_string(&path).unwrap();
+        let last = text.trim_end().len() - 1;
+        let flipped = if text.as_bytes()[last] == b'0' {
+            "1"
+        } else {
+            "0"
+        };
+        text.replace_range(last..=last, flipped);
+        Self::overwrite(fixture, &text)
+    }
+
+    fn overwrite(fixture: &Fixture, text: &str) -> Self {
+        let path = fixture.public_key_file();
+        let genuine = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, text).unwrap();
+        Self { path, genuine }
+    }
+}
+
+impl Drop for PublicKeyFile {
+    fn drop(&mut self) {
+        std::fs::write(&self.path, &self.genuine).unwrap();
+    }
+}
+
+#[derive(Clone)]
+enum Relay {
+    Pass,
+    Replay,
+    OtherService(&'static str),
+    FlippedChallenge,
+}
+
+struct TokenRelay {
+    path: PathBuf,
+    mode: Arc<Mutex<Relay>>,
+    _dir: tempfile::TempDir,
+}
+
+impl TokenRelay {
+    fn start(keyd: &Path) -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("relay.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let mode = Arc::new(Mutex::new(Relay::Pass));
+        let recorded = Arc::new(Mutex::new(None::<Vec<u8>>));
+        let (keyd, shared_mode) = (keyd.to_path_buf(), mode.clone());
+        std::thread::spawn(move || {
+            for client in listener.incoming().flatten() {
+                relay_connection(client, &keyd, &shared_mode, &recorded);
             }
-            if in_certificate {
-                if let Some(id) = line.strip_prefix("id: ") {
-                    return id.trim().to_string();
-                }
+        });
+        Self {
+            path,
+            mode,
+            _dir: dir,
+        }
+    }
+
+    fn set(&self, mode: Relay) {
+        *self.mode.lock().unwrap_or_else(PoisonError::into_inner) = mode;
+    }
+}
+
+fn relay_connection(
+    mut client: UnixStream,
+    keyd: &Path,
+    mode: &Mutex<Relay>,
+    recorded: &Mutex<Option<Vec<u8>>>,
+) {
+    let Ok(mut upstream) = UnixStream::connect(keyd) else {
+        return;
+    };
+    while let Some((op, mut payload)) = read_frame(&mut client) {
+        let mode = mode.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        if op == AUTH_OP {
+            mutate(&mode, &mut payload);
+        }
+        if write_frame(&mut upstream, op, &payload).is_err() {
+            return;
+        }
+        let Some((status, mut body)) = read_frame(&mut upstream) else {
+            return;
+        };
+        if op == AUTH_OP && status == 0 {
+            let mut recorded = recorded.lock().unwrap_or_else(PoisonError::into_inner);
+            match (&mode, recorded.as_ref()) {
+                (Relay::Replay, Some(old)) => body = old.clone(),
+                _ => *recorded = Some(body.clone()),
             }
         }
-        panic!("no certificate object in the token listing:\n{listing}");
-    }
-
-    fn swap_token_certificate(&self, pem: &Path) {
-        let object = self.certificate_object();
-        self.ptool(&["objdel", &object]);
-        self.ptool(&[
-            "addcert",
-            "--label",
-            &format!("openhello-{}", uid()),
-            "--key-id",
-            &self.fixture_key().handle,
-            pem.to_str().unwrap(),
-        ]);
-    }
-
-    fn fixture_key(&self) -> &KeyInfo {
-        &self.fixture.key
+        if write_frame(&mut client, status, &body).is_err() {
+            return;
+        }
     }
 }
 
-impl Drop for RogueCertificate<'_> {
-    fn drop(&mut self) {
-        let genuine = self.fixture.dir.path().join("genuine.pem");
-        std::fs::write(&genuine, &self.genuine_pem).unwrap();
-        self.swap_token_certificate(&genuine);
-        let spec = format!(
-            "sql:{}",
-            self.fixture.config.nss_dir.as_ref().unwrap().display()
-        );
-        let _ = Command::new(self.rig.prefix.join("usr/bin/certutil"))
-            .args(["-D", "-d", &spec, "-n", "rogue"])
-            .env("LD_LIBRARY_PATH", self.rig.prefix.join("usr/lib64"))
-            .status();
+fn mutate(mode: &Relay, payload: &mut Vec<u8>) {
+    match mode {
+        Relay::OtherService(service) => {
+            let challenge: [u8; 32] = payload[payload.len() - 32..].try_into().unwrap();
+            *payload = openhello_auth_proto::request_payload(service, &challenge).unwrap();
+        }
+        Relay::FlippedChallenge => *payload.last_mut().unwrap() ^= 1,
+        Relay::Pass | Relay::Replay => {}
     }
 }
 
-fn run_env(command: &mut Command) -> String {
-    let output = command.output().expect("python3 must be installed");
-    assert!(
-        output.status.success(),
-        "tool failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8_lossy(&output.stdout).into_owned()
+fn read_frame(stream: &mut UnixStream) -> Option<(u8, Vec<u8>)> {
+    let mut header = [0u8; 3];
+    stream.read_exact(&mut header).ok()?;
+    let mut body = vec![0u8; usize::from(u16::from_be_bytes([header[1], header[2]]))];
+    stream.read_exact(&mut body).ok()?;
+    Some((header[0], body))
 }
 
-fn pem_of(der: &[u8]) -> String {
-    let mut child = Command::new("openssl")
-        .args(["x509", "-inform", "DER", "-outform", "PEM"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("openssl must be installed to run the PAM tests");
-    child.stdin.take().unwrap().write_all(der).unwrap();
-    String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap()
+fn write_frame(stream: &mut UnixStream, tag: u8, body: &[u8]) -> std::io::Result<()> {
+    let mut frame = vec![tag];
+    frame.extend_from_slice(&(body.len() as u16).to_be_bytes());
+    frame.extend_from_slice(body);
+    stream.write_all(&frame)
 }

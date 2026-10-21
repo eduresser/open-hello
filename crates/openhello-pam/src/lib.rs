@@ -1,30 +1,35 @@
 #![allow(non_snake_case, clippy::missing_safety_doc)]
 
-use std::ffi::{c_char, c_int, c_void, CStr, CString};
+use std::ffi::{c_char, c_int, c_void, CStr};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+
+mod challenge;
 
 // Shared source, not a dependency: depending on the wrapper crate would export its PKCS#11 symbols from this module.
 #[allow(dead_code)]
 #[path = "../../openhello-pkcs11/src/config.rs"]
 mod config;
 
-use config::{Settings, PLACEHOLDER_PIN};
+use challenge::SignError;
+use config::Settings;
 
 const PAM_SUCCESS: c_int = 0;
+const PAM_AUTH_ERR: c_int = 7;
 const PAM_IGNORE: c_int = 25;
 const PAM_SERVICE: c_int = 1;
 const PAM_TTY: c_int = 3;
 const PAM_RHOST: c_int = 4;
 const PAM_USER: c_int = 2;
 const PAM_CONV: c_int = 5;
-const PAM_AUTHTOK: c_int = 6;
 const PAM_TEXT_INFO: c_int = 4;
 const BUDGET: Duration = Duration::from_secs(5);
+const VERIFY_TIMEOUT: Duration = Duration::from_secs(4);
 const BUS_NAME: &str = "io.openhello.Biometrics1";
-const DEFAULT_MAPFILE: &str = "/etc/openhello/pkcs11-subject-map";
-const MAPPING_SEPARATOR: &str = " -> ";
+const OBJECT_PATH: &str = "/io/openhello/Biometrics1";
+const DEFAULT_AUTH_DIR: &str = "/etc/openhello/auth";
+const ROOT_UID: u32 = 0;
 const LOOKING_FOR_FACE: &CStr = c"Looking for your face...";
 
 #[repr(C)]
@@ -54,10 +59,8 @@ struct PamConv {
 
 extern "C" {
     fn pam_get_item(pamh: *const c_void, item: c_int, value: *mut *const c_void) -> c_int;
-    fn pam_set_item(pamh: *mut c_void, item: c_int, value: *const c_void) -> c_int;
 }
 
-// Success only means "placeholder set"; the stack maps it to ignore so this module can never grant access, and ignore skips pam_pkcs11, which crashes without a first password.
 #[no_mangle]
 pub unsafe extern "C" fn pam_sm_authenticate(
     pamh: *mut c_void,
@@ -66,17 +69,23 @@ pub unsafe extern "C" fn pam_sm_authenticate(
     argv: *const *const c_char,
 ) -> c_int {
     let args = arguments(argc, argv);
-    if args.iter().any(|a| a == "clear") {
-        pam_set_item(pamh, PAM_AUTHTOK, std::ptr::null());
-        return PAM_IGNORE;
-    }
     let started = Instant::now();
     if !local_session_allowed(pamh, &args) {
         return PAM_IGNORE;
     }
-    if !has_credential(pamh, &args) {
+    let Some(user) = item_text(pamh, PAM_USER).filter(|u| !u.is_empty()) else {
+        return PAM_IGNORE;
+    };
+    let Some(uid) = uid_of(&user) else {
+        return PAM_IGNORE;
+    };
+    let service = item_text(pamh, PAM_SERVICE).unwrap_or_default();
+    if !openhello_auth_proto::valid_service(&service) {
         return PAM_IGNORE;
     }
+    let Some(key) = registered_key(&args, uid) else {
+        return PAM_IGNORE;
+    };
     let config = args
         .iter()
         .find_map(|a| a.strip_prefix("config=").map(PathBuf::from))
@@ -84,14 +93,92 @@ pub unsafe extern "C" fn pam_sm_authenticate(
     let Ok(settings) = config::current(&config::process_env, &config) else {
         return PAM_IGNORE;
     };
+    let Some(socket) = settings.token_socket.clone() else {
+        return PAM_IGNORE;
+    };
     if !service_available(&settings, started) {
         return PAM_IGNORE;
     }
+    let Some(challenge) = challenge::random_challenge() else {
+        return PAM_IGNORE;
+    };
     tell(pamh, LOOKING_FOR_FACE);
-    if let Ok(placeholder) = CString::new(PLACEHOLDER_PIN) {
-        pam_set_item(pamh, PAM_AUTHTOK, placeholder.as_ptr().cast());
+    let remaining = || BUDGET.saturating_sub(started.elapsed());
+    match verify_face(
+        uid,
+        settings.bus_address.clone(),
+        remaining().min(VERIFY_TIMEOUT),
+    ) {
+        Some(true) => {}
+        Some(false) => return PAM_AUTH_ERR,
+        None => return PAM_IGNORE,
     }
-    PAM_SUCCESS
+    match challenge::request_signature(&socket, uid, &service, &challenge, remaining()) {
+        Ok(signature)
+            if challenge::signature_is_valid(&key, uid, &service, &challenge, &signature) =>
+        {
+            PAM_SUCCESS
+        }
+        Ok(_) | Err(SignError::Refused) => PAM_AUTH_ERR,
+        Err(SignError::Unavailable) => PAM_IGNORE,
+    }
+}
+
+fn uid_of(user: &str) -> Option<u32> {
+    let name = std::ffi::CString::new(user).ok()?;
+    let mut buffer = vec![0u8; 4096];
+    let mut entry: libc::passwd = unsafe { std::mem::zeroed() };
+    let mut found: *mut libc::passwd = std::ptr::null_mut();
+    let rc = unsafe {
+        libc::getpwnam_r(
+            name.as_ptr(),
+            &mut entry,
+            buffer.as_mut_ptr().cast(),
+            buffer.len(),
+            &mut found,
+        )
+    };
+    (rc == 0 && !found.is_null()).then_some(entry.pw_uid)
+}
+
+// trusted_uid exists for unprivileged test runs; a privileged caller always requires root.
+fn registered_key(args: &[String], uid: u32) -> Option<p256::ecdsa::VerifyingKey> {
+    let dir = args
+        .iter()
+        .find_map(|a| a.strip_prefix("authdir=").map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_AUTH_DIR));
+    let (ruid, euid) = unsafe { (libc::getuid(), libc::geteuid()) };
+    let owner = if config::is_privileged(ruid, euid) {
+        ROOT_UID
+    } else {
+        args.iter()
+            .find_map(|a| a.strip_prefix("trusted_uid=")?.parse().ok())
+            .unwrap_or(ROOT_UID)
+    };
+    challenge::load_public_key(&dir, uid, owner)
+}
+
+fn verify_face(uid: u32, bus_address: Option<String>, timeout: Duration) -> Option<bool> {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(call_verify(uid, bus_address.as_deref()));
+    });
+    receiver.recv_timeout(timeout).ok().flatten()
+}
+
+fn call_verify(uid: u32, bus_address: Option<&str>) -> Option<bool> {
+    let connection = connect_bus(bus_address)?;
+    let proxy = zbus::blocking::Proxy::new(&connection, BUS_NAME, OBJECT_PATH, BUS_NAME).ok()?;
+    proxy.call("Verify", &(uid,)).ok()
+}
+
+fn connect_bus(address: Option<&str>) -> Option<zbus::blocking::Connection> {
+    match address {
+        Some(address) => zbus::blocking::connection::Builder::address(address)
+            .and_then(|builder| builder.build())
+            .ok(),
+        None => zbus::blocking::Connection::system().ok(),
+    }
 }
 
 unsafe fn item_text(pamh: *mut c_void, item: c_int) -> Option<String> {
@@ -103,36 +190,6 @@ unsafe fn item_text(pamh: *mut c_void, item: c_int) -> Option<String> {
         .to_str()
         .ok()
         .map(str::to_string)
-}
-
-// PAM_USER is read as an item: pam_get_user would prompt for a name through the conversation.
-unsafe fn has_credential(pamh: *mut c_void, args: &[String]) -> bool {
-    let Some(user) = item_text(pamh, PAM_USER).filter(|u| !u.is_empty()) else {
-        return false;
-    };
-    let path = args
-        .iter()
-        .find_map(|a| a.strip_prefix("mapfile=").map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_MAPFILE));
-    let (ruid, euid) = (libc::getuid(), libc::geteuid());
-    let text = if config::is_privileged(ruid, euid) {
-        config::read_trusted(&path, 0).ok()
-    } else {
-        std::fs::read_to_string(&path).ok()
-    };
-    text.is_some_and(|t| maps_user(&t, &user))
-}
-
-fn maps_user(mapfile: &str, user: &str) -> bool {
-    mapfile.lines().any(|line| {
-        line.split_once(MAPPING_SEPARATOR)
-            .is_some_and(|(subject, mapped)| {
-                subject
-                    .trim_start_matches('/')
-                    .starts_with("CN=openhello-uid-")
-                    && mapped.trim() == user
-            })
-    })
 }
 
 unsafe fn local_session_allowed(pamh: *mut c_void, args: &[String]) -> bool {
@@ -298,7 +355,7 @@ unsafe fn tell(pamh: *mut c_void, text: &CStr) {
 
 #[cfg(test)]
 mod tests {
-    use super::{maps_user, permitted};
+    use super::permitted;
 
     #[test]
     fn remote_or_headless_sessions_are_ignored_before_the_allowlist() {
@@ -308,12 +365,8 @@ mod tests {
     }
 
     #[test]
-    fn only_users_with_an_open_hello_line_are_mapped() {
-        let map = "CN=openhello-uid-1000 -> ana\nCN=other -> bia\nbroken\n";
-        assert!(maps_user(map, "ana"));
-        assert!(!maps_user(map, "bia"));
-        assert!(!maps_user(map, "an"));
-        assert!(!maps_user("", "ana"));
-        assert!(maps_user("/CN=openhello-uid-1000 -> ana\n", "ana"));
+    fn unknown_users_have_no_uid() {
+        assert!(super::uid_of("root") == Some(0));
+        assert!(super::uid_of("openhello-no-such-user").is_none());
     }
 }

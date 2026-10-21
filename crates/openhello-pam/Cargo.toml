@@ -10,4 +10,9 @@ crate-type = ["cdylib"]
 
 [dependencies]
 libc = "0.2"
+openhello-auth-proto = { path = "../openhello-auth-proto" }
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
 zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
+
+[dev-dependencies]
+tempfile = "3"
