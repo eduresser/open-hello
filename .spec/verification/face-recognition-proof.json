@@ -1,7 +1,7 @@
 {
   "feature": "face-recognition-proof",
-  "timestamp": "2026-10-21T00:34:18.080Z",
-  "gitRev": "b2e2a0e",
+  "timestamp": "2026-10-21T01:16:18.873Z",
+  "gitRev": "9b290e9",
   "command": "cargo test",
   "reporter": "exitcode",
   "exitCode": 0,
@@ -58,11 +58,6 @@
       "method": "exitcode"
     },
     "AC-011": {
-      "status": "pass",
-      "testName": null,
-      "method": "exitcode"
-    },
-    "AC-012": {
       "status": "pass",
       "testName": null,
       "method": "exitcode"
