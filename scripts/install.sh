@@ -89,8 +89,14 @@ install_runtime_and_models() {
   rm -rf "$work"
 }
 
+single_subdirectory() {
+  local entries
+  entries="$(find "$1" -mindepth 1 -maxdepth 1)"
+  if [ "$(printf '%s\n' "$entries" | wc -l)" = 1 ] && [ -d "$entries" ]; then printf '%s\n' "$entries"; else printf '%s\n' "$1"; fi
+}
+
 calibrate() {
-  local images="$CALIBRATION_IMAGES" work=""
+  local images="$CALIBRATION_IMAGES" work="" status=0
   if [ -z "$images" ] && [ -n "$CALIBRATION_URL" ]; then
     work="$(mktemp -d)"
     run curl -fL --retry 3 -o "$work/dataset.archive" "$CALIBRATION_URL"
@@ -99,11 +105,13 @@ calibrate() {
       *) run mkdir -p "$work/images"; run tar -xf "$work/dataset.archive" -C "$work/images" ;;
     esac
     images="$work/images"
+    [ "$DRY_RUN" = 1 ] || images="$(single_subdirectory "$images")"
   fi
   [ -n "$images" ] || return 1
   ORT_DYLIB_PATH="$LIB_DIR/libonnxruntime.so" run "$BIN_DIR/openhello-calibrate" \
-    --models-dir "$MODELS_DIR" --images-dir "$images" --out "$CALIBRATION_FILE"
+    --models-dir "$MODELS_DIR" --images-dir "$images" --out "$CALIBRATION_FILE" || status=$?
   [ -z "$work" ] || rm -rf "$work"
+  return "$status"
 }
 
 [ "$INSTALL_DEPS" = 1 ] && install_deps
@@ -224,6 +232,7 @@ run systemctl reload dbus 2>/dev/null || true
 run systemctl enable --now openhello-keyd 2>/dev/null || true
 
 if [ "$CALIBRATED" = 1 ]; then
+  run systemctl reset-failed openhellod 2>/dev/null || true
   run systemctl enable --now openhellod 2>/dev/null || true
   echo
   echo "open-hello installed and started. Check OPENHELLO_DEVICE (the IR camera node) in $CONF_DIR/openhello.env"
