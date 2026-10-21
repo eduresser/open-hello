@@ -7,6 +7,7 @@ use openhellod::logging::Logger;
 use openhellod::dbus_service::{Authorizer, RootOnlyAuthorizer, Service, BUS_NAME, OBJECT_PATH};
 use openhellod::plugin_loader::{EnginePlugin, SensorPlugin, StoragePlugin};
 use openhellod::polkit::{DbusPolkit, PolkitAuthorizer};
+use openhellod::ticket_client::TicketClient;
 
 const USAGE: &str = "usage: openhellod --sensor-lib PATH --engine-lib PATH --storage-lib PATH --device /dev/videoN \
 --state-dir DIR --engine-config FILE.json [--bus system|session] [--auth polkit|root-only] [--log-level error|warn|info|debug|trace] [--target-far 1e-5]";
@@ -19,7 +20,8 @@ fn run(config: Config) -> Result<(), String> {
     let engine = EnginePlugin::load(&config.engine_lib, &engine_json).map_err(|e| e.to_string())?;
     let storage = StoragePlugin::load(&config.storage_lib, state_dir).map_err(|e| e.to_string())?;
     let core = Biometrics::new(Box::new(sensor), Box::new(engine), Box::new(storage), config.target_far)
-        .with_logger(Logger::stderr(config.log_level));
+        .with_logger(Logger::stderr(config.log_level))
+        .with_ticket_client(TicketClient::from_env());
     let authorizer: Arc<dyn Authorizer> = match config.auth {
         AuthMode::Polkit => Arc::new(PolkitAuthorizer::new(Arc::new(DbusPolkit))),
         AuthMode::RootOnly => Arc::new(RootOnlyAuthorizer),
