@@ -954,7 +954,7 @@ fn the_built_module_declares_libpam_as_a_needed_library() {
     );
 }
 
-// @covers:AC-028-pam-path
+// @spec:AC-028
 #[test]
 fn the_generic_lock_screen_service_authenticates_a_face_without_privilege_and_falls_back_on_a_miss()
 {

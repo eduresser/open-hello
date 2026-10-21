@@ -108,11 +108,11 @@ As a laptop owner on any Linux distribution and desktop, I want `sudo` and the l
 - **When** the user runs `sudo` and looks at the camera
 - **Then** authentication succeeds without a password, by verifying a challenge signed with the TPM key
 
-#### AC-028 — A matching face unlocks a PAM-based lock screen
+#### AC-028 — A matching face passes a lock screen's PAM authentication without a password
 
-- **Given** an enrolled and provisioned user on a locked graphical session whose screen locker authenticates through PAM (first verified on KDE Plasma)
+- **Given** an enrolled and provisioned user on a locked graphical session whose screen locker authenticates through PAM, with the open-hello module enabled in that locker's PAM service
 - **When** the user looks at the camera
-- **Then** the session unlocks through the same PAM path, with no desktop-specific code in open-hello
+- **Then** the locker's own PAM service authenticates the face with no password, as the unprivileged user and through the same path as `sudo`, with no desktop-specific code in open-hello; a miss, or an unavailable daemon, falls through to the password; completing the unlock afterwards is the locker's own behaviour (KDE shows one confirmation button, verified on Plasma 6.8)
 
 #### AC-029 — A different face is never accepted and falls through to the password
 

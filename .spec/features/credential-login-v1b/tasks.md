@@ -194,8 +194,7 @@
 - Notes: lowest priority and optional. One distribution-neutral tarball plus a single nfpm definition that emits deb and rpm; the only per-family content is the dependency names, kept as data in the metadata, never as code. Post-install scripts call the same neutral steps as the installer and `openhello-cli pam enable`; models and ONNX Runtime stay outside the package, fetched and verified. CI in containers (Ubuntu LTS, Fedora, openSUSE Tumbleweed) with systemd, pam_wrapper and swtpm is a follow-up.
 
 
-## T-040 — Lock screens use the same rule; no desktop adapter [pending]
-
+## T-040 — Lock screens use the same rule; no desktop adapter [done]
 - Refs: AC-028
 - Files: .spec/features/credential-login-v1b/lockscreen.md
 - Model: claude-sonnet-5
@@ -209,7 +208,7 @@
 - Effort: medium
 - Notes: found on the KDE neon VM (2026-10-21) after upgrading: `/etc/openhello/auth` did not exist, because the user was provisioned before T-034, so `pam_openhello` found no credential and stayed silent (sudo and the KDE lock screen asked for the password). A repeated Provision cannot repair it (the key already exists). At start, and after each Provision, keyd reads the public key of every token `openhello-<uid>` (a public object, no login) and writes `<uid>.pub` when it is missing or differs, with the same format, owner, mode and atomic write as T-034; a token whose key cannot be read is skipped with a generic log line and never blocks startup. Purge still removes the file. The token's public key is authoritative.
 
-## T-042 — pam_openhello: logs the reason it stays silent, detects local sessions robustly, links libpam [in-progress]
+## T-042 — pam_openhello: logs the reason it stays silent, detects local sessions robustly, links libpam [done]
 - Refs: AC-028, AC-030
 - Files: crates/openhello-pam/src/lib.rs, crates/openhello-pam/src/session.rs, crates/openhello-pam/build.rs, crates/openhello-pam/Cargo.toml, crates/openhello-cli/tests/pam_sudo.rs
 - Model: claude-sonnet-5
