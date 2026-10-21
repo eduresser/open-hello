@@ -30,6 +30,7 @@ STATE_DIR=/var/lib/openhello
 UNIT_DIR=/usr/lib/systemd/system
 DBUS_POLICY_DIR=/usr/share/dbus-1/system.d
 POLKIT_ACTIONS_DIR=/usr/share/polkit-1/actions
+LEGACY_UNIT_DIR=/etc/systemd/system
 LDCONFIG="$(command -v ldconfig || echo /sbin/ldconfig)"
 CALIBRATION_FILE="$STATE_DIR/calibration.bin"
 
@@ -161,6 +162,14 @@ install_unit() {
   chmod 0644 "$UNIT_DIR/$1"
 }
 
+remove_legacy_units() {
+  local unit file
+  for unit in openhellod.service openhello-keyd.service; do
+    file="$LEGACY_UNIT_DIR/$unit"
+    if [ -f "$file" ] && [ ! -L "$file" ] && grep -q '^Description=open-hello' "$file"; then run rm -f "$file"; fi
+  done
+}
+
 install_key_daemon() {
   run install -m 0755 "$T/openhello-keyd" "$BIN_DIR/openhello-keyd"
   run install -m 0644 "$T/libopenhello_pkcs11.so" "$LIB_DIR/libopenhello_pkcs11.so"
@@ -226,6 +235,7 @@ fi
 install_key_daemon
 install_pam_module
 
+remove_legacy_units
 run systemctl daemon-reload
 run systemctl reload dbus 2>/dev/null || true
 run systemctl enable openhello-keyd 2>/dev/null || true
@@ -237,3 +247,4 @@ run systemctl restart openhellod 2>/dev/null || true
 echo
 echo "open-hello installed and started. Check OPENHELLO_DEVICE (the IR camera node) in $CONF_DIR/openhello.env"
 echo "PAM module installed at $PAM_MODULE_DIR/pam_openhello.so; enable it per service with: openhello-cli pam enable sudo"
+[ ! -d "$CONF_DIR/nssdb" ] || echo "$CONF_DIR/nssdb was created by an older installer and is no longer used; it can be deleted"
