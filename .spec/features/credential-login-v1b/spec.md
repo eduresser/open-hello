@@ -168,6 +168,28 @@ out of logs, so that another process cannot plant, change or leak my credential.
 - **When** a full provision, face unlock, PIN unlock, recovery and purge cycle runs
 - **Then** no log line contains a PIN, a Protector secret, a ticket value or a recovery code
 
+### US-016 — FAR calibration shipped with the application
+
+As a person installing open-hello, I want the false-accept calibration to ship inside the application, so that I need no photo dataset to install it and every machine decides with the same measured thresholds.
+
+#### AC-036 — The engine starts without any calibration file
+
+- **Given** a configuration with no calibration file path and no file at the default location
+- **When** the face engine is loaded
+- **Then** it loads, using the calibration table embedded in the binary, and a `Verify` at the default target false-accept rate (1e-5) uses the embedded table's threshold
+
+#### AC-037 — A calibration file overrides the embedded table
+
+- **Given** a valid calibration file at the configured path whose thresholds differ from the embedded table
+- **When** the face engine is loaded and matches a face
+- **Then** the decision threshold comes from the file, not from the embedded table
+
+#### AC-038 — A broken calibration file is an explicit error, never a silent fallback
+
+- **Given** a configured calibration file that is truncated, has the wrong format marker or holds inconsistent values
+- **When** the face engine is loaded
+- **Then** loading fails with an explicit calibration error and the embedded table is not used
+
 ## Out of scope
 
 - GDM/SDDM graphical login and its UX (roadmap v2).
@@ -188,6 +210,7 @@ out of logs, so that another process cannot plant, change or leak my credential.
 | ASM-010 | `swtpm` supports ECC P-256 and the dictionary-attack lockout well enough to run the key and lockout tests in CI. | confirmed | Proved (spike.md): swtpm has P-256 and the dictionary-attack lockout; three wrong auths give `inLockout=1`, the right password is refused (0x921), `--clear-lockout` recovers. Needs a recovery time above zero and `tpm2-abrmd`. The lockout counter is global to the TPM, not per key: tests and T-017 must set `max-tries` and `recovery-time`. |
 | ASM-011 | A PAM-based screen locker can run the open-hello PAM module non-interactively through its own PAM service, on any distro and desktop with an IR camera. | open | open-hello ships a generic lock-screen PAM service; a manual test on this machine's KDE Plasma is the first check, and other lockers (GNOME, swaylock, i3lock, LightDM) are listed as unverified. AC-028 stays unproven until the manual test. |
 | ASM-012 | Purge destroys the user's key the way P-008 intends. | open | Not fully: `tpm2-pkcs11` keeps the key as a wrapped blob in its sqlite store under a deterministic primary, with no persistent TPM handle to evict. Purge removes the token and every Protector blob, so nobody can unlock it, but an attacker holding a copy of the store and the Protectors' sealed blobs, plus access to the same TPM, could still sign (T-020 test). Closing it needs one persistent TPM object per user that purge evicts. AC-033 is proven for what purge does today; the wording "TPM key is evicted" does not strictly apply. Owner decision needed. |
+| ASM-013 | The embedded calibration table, measured on visible-light photos (LFW) through the real detector and embedding model, is an acceptable provisional default for the infrared camera. | open | Not proven: infrared impostor scores may differ and the 2-person live test (ASM-001) does not measure FAR. Replace the table with one measured on infrared captures from the target camera once enough people are available; the table is one 1,072-byte file plus the golden test, so swapping it is cheap. |
 
 ## Open questions
 

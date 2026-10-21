@@ -89,3 +89,19 @@
 - Model: claude-sonnet-5
 - Effort: medium
 - Notes: delivered 2026-10-21 (generic lock-screen PAM service, survey script, guide); stays in-progress until the manual check proves AC-028. Depends on T-025. Manual check on the Plasma session (ASM-011), recorded as evidence; an unprivileged PAM test through the `kde` service file covers the same path in CI.
+
+## T-026 — Embed the default FAR calibration table [pending]
+
+- Refs: AC-036, AC-037, AC-038
+- Files: crates/engine-adapter-face/assets/default_calibration.bin, crates/engine-adapter-face/src/far_calibration.rs, crates/engine-adapter-face/src/ffi.rs, crates/engine-adapter-face/tests/default_calibration.rs
+- Model: claude-sonnet-5
+- Effort: medium
+- Notes: blocked until the table exists: run the installer calibration once on the VM (LFW through the real models), copy `/var/lib/openhello/calibration.bin` (1,072 bytes) to the asset path. `calibration_path` becomes optional; absent means the embedded table, present means the file or an explicit error. Keep the golden test; add a test that the embedded table parses and yields sane thresholds (monotonic over FAR 1e-1 to 1e-8).
+
+## T-027 — Installer no longer calibrates; docs [pending]
+
+- Refs: AC-036
+- Files: scripts/install.sh, evaluation/README.md, crates/openhellod/src/config.rs
+- Model: claude-sonnet-5
+- Effort: low
+- Notes: depends on T-026. `install.sh` stops requiring calibration images (`--calibration-*` options stay as an optional override that writes `/var/lib/openhello/calibration.bin`); the daemon starts right after install. `openhellod` config makes the calibration path optional. The evaluation README explains how to regenerate the embedded table from LFW or from infrared captures.
