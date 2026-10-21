@@ -1,0 +1,82 @@
+{
+  "feature": "face-recognition-proof",
+  "timestamp": "2026-10-21T01:48:56.251Z",
+  "gitRev": "41e3cde",
+  "command": "cargo test",
+  "reporter": "exitcode",
+  "exitCode": 0,
+  "testsParsed": 0,
+  "results": {
+    "AC-001": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-002": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-003": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-004": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-005": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-006": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-007": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-008": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-009": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-010": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-011": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-013": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-014": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-015": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    }
+  },
+  "principles": {}
+}
