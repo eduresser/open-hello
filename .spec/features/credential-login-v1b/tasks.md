@@ -120,3 +120,19 @@
 - Effort: low
 - Notes: found on the VM: for a user with no token the stack printed "Looking for your face..." and then pam_pkcs11 errors ("no suitable token available", "Error 2308") before the password prompt. `pam_openhello` checks the root-owned subject map (T-024) for the calling user and returns `PAM_IGNORE` silently when the user is absent, before any message or camera use. The check must not need the user's home or environment.
 
+## T-030 — keyd finds the tpm2-pkcs11 module on any distribution; CLI can retry provisioning [pending]
+
+- Refs: AC-016
+- Files: crates/openhello-keyd/src/tpm.rs, crates/openhello-keyd/src/config.rs, crates/openhello-keyd/src/lib.rs, crates/openhello-keyd/tests/module_discovery.rs, crates/openhello-cli/src/lib.rs, crates/openhello-cli/src/keyd_client.rs, crates/openhello-cli/src/main.rs, crates/openhello-cli/tests/provisioning_flow.rs
+- Model: claude-sonnet-5
+- Effort: medium
+- Notes: found on the KDE neon VM (2026-10-21): keyd looked for `/usr/lib64/pkcs11/libtpm2_pkcs11.so` (openSUSE layout) and the module lives in `/usr/lib/x86_64-linux-gnu/pkcs11/` on Debian and Ubuntu. keyd resolves the module from an explicit `OPENHELLO_TPM2_PKCS11_MODULE`, else the test prefix, else the first existing of the common locations (`/usr/lib64/pkcs11`, `/usr/lib/<multiarch>/pkcs11`, `/usr/lib/pkcs11`, `/usr/lib/aarch64-linux-gnu/pkcs11`), and fails with a message naming the paths it tried. New `openhello-cli provision` retries the key creation for an already enrolled face without re-enrolling.
+
+## T-031 — Installer restarts services and never overwrites loaded libraries [pending]
+
+- Refs: AC-016
+- Files: scripts/install.sh
+- Model: claude-sonnet-5
+- Effort: low
+- Notes: found on the VM: `cp -a` over the ONNX Runtime libraries mapped by the running `openhellod` crashed it with SEGV on the next call, and `enable --now` left the old `openhello-keyd` running the previous binary. The installer stops both services before replacing files, copies libraries without writing into mapped files (`cp --remove-destination`), then restarts both. Debian and Ubuntu use `libtpm2-pkcs11-tools`.
+
