@@ -46,7 +46,6 @@ impl Clock for SystemClock {
     }
 }
 
-/// Ephemeral HMAC key shared by the issuer and the verifier; wiped on drop, never printed.
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct TicketKey([u8; KEY_LEN]);
 
@@ -205,8 +204,7 @@ impl<C: Clock> Verifier<C> {
         }
     }
 
-    /// Checks MAC (constant time), uid, expiry and single use, in that order. A ticket is
-    /// consumed only when every check passes, so a refused attempt never burns a valid nonce.
+    // Consumed only after every check passes, so a refused attempt never burns a valid nonce.
     pub fn verify(&mut self, bytes: &[u8], expected_uid: u32) -> Result<(), TicketError> {
         let ticket = Ticket::decode(bytes)?;
         let signed = body(ticket.uid, &ticket.nonce, ticket.expiry_ms);
@@ -229,7 +227,6 @@ impl<C: Clock> Verifier<C> {
         Ok(())
     }
 
-    /// Forgets nonces whose ticket can no longer pass the expiry check anyway.
     pub fn purge_expired(&mut self, now_ms: u64) {
         self.used.retain(|_, expiry| *expiry > now_ms);
     }

@@ -23,8 +23,7 @@ fn required(name: &str, meaning: &str) -> String {
     }
 }
 
-/// tpm2-pkcs11 keeps process-wide state (store, D-Bus connection), so every test in a binary shares one
-/// TPM rig and runs one at a time. Each test uses its own uid, hence its own token.
+// tpm2-pkcs11 keeps process-wide state, so tests share one rig and run serially.
 static RIG: Mutex<Option<Rig>> = Mutex::new(None);
 
 pub struct Shared(MutexGuard<'static, Option<Rig>>);
@@ -50,8 +49,6 @@ extern "C" fn teardown() {
     RIG.lock().unwrap_or_else(PoisonError::into_inner).take();
 }
 
-/// A private swtpm, D-Bus session and `tpm2-abrmd`, plus a keyd config wired to them. The TPM-wide lockout
-/// allows 50 wrong auth values.
 pub struct Rig {
     pub config: KeydConfig,
     pub prefix: PathBuf,
@@ -156,7 +153,6 @@ impl Rig {
             .expect("tpm2-tools must be installed")
     }
 
-    /// The TPM's own dictionary-attack failure counter (`TPM2_PT_LOCKOUT_COUNTER`).
     pub fn lockout_counter(&self) -> u32 {
         let out = self.tpm2("tpm2_getcap", &["properties-variable"]);
         String::from_utf8_lossy(&out.stdout)
@@ -175,7 +171,6 @@ impl Rig {
         );
     }
 
-    /// Objects `tpm2_ptool` lists for a token, one `CKO_*` class name per object.
     pub fn listed_classes(&self, label: &str) -> Vec<String> {
         let site: Vec<String> = ["usr/lib", "usr/lib64"]
             .iter()

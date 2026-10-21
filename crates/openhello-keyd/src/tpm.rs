@@ -16,8 +16,7 @@ const DEFAULT_MODULE: &str = "/usr/lib64/pkcs11/libtpm2_pkcs11.so";
 const PKCS11_SUBPATH: &str = "usr/lib64/pkcs11/libtpm2_pkcs11.so";
 const DATABASE_FILE: &str = "tpm2_pkcs11.sqlite3";
 
-/// Keeps `tpm2_ptool` secrets off its command line: arguments arrive on stdin, NUL separated.
-/// `addkey` creates signing-only keys; the stock default also allows decryption.
+// Secrets arrive on stdin, not argv; `addkey` is patched to create signing-only keys (stock also allows decryption).
 const PTOOL_ENTRY: &str = "
 import sys
 from tpm2_pkcs11 import tpm2
@@ -32,7 +31,6 @@ sys.argv = ['tpm2_ptool'] + sys.stdin.read().split('\\0')[:-1]
 main()
 ";
 
-/// Read-only dump of a token's objects straight from the tpm2-pkcs11 store (no PIN involved).
 const INSPECT_ENTRY: &str = "
 import sqlite3, sys, yaml
 from tpm2_pkcs11.pkcs11t import CKA_TPM2_PUB_BLOB
@@ -69,16 +67,11 @@ pub(crate) fn lock() -> Guard {
     }
 }
 
-/// Where the key daemon keeps its state and how it reaches the TPM.
 #[derive(Debug, Clone)]
 pub struct KeydConfig {
-    /// Directory of the tpm2-pkcs11 store (one token per user). Created with mode 0700.
     pub store_dir: PathBuf,
-    /// TCTI string for tpm2-tools and tpm2-pkcs11, typically `tabrmd` in production.
     pub tcti: Option<String>,
-    /// User-space install root of tpm2-pkcs11 and its Python tools, instead of the system paths.
     pub prefix: Option<PathBuf>,
-    /// Extra environment for the TPM tools (for example `DBUS_SESSION_BUS_ADDRESS`).
     pub env: Vec<(String, String)>,
 }
 
@@ -92,7 +85,6 @@ impl KeydConfig {
         }
     }
 
-    /// Reads `OPENHELLO_KEYD_STORE_DIR` (required), `OPENHELLO_KEYD_TCTI` and `OPENHELLO_TPM2_PKCS11_PREFIX`.
     pub fn from_env() -> Result<Self, KeydError> {
         let store = std::env::var_os("OPENHELLO_KEYD_STORE_DIR")
             .filter(|v| !v.is_empty())
@@ -363,7 +355,6 @@ pub(crate) fn store_file(dir: &Path) -> PathBuf {
     dir.join(DATABASE_FILE)
 }
 
-/// Full detail goes to the log only; callers receive the generic `KeydError::Tpm`.
 pub(crate) fn failure(context: &str, detail: &str, secrets: &[&str]) -> KeydError {
     let mut detail = detail.to_string();
     for secret in secrets.iter().filter(|s| !s.is_empty()) {

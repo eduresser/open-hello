@@ -22,7 +22,6 @@ const RESTRICTED: u32 = 0x1_0000;
 const DECRYPT: u32 = 0x2_0000;
 const SIGN: u32 = 0x4_0000;
 
-/// TPM object attributes of the key, as read from its stored public area.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TpmAttributes {
     pub fixed_tpm: bool,
@@ -33,12 +32,9 @@ pub struct TpmAttributes {
     pub restricted: bool,
 }
 
-/// Public facts about a user's key. Never contains private material.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyInfo {
-    /// PKCS#11 object id (`CKA_ID`, hex). Stable for the life of the key.
     pub handle: String,
-    /// Uncompressed SEC1 P-256 point (65 bytes).
     pub public_key: Vec<u8>,
     pub extractable: bool,
     pub sensitive: bool,
@@ -48,17 +44,14 @@ pub struct KeyInfo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Provisioned {
     pub key: KeyInfo,
-    /// False when the user already had a key and nothing was changed.
     pub created: bool,
 }
 
-/// Attributes the API will answer about the private key. The private value is not one of them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyAttribute {
     Extractable,
     Sensitive,
     Sign,
-    /// `CKA_VALUE`: always refused.
     Value,
 }
 
@@ -71,12 +64,6 @@ impl Keyd {
         Self { config }
     }
 
-    /// Creates the user's ECDSA P-256 key in the TPM and registers it in the user's tpm2-pkcs11 token,
-    /// or returns the existing key untouched.
-    ///
-    /// `secret` is the token's user auth value. Extension point for T-017: Protectors generate it
-    /// (20 random bytes as 40 hex characters) and keep it; this call only hands it to the token.
-    /// The token's administrator PIN is random and discarded.
     pub fn provision(&self, uid: u32, secret: &Secret) -> Result<Provisioned, KeydError> {
         let uid = validate_uid(uid)?;
         let guard = lock();
@@ -163,8 +150,6 @@ impl Keyd {
         }
     }
 
-    /// Asks the token itself, after login, whether the key is non-extractable and sensitive and
-    /// whether it refuses to hand out `CKA_VALUE`.
     pub fn verify_protection(&self, uid: u32, secret: &Secret) -> Result<(), KeydError> {
         let uid = validate_uid(uid)?;
         let guard = lock();
@@ -178,8 +163,7 @@ impl Keyd {
         self.check_protection(&guard, &label, &key, secret)
     }
 
-    /// Signs a SHA-256 digest with the user's key (ECDSA, raw `r || s`, 64 bytes), the only private-key
-    /// operation offered. A wrong secret also counts against the TPM-wide dictionary-attack lockout.
+    // A wrong secret counts against the TPM-wide dictionary-attack lockout.
     pub fn sign_digest(
         &self,
         uid: u32,
@@ -301,7 +285,6 @@ fn has_key(dump: &TokenDump) -> bool {
     dump.objects.iter().any(|o| o.class == CLASS_PRIVATE_KEY)
 }
 
-/// Exactly one private and one public key sharing an id; anything else is a broken token.
 fn key_pair(dump: &TokenDump) -> Result<(&DumpedObject, &DumpedObject), KeydError> {
     let of = |class| {
         dump.objects
