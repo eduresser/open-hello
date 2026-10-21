@@ -106,6 +106,8 @@ impl Rig {
             lib64.join("libtss2-tcti-tabrmd.so.0").display()
         ));
         config.prefix = Some(prefix.clone());
+        config.mapfile = store.path().join("pkcs11-subject-map");
+        config.user_name = Some(|uid| Some(format!("user{uid}")));
         config.env = vec![("DBUS_SESSION_BUS_ADDRESS".into(), address)];
         let rig = Self {
             config,

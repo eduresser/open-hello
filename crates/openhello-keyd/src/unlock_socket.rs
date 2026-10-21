@@ -18,7 +18,10 @@ use crate::{KeydError, Protectors};
 pub const OP_UNLOCK_TAKE_GRANT: u8 = 1;
 pub const OP_UNLOCK_PIN: u8 = 2;
 pub const OP_UNLOCK_RECOVERY: u8 = 3;
+pub const OP_UNLOCK_FOR_UID: u8 = 4;
 pub const RECOVERY_SEPARATOR: u8 = b'\n';
+const ROOT_UID: u32 = 0;
+const FOR_UID_HEADER: usize = 5;
 const MAX_PAYLOAD: usize = 128;
 const MAX_CONNECTIONS: usize = 32;
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
@@ -38,6 +41,24 @@ impl UnlockSocket {
     pub fn bind(
         protectors: Arc<Protectors>,
         config: UnlockSocketConfig,
+    ) -> Result<Self, KeydError> {
+        Self::bind_as(protectors, config, None)
+    }
+
+    // Lets tests play the root peer (setuid sudo) without running as root; release builds cannot set it.
+    #[cfg(debug_assertions)]
+    pub fn bind_with_peer_uid(
+        protectors: Arc<Protectors>,
+        config: UnlockSocketConfig,
+        peer_uid: u32,
+    ) -> Result<Self, KeydError> {
+        Self::bind_as(protectors, config, Some(peer_uid))
+    }
+
+    fn bind_as(
+        protectors: Arc<Protectors>,
+        config: UnlockSocketConfig,
+        peer_override: Option<u32>,
     ) -> Result<Self, KeydError> {
         if config.path.exists() {
             std::fs::remove_file(&config.path)
@@ -65,7 +86,7 @@ impl UnlockSocket {
                     let protectors = protectors.clone();
                     let active = active.clone();
                     std::thread::spawn(move || {
-                        serve(&protectors, stream);
+                        serve(&protectors, stream, peer_override);
                         active.fetch_sub(1, Ordering::SeqCst);
                     });
                 }
@@ -94,15 +115,19 @@ impl Drop for UnlockSocket {
     }
 }
 
-fn serve(protectors: &Protectors, mut stream: UnixStream) {
+fn serve(protectors: &Protectors, mut stream: UnixStream, peer_override: Option<u32>) {
     let _ = stream.set_read_timeout(Some(IO_TIMEOUT));
     let _ = stream.set_write_timeout(Some(IO_TIMEOUT));
-    let Some(uid) = peer_uid(&stream) else {
+    let Some(peer) = peer_override.or_else(|| peer_uid(&stream)) else {
         refuse(&mut stream);
         return;
     };
     while let Some((op, payload)) = read_frame(&mut stream) {
-        let Some(reply) = answer(protectors, uid, op, &payload) else {
+        let request = target(peer, op, payload);
+        let uid = request.as_ref().map_or(peer, |(uid, _, _)| *uid);
+        let Some(reply) =
+            request.and_then(|(uid, op, payload)| answer(protectors, uid, op, &payload))
+        else {
             log(Level::Warn, "unlock-refused", &[("uid", Value::Uid(uid))]);
             refuse(&mut stream);
             return;
@@ -112,6 +137,22 @@ fn serve(protectors: &Protectors, mut stream: UnixStream) {
             return;
         }
     }
+}
+
+// Only a root peer may name another uid; anyone else is limited to the uid the kernel reports for the connection.
+fn target(peer: u32, op: u8, payload: Zeroizing<Vec<u8>>) -> Option<(u32, u8, Zeroizing<Vec<u8>>)> {
+    if op != OP_UNLOCK_FOR_UID {
+        return Some((peer, op, payload));
+    }
+    if payload.len() < FOR_UID_HEADER {
+        return None;
+    }
+    let named = u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    if peer != ROOT_UID && named != peer {
+        return None;
+    }
+    let inner = Zeroizing::new(payload[FOR_UID_HEADER..].to_vec());
+    Some((named, payload[4], inner))
 }
 
 fn answer(

@@ -79,6 +79,8 @@ pub struct KeydConfig {
     pub tcti: Option<String>,
     pub prefix: Option<PathBuf>,
     pub env: Vec<(String, String)>,
+    pub mapfile: PathBuf,
+    pub user_name: Option<fn(u32) -> Option<String>>,
 }
 
 impl KeydConfig {
@@ -88,6 +90,8 @@ impl KeydConfig {
             tcti: None,
             prefix: None,
             env: Vec::new(),
+            mapfile: PathBuf::from(crate::certificate::DEFAULT_MAPFILE),
+            user_name: None,
         }
     }
 
@@ -103,6 +107,10 @@ impl KeydConfig {
         config.tcti = std::env::var("OPENHELLO_KEYD_TCTI")
             .ok()
             .filter(|v| !v.is_empty());
+        if let Some(mapfile) = std::env::var_os("OPENHELLO_KEYD_MAPFILE").filter(|v| !v.is_empty())
+        {
+            config.mapfile = PathBuf::from(mapfile);
+        }
         config.prefix = std::env::var_os("OPENHELLO_TPM2_PKCS11_PREFIX")
             .filter(|v| !v.is_empty())
             .map(PathBuf::from);

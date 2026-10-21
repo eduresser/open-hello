@@ -309,7 +309,7 @@ fn purge_destroys_the_key_and_makes_a_saved_copy_of_the_protectors_useless() {
         .keyd()
         .sign_digest(uid, &key_secret, &DIGEST)
         .is_ok());
-    assert_eq!(rig.listed_classes(&format!("openhello-{uid}")).len(), 2);
+    assert_eq!(rig.listed_classes(&format!("openhello-{uid}")).len(), 3);
     let transient_before = transient_handles(&rig);
 
     protectors.purge(uid).unwrap();

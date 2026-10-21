@@ -41,7 +41,10 @@ fn provisioning_creates_one_non_exportable_p256_signing_key() {
 
     let mut classes = rig.listed_classes("openhello-1000");
     classes.sort();
-    assert_eq!(classes, ["CKO_PRIVATE_KEY", "CKO_PUBLIC_KEY"]);
+    assert_eq!(
+        classes,
+        ["CKO_CERTIFICATE", "CKO_PRIVATE_KEY", "CKO_PUBLIC_KEY"]
+    );
 
     let signature = keyd.sign_digest(1000, &secret(SECRET), &DIGEST).unwrap();
     assert_eq!(signature.len(), 64);
@@ -57,7 +60,7 @@ fn each_user_gets_a_separate_key() {
     let second = keyd.provision(1002, &secret(OTHER_SECRET)).unwrap().key;
     assert_ne!(first.handle, second.handle);
     assert_ne!(first.public_key, second.public_key);
-    assert_eq!(rig.listed_classes("openhello-1002").len(), 2);
+    assert_eq!(rig.listed_classes("openhello-1002").len(), 3);
     let signature = keyd
         .sign_digest(1002, &secret(OTHER_SECRET), &DIGEST)
         .unwrap();
@@ -76,7 +79,7 @@ fn provisioning_twice_keeps_the_same_key() {
     assert!(first.created && !again.created);
     assert_eq!(first.key, again.key);
     assert_eq!(keyd.key(1003).unwrap(), first.key);
-    assert_eq!(rig.listed_classes("openhello-1003").len(), 2);
+    assert_eq!(rig.listed_classes("openhello-1003").len(), 3);
     let signature = keyd.sign_digest(1003, &secret(SECRET), &DIGEST).unwrap();
     assert!(verifies(&first.key, &signature));
     assert!(matches!(

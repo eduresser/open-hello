@@ -39,6 +39,9 @@ impl DaemonConfig {
             .ok_or("OPENHELLO_KEYD_STORE_DIR must name the token store directory")?;
         let mut keyd = KeydConfig::new(store);
         keyd.tcti = get("OPENHELLO_KEYD_TCTI");
+        if let Some(mapfile) = get("OPENHELLO_KEYD_MAPFILE") {
+            keyd.mapfile = PathBuf::from(mapfile);
+        }
         keyd.prefix = get("OPENHELLO_TPM2_PKCS11_PREFIX").map(PathBuf::from);
         let allowed_uid = match get("OPENHELLO_KEYD_TICKET_UID") {
             None => 0,
