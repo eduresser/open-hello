@@ -17,6 +17,7 @@ thiserror.workspace = true
 openhello-ticket = { path = "../openhello-ticket" }
 openhello-auth-proto = { path = "../openhello-auth-proto" }
 libc = "0.2"
+libloading = "0.8"
 cryptoki = "0.12"
 cryptoki-sys = "0.5"
 getrandom = "0.2"

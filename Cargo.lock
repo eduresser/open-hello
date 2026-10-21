@@ -858,6 +858,7 @@ dependencies = [
  "cryptoki-sys",
  "getrandom 0.2.17",
  "libc",
+ "libloading 0.8.9",
  "openhello-auth-proto",
  "openhello-ticket",
  "openhellod",
