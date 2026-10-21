@@ -20,7 +20,7 @@ pub use msxu::{MsxuEmitter, MsxuUnit};
 pub use v4l2_capture::V4l2Camera;
 
 use lazy::{LazyCapture, IDLE_RELEASE};
-use illumination::{FrameStats, MAX_CONSECUTIVE_UNLIT, PROBE_FRAMES};
+use illumination::{FrameStats, MAX_CONSECUTIVE_UNLIT, MAX_PROBE_FRAMES, PROBE_LIT_FRAMES};
 
 const EMITTER_ENV: &str = "OPENHELLO_IR_EMITTER";
 const ALLOW_WRITE_ENV: &str = "OPENHELLO_IR_EMITTER_ALLOW_WRITE";
@@ -94,12 +94,15 @@ impl<S: FrameSource> CaptureSession<S> {
 
 fn probe_illumination<S: FrameSource>(source: &mut S, filter: &mut LitFrameFilter) -> Result<Probe, SensorError> {
     let mut probe = Probe { lit: false, frames: VecDeque::new() };
-    for _ in 0..PROBE_FRAMES {
+    for _ in 0..MAX_PROBE_FRAMES {
         let frame = source.next_frame()?;
         let stats = FrameStats::of(&frame.pixels);
         probe.lit |= stats.is_illuminated();
         if filter.admit(stats) {
             probe.frames.push_back(frame);
+        }
+        if probe.frames.len() >= PROBE_LIT_FRAMES {
+            break;
         }
     }
     Ok(probe)
@@ -324,8 +327,20 @@ mod tests {
         let mut emitter = FakeEmitter { log: log.clone(), fail: false };
         let brightness: Vec<u8> = (60..100).collect();
         let mut session = CaptureSession::begin(&mut emitter, FakeSource::new(&log, &brightness)).unwrap();
-        let first: Vec<u64> = (0..PROBE_FRAMES + 2).map(|_| session.next_frame().unwrap().timestamp_us).collect();
-        assert_eq!(first, (60..60 + PROBE_FRAMES as u64 + 2).collect::<Vec<_>>());
+        let first: Vec<u64> = (0..PROBE_LIT_FRAMES + 2).map(|_| session.next_frame().unwrap().timestamp_us).collect();
+        assert_eq!(first, (60..60 + PROBE_LIT_FRAMES as u64 + 2).collect::<Vec<_>>());
+    }
+
+    // @spec:AC-011
+    #[test]
+    fn camera_that_needs_a_warm_up_before_lighting_is_waited_for_without_touching_the_emitter() {
+        let log: Log = Rc::default();
+        let mut emitter = FakeEmitter { log: log.clone(), fail: false };
+        let mut brightness = vec![5; 40];
+        brightness.extend(vec![66; 60]);
+        let mut session = CaptureSession::begin(&mut emitter, FakeSource::new(&log, &brightness)).unwrap();
+        assert_eq!(session.next_frame().unwrap().pixels[0], 66);
+        assert_eq!(*log.borrow(), vec!["stream"]);
     }
 
     // @spec:AC-011
@@ -386,10 +401,10 @@ mod tests {
     fn stream_that_goes_dark_mid_session_reports_no_illumination_instead_of_unlit_frames() {
         let log: Log = Rc::default();
         let mut emitter = FakeEmitter { log: log.clone(), fail: false };
-        let mut brightness = vec![66; PROBE_FRAMES];
+        let mut brightness = vec![66; PROBE_LIT_FRAMES];
         brightness.extend(vec![5; 200]);
         let mut session = CaptureSession::begin(&mut emitter, FakeSource::new(&log, &brightness)).unwrap();
-        for _ in 0..PROBE_FRAMES {
+        for _ in 0..PROBE_LIT_FRAMES {
             assert_eq!(session.next_frame().unwrap().pixels[0], 66);
         }
         assert!(matches!(session.next_frame().err(), Some(SensorError::NoIllumination)));
