@@ -1,9 +1,16 @@
+mod protector;
 mod provision;
+mod ticket_socket;
 mod tpm;
 
+pub use protector::{LockoutPolicy, Protectors, RecoveryCode};
 pub use provision::{KeyAttribute, KeyInfo, Keyd, Provisioned, TpmAttributes};
+pub use ticket_socket::{
+    TicketSocket, TicketSocketConfig, OP_TICKET, OP_TICKET_KEY, STATUS_ACCEPTED, STATUS_REFUSED,
+};
 pub use tpm::KeydConfig;
 
+use openhello_ticket::TicketError;
 use thiserror::Error;
 use zeroize::Zeroizing;
 
@@ -22,14 +29,24 @@ pub enum KeydError {
     NotProvisioned,
     #[error("the secret was not accepted")]
     AuthenticationFailed,
+    #[error("PIN must be 6 to 32 printable ASCII characters")]
+    InvalidPin,
+    #[error("this user already has a key and protectors")]
+    AlreadyProvisioned,
+    #[error("no PIN is set for this user")]
+    PinNotSet,
+    #[error("the TPM is locked out after too many wrong attempts; try again later")]
+    LockedOut,
+    #[error("{0}")]
+    Ticket(TicketError),
     #[error("private key material cannot be read or exported")]
     Refused,
     #[error("TPM operation failed")]
     Tpm,
 }
 
-/// Auth value of a user's token. T-017 (Protectors) will generate it and release it to
-/// the PKCS#11 wrapper; provisioning only needs it to arrive as a parameter.
+/// Auth value of a user's token (K). Protectors generate it and seal it in the TPM; provisioning
+/// only needs it to arrive as a parameter.
 pub struct Secret(Zeroizing<String>);
 
 impl Secret {

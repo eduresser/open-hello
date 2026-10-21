@@ -840,6 +840,7 @@ dependencies = [
  "cryptoki",
  "getrandom 0.2.17",
  "libc",
+ "openhello-ticket",
  "p256",
  "tempfile",
  "thiserror",
