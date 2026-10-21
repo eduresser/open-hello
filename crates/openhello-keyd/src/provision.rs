@@ -1,0 +1,415 @@
+use cryptoki::mechanism::Mechanism;
+use cryptoki::object::{Attribute, AttributeType, KeyType, ObjectClass};
+use zeroize::Zeroizing;
+
+use crate::tpm::{decode_hex, failure, lock, p11_failure, DumpedObject, Guard, TokenDump};
+use crate::{validate_uid, KeydConfig, KeydError, Secret};
+
+const TOKEN_LABEL_PREFIX: &str = "openhello-";
+const PRIMARY_ID: &str = "1";
+const KEY_ALGORITHM: &str = "ecc256";
+const SO_PIN_BYTES: usize = 20;
+const CLASS_PUBLIC_KEY: u64 = 2;
+const CLASS_PRIVATE_KEY: u64 = 3;
+const TPM_ALG_ECC: u16 = 0x0023;
+const POINT_LEN: usize = 65;
+const DIGEST_LEN: usize = 32;
+
+const FIXED_TPM: u32 = 0x2;
+const FIXED_PARENT: u32 = 0x10;
+const SENSITIVE_DATA_ORIGIN: u32 = 0x20;
+const RESTRICTED: u32 = 0x1_0000;
+const DECRYPT: u32 = 0x2_0000;
+const SIGN: u32 = 0x4_0000;
+
+/// TPM object attributes of the key, as read from its stored public area.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TpmAttributes {
+    pub fixed_tpm: bool,
+    pub fixed_parent: bool,
+    pub sensitive_data_origin: bool,
+    pub sign: bool,
+    pub decrypt: bool,
+    pub restricted: bool,
+}
+
+/// Public facts about a user's key. Never contains private material.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyInfo {
+    /// PKCS#11 object id (`CKA_ID`, hex). Stable for the life of the key.
+    pub handle: String,
+    /// Uncompressed SEC1 P-256 point (65 bytes).
+    pub public_key: Vec<u8>,
+    pub extractable: bool,
+    pub sensitive: bool,
+    pub tpm: TpmAttributes,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Provisioned {
+    pub key: KeyInfo,
+    /// False when the user already had a key and nothing was changed.
+    pub created: bool,
+}
+
+/// Attributes the API will answer about the private key. The private value is not one of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyAttribute {
+    Extractable,
+    Sensitive,
+    Sign,
+    /// `CKA_VALUE`: always refused.
+    Value,
+}
+
+pub struct Keyd {
+    config: KeydConfig,
+}
+
+impl Keyd {
+    pub fn new(config: KeydConfig) -> Self {
+        Self { config }
+    }
+
+    /// Creates the user's ECDSA P-256 key in the TPM and registers it in the user's tpm2-pkcs11 token,
+    /// or returns the existing key untouched.
+    ///
+    /// `secret` is the token's user auth value. Extension point for T-017: Protectors generate it
+    /// (20 random bytes as 40 hex characters) and keep it; this call only hands it to the token.
+    /// The token's administrator PIN is random and discarded.
+    pub fn provision(&self, uid: u32, secret: &Secret) -> Result<Provisioned, KeydError> {
+        let uid = validate_uid(uid)?;
+        let guard = lock();
+        self.config.ensure_store_dir()?;
+        if !crate::tpm::store_file(&self.config.store_dir).exists() {
+            self.config.ptool(&guard, &["init"], &[])?;
+        }
+        let label = token_label(uid);
+        let dump = self.config.inspect(&guard, &label)?;
+        if has_key(&dump) {
+            return Ok(Provisioned {
+                key: self.describe(&guard, &label, &dump)?,
+                created: false,
+            });
+        }
+
+        let pin = secret.expose();
+        let created_token = !dump.present;
+        let outcome = (|| {
+            if created_token {
+                let so_pin = random_hex(SO_PIN_BYTES)?;
+                let args = [
+                    "addtoken",
+                    "--pid",
+                    PRIMARY_ID,
+                    "--sopin",
+                    &so_pin,
+                    "--userpin",
+                    pin,
+                    "--label",
+                    &label,
+                ];
+                self.config.ptool(&guard, &args, &[&so_pin, pin])?;
+            }
+            self.config.ptool(
+                &guard,
+                &[
+                    "addkey",
+                    "--label",
+                    &label,
+                    "--userpin",
+                    pin,
+                    "--algorithm",
+                    KEY_ALGORITHM,
+                ],
+                &[pin],
+            )?;
+            let key = self.describe(&guard, &label, &self.config.inspect(&guard, &label)?)?;
+            self.check_protection(&guard, &label, &key, secret)?;
+            Ok(key)
+        })();
+        match outcome {
+            Ok(key) => Ok(Provisioned { key, created: true }),
+            Err(error) => {
+                if created_token {
+                    let _ = self
+                        .config
+                        .ptool(&guard, &["rmtoken", "--label", &label], &[]);
+                }
+                Err(error)
+            }
+        }
+    }
+
+    pub fn key(&self, uid: u32) -> Result<KeyInfo, KeydError> {
+        let uid = validate_uid(uid)?;
+        let guard = lock();
+        self.config.ensure_store_dir()?;
+        let label = token_label(uid);
+        let dump = self.dump_if_initialized(&guard, &label)?;
+        if !has_key(&dump) {
+            return Err(KeydError::NotProvisioned);
+        }
+        self.describe(&guard, &label, &dump)
+    }
+
+    pub fn attribute(&self, uid: u32, attribute: KeyAttribute) -> Result<bool, KeydError> {
+        let key = self.key(uid)?;
+        match attribute {
+            KeyAttribute::Extractable => Ok(key.extractable),
+            KeyAttribute::Sensitive => Ok(key.sensitive),
+            KeyAttribute::Sign => Ok(key.tpm.sign),
+            KeyAttribute::Value => Err(KeydError::Refused),
+        }
+    }
+
+    /// Asks the token itself, after login, whether the key is non-extractable and sensitive and
+    /// whether it refuses to hand out `CKA_VALUE`.
+    pub fn verify_protection(&self, uid: u32, secret: &Secret) -> Result<(), KeydError> {
+        let uid = validate_uid(uid)?;
+        let guard = lock();
+        self.config.ensure_store_dir()?;
+        let label = token_label(uid);
+        let dump = self.dump_if_initialized(&guard, &label)?;
+        if !has_key(&dump) {
+            return Err(KeydError::NotProvisioned);
+        }
+        let key = self.describe(&guard, &label, &dump)?;
+        self.check_protection(&guard, &label, &key, secret)
+    }
+
+    /// Signs a SHA-256 digest with the user's key (ECDSA, raw `r || s`, 64 bytes), the only private-key
+    /// operation offered. A wrong secret also counts against the TPM-wide dictionary-attack lockout.
+    pub fn sign_digest(
+        &self,
+        uid: u32,
+        secret: &Secret,
+        digest: &[u8; DIGEST_LEN],
+    ) -> Result<Vec<u8>, KeydError> {
+        let uid = validate_uid(uid)?;
+        let guard = lock();
+        self.config.ensure_store_dir()?;
+        let label = token_label(uid);
+        let dump = self.dump_if_initialized(&guard, &label)?;
+        if !has_key(&dump) {
+            return Err(KeydError::NotProvisioned);
+        }
+        let key = self.describe(&guard, &label, &dump)?;
+        let token = self.config.open_token(&guard, &label)?;
+        token.login(secret)?;
+        let handle = find_key(&token, ObjectClass::PRIVATE_KEY, &key.handle)?;
+        token
+            .session
+            .sign(&Mechanism::Ecdsa, handle, digest)
+            .map_err(|e| p11_failure("signing", &e))
+    }
+
+    fn dump_if_initialized(&self, guard: &Guard, label: &str) -> Result<TokenDump, KeydError> {
+        if !crate::tpm::store_file(&self.config.store_dir).exists() {
+            return Ok(TokenDump::default());
+        }
+        self.config.inspect(guard, label)
+    }
+
+    fn describe(&self, guard: &Guard, label: &str, dump: &TokenDump) -> Result<KeyInfo, KeydError> {
+        let (private, public) = key_pair(dump)?;
+        let tpm = parse_tpm_attributes(
+            private
+                .tpm_public
+                .as_deref()
+                .or(public.tpm_public.as_deref()),
+        )?;
+        let token = self.config.open_token(guard, label)?;
+        let handle = find_key(&token, ObjectClass::PUBLIC_KEY, &private.id)?;
+        let point = token
+            .session
+            .get_attributes(handle, &[AttributeType::EcPoint])
+            .map_err(|e| p11_failure("reading the public key", &e))?
+            .into_iter()
+            .find_map(|a| {
+                if let Attribute::EcPoint(point) = a {
+                    Some(point)
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| failure("reading the public key", "token returned no EC point", &[]))?;
+        Ok(KeyInfo {
+            handle: private.id.clone(),
+            public_key: unwrap_point(&point)?,
+            extractable: private.extractable,
+            sensitive: private.sensitive,
+            tpm,
+        })
+    }
+
+    fn check_protection(
+        &self,
+        guard: &Guard,
+        label: &str,
+        key: &KeyInfo,
+        secret: &Secret,
+    ) -> Result<(), KeydError> {
+        let required = key.tpm.fixed_tpm
+            && key.tpm.fixed_parent
+            && key.tpm.sensitive_data_origin
+            && key.tpm.sign;
+        if !required || key.tpm.restricted || key.tpm.decrypt || key.extractable || !key.sensitive {
+            return Err(failure(
+                "checking the key",
+                "key attributes are not the required non-exportable signing key",
+                &[],
+            ));
+        }
+        let token = self.config.open_token(guard, label)?;
+        token.login(secret)?;
+        let handle = find_key(&token, ObjectClass::PRIVATE_KEY, &key.handle)?;
+        let flags = token
+            .session
+            .get_attributes(
+                handle,
+                &[AttributeType::Extractable, AttributeType::Sensitive],
+            )
+            .map_err(|e| p11_failure("reading key protection", &e))?;
+        let reports = |wanted: &Attribute| flags.iter().any(|a| a == wanted);
+        if !reports(&Attribute::Extractable(false)) || !reports(&Attribute::Sensitive(true)) {
+            return Err(failure(
+                "checking the key",
+                "token does not report a non-extractable, sensitive key",
+                &[],
+            ));
+        }
+        match token
+            .session
+            .get_attributes(handle, &[AttributeType::Value])
+        {
+            Ok(values) if values.iter().any(|a| matches!(a, Attribute::Value(_))) => Err(failure(
+                "checking the key",
+                "token exposes the private value",
+                &[],
+            )),
+            _ => Ok(()),
+        }
+    }
+}
+
+fn token_label(uid: u32) -> String {
+    format!("{TOKEN_LABEL_PREFIX}{uid}")
+}
+
+fn has_key(dump: &TokenDump) -> bool {
+    dump.objects.iter().any(|o| o.class == CLASS_PRIVATE_KEY)
+}
+
+/// Exactly one private and one public key sharing an id; anything else is a broken token.
+fn key_pair(dump: &TokenDump) -> Result<(&DumpedObject, &DumpedObject), KeydError> {
+    let of = |class| {
+        dump.objects
+            .iter()
+            .filter(move |o| o.class == class)
+            .collect::<Vec<_>>()
+    };
+    match (
+        of(CLASS_PRIVATE_KEY).as_slice(),
+        of(CLASS_PUBLIC_KEY).as_slice(),
+        dump.objects.len(),
+    ) {
+        ([private], [public], 2) if private.id == public.id => Ok((private, public)),
+        _ => Err(failure(
+            "reading the token",
+            "token does not hold exactly one key pair",
+            &[],
+        )),
+    }
+}
+
+fn find_key(
+    token: &crate::tpm::Token,
+    class: ObjectClass,
+    handle: &str,
+) -> Result<cryptoki::object::ObjectHandle, KeydError> {
+    let id =
+        decode_hex(handle).ok_or_else(|| failure("locating the key", "key id is not hex", &[]))?;
+    let found = token
+        .session
+        .find_objects(&[
+            Attribute::Class(class),
+            Attribute::KeyType(KeyType::EC),
+            Attribute::Id(id),
+        ])
+        .map_err(|e| p11_failure("locating the key", &e))?;
+    match found.as_slice() {
+        [one] => Ok(*one),
+        _ => Err(failure(
+            "locating the key",
+            &format!("{} matching objects", found.len()),
+            &[],
+        )),
+    }
+}
+
+fn parse_tpm_attributes(public: Option<&[u8]>) -> Result<TpmAttributes, KeydError> {
+    let blob = public
+        .filter(|b| b.len() >= 10)
+        .ok_or_else(|| failure("reading the key", "TPM public area missing", &[]))?;
+    if u16::from_be_bytes([blob[2], blob[3]]) != TPM_ALG_ECC {
+        return Err(failure("reading the key", "TPM key is not ECC", &[]));
+    }
+    let bits = u32::from_be_bytes([blob[6], blob[7], blob[8], blob[9]]);
+    let has = |flag: u32| bits & flag != 0;
+    Ok(TpmAttributes {
+        fixed_tpm: has(FIXED_TPM),
+        fixed_parent: has(FIXED_PARENT),
+        sensitive_data_origin: has(SENSITIVE_DATA_ORIGIN),
+        sign: has(SIGN),
+        decrypt: has(DECRYPT),
+        restricted: has(RESTRICTED),
+    })
+}
+
+/// `CKA_EC_POINT` is a DER OCTET STRING around the SEC1 point.
+fn unwrap_point(der: &[u8]) -> Result<Vec<u8>, KeydError> {
+    match der {
+        [0x04, len, rest @ ..]
+            if usize::from(*len) == POINT_LEN && rest.len() == POINT_LEN && rest[0] == 0x04 =>
+        {
+            Ok(rest.to_vec())
+        }
+        _ => Err(failure(
+            "reading the public key",
+            "unexpected EC point encoding",
+            &[],
+        )),
+    }
+}
+
+fn random_hex(bytes: usize) -> Result<Zeroizing<String>, KeydError> {
+    let mut raw = Zeroizing::new(vec![0u8; bytes]);
+    getrandom::getrandom(&mut raw)
+        .map_err(|e| failure("gathering randomness", &e.to_string(), &[]))?;
+    Ok(Zeroizing::new(
+        raw.iter().map(|b| format!("{b:02x}")).collect(),
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tpm_attributes_are_read_from_the_public_area() {
+        let blob = [0x00, 0x56, 0x00, 0x23, 0x00, 0x0b, 0x00, 0x04, 0x00, 0x72];
+        let attrs = parse_tpm_attributes(Some(&blob)).unwrap();
+        assert!(attrs.fixed_tpm && attrs.fixed_parent && attrs.sensitive_data_origin && attrs.sign);
+        assert!(!attrs.decrypt && !attrs.restricted);
+        assert!(parse_tpm_attributes(Some(&blob[..9])).is_err());
+    }
+
+    #[test]
+    fn ec_point_must_be_a_wrapped_uncompressed_p256_point() {
+        let mut der = vec![0x04, 0x41, 0x04];
+        der.extend([7u8; 64]);
+        assert_eq!(unwrap_point(&der).unwrap().len(), POINT_LEN);
+        assert!(unwrap_point(&der[1..]).is_err());
+    }
+}
