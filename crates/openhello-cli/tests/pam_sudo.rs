@@ -381,6 +381,7 @@ struct Stack {
     lock_screen: bool,
     common: bool,
     rhost: Option<&'static str>,
+    user: Option<&'static str>,
     allowed_services: Option<&'static str>,
 }
 
@@ -395,6 +396,7 @@ impl Stack {
             lock_screen: false,
             common: false,
             rhost: None,
+            user: None,
             allowed_services: None,
         }
     }
@@ -442,7 +444,13 @@ impl Outcome {
     }
 }
 
-fn service_text(rig: &Rig, stack: &Stack, pkcs11_conf: &Path, hooks_conf: &Path) -> String {
+fn service_text(
+    rig: &Rig,
+    stack: &Stack,
+    pkcs11_conf: &Path,
+    hooks_conf: &Path,
+    mapfile: &Path,
+) -> String {
     let mut lines = Vec::new();
     let text = match (stack.lock_screen, stack.common) {
         (true, _) => LOCKSCREEN_STACK,
@@ -474,7 +482,12 @@ fn service_text(rig: &Rig, stack: &Stack, pkcs11_conf: &Path, hooks_conf: &Path)
         };
         let module = match module_name {
             "pam_openhello.so" => {
-                format!("{} config={}", pam_module().display(), hooks_conf.display())
+                format!(
+                    "{} config={} mapfile={}",
+                    pam_module().display(),
+                    hooks_conf.display(),
+                    mapfile.display()
+                )
             }
             "pam_deny.so" => system_module("pam_deny.so"),
             _ => pam_pkcs11_module(rig),
@@ -537,7 +550,13 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
     .unwrap();
     let services = fixture.dir.path().join("services");
     std::fs::create_dir_all(&services).unwrap();
-    let stack_text = service_text(rig, stack, &fixture.pkcs11_conf, &hooks_conf);
+    let stack_text = service_text(
+        rig,
+        stack,
+        &fixture.pkcs11_conf,
+        &hooks_conf,
+        &fixture.config.mapfile,
+    );
     let recorder = format!(
         "auth required {} path={}\n",
         fixture.recorder.display(),
@@ -569,7 +588,13 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
         client.env("PAMTEST_RHOST", host);
     }
     let output = client
-        .args([service, &linux_user_name(uid()).unwrap()])
+        .args([
+            service,
+            &stack
+                .user
+                .map(str::to_string)
+                .unwrap_or_else(|| linux_user_name(uid()).unwrap()),
+        ])
         .env("PAM_WRAPPER", "1")
         .env("PAM_WRAPPER_SERVICE_DIR", &services)
         .env("LD_PRELOAD", lib64.join("libpam_wrapper.so"))
@@ -818,6 +843,32 @@ fn a_missing_keyd_or_openhellod_or_a_silent_camera_falls_through_within_five_sec
             "the camera wait took {:?}",
             silent.elapsed
         );
+    });
+}
+
+// @covers:AC-030-no-credential
+#[test]
+fn a_user_without_an_open_hello_credential_is_ignored_silently_before_any_message_or_socket() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+
+        let stranger = scenario(
+            &rig,
+            fixture,
+            &services,
+            Stack {
+                user: Some("nobody-enrolled"),
+                ..Stack::face(Verify::Matches)
+            },
+        );
+        assert!(!stranger.granted());
+        assert_eq!(stranger.reached, ["authtok=unset"]);
+        assert!(stranger.prompts.is_empty(), "{:?}", stranger.prompts);
+        assert_eq!(stranger.verify_calls, 0);
+
+        let enrolled = scenario(&rig, fixture, &services, Stack::face(Verify::Matches));
+        assert!(enrolled.granted());
     });
 }
 

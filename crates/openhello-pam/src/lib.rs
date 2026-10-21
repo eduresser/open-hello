@@ -17,11 +17,14 @@ const PAM_IGNORE: c_int = 25;
 const PAM_SERVICE: c_int = 1;
 const PAM_TTY: c_int = 3;
 const PAM_RHOST: c_int = 4;
+const PAM_USER: c_int = 2;
 const PAM_CONV: c_int = 5;
 const PAM_AUTHTOK: c_int = 6;
 const PAM_TEXT_INFO: c_int = 4;
 const BUDGET: Duration = Duration::from_secs(5);
 const BUS_NAME: &str = "io.openhello.Biometrics1";
+const DEFAULT_MAPFILE: &str = "/etc/openhello/pkcs11-subject-map";
+const MAPPING_SEPARATOR: &str = " -> ";
 const LOOKING_FOR_FACE: &CStr = c"Looking for your face...";
 
 #[repr(C)]
@@ -71,6 +74,9 @@ pub unsafe extern "C" fn pam_sm_authenticate(
     if !local_session_allowed(pamh, &args) {
         return PAM_IGNORE;
     }
+    if !has_credential(pamh, &args) {
+        return PAM_IGNORE;
+    }
     let config = args
         .iter()
         .find_map(|a| a.strip_prefix("config=").map(PathBuf::from))
@@ -97,6 +103,33 @@ unsafe fn item_text(pamh: *mut c_void, item: c_int) -> Option<String> {
         .to_str()
         .ok()
         .map(str::to_string)
+}
+
+// PAM_USER is read as an item: pam_get_user would prompt for a name through the conversation.
+unsafe fn has_credential(pamh: *mut c_void, args: &[String]) -> bool {
+    let Some(user) = item_text(pamh, PAM_USER).filter(|u| !u.is_empty()) else {
+        return false;
+    };
+    let path = args
+        .iter()
+        .find_map(|a| a.strip_prefix("mapfile=").map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_MAPFILE));
+    let (ruid, euid) = (libc::getuid(), libc::geteuid());
+    let text = if config::is_privileged(ruid, euid) {
+        config::read_trusted(&path, 0).ok()
+    } else {
+        std::fs::read_to_string(&path).ok()
+    };
+    text.is_some_and(|t| maps_user(&t, &user))
+}
+
+fn maps_user(mapfile: &str, user: &str) -> bool {
+    mapfile.lines().any(|line| {
+        line.split_once(MAPPING_SEPARATOR)
+            .is_some_and(|(subject, mapped)| {
+                subject.starts_with("CN=openhello-uid-") && mapped.trim() == user
+            })
+    })
 }
 
 unsafe fn local_session_allowed(pamh: *mut c_void, args: &[String]) -> bool {
@@ -262,12 +295,21 @@ unsafe fn tell(pamh: *mut c_void, text: &CStr) {
 
 #[cfg(test)]
 mod tests {
-    use super::permitted;
+    use super::{maps_user, permitted};
 
     #[test]
     fn remote_or_headless_sessions_are_ignored_before_the_allowlist() {
         assert!(!permitted(true, true, "sudo", None));
         assert!(!permitted(false, false, "sudo", None));
         assert!(permitted(false, true, "sudo", None));
+    }
+
+    #[test]
+    fn only_users_with_an_open_hello_line_are_mapped() {
+        let map = "CN=openhello-uid-1000 -> ana\nCN=other -> bia\nbroken\n";
+        assert!(maps_user(map, "ana"));
+        assert!(!maps_user(map, "bia"));
+        assert!(!maps_user(map, "an"));
+        assert!(!maps_user("", "ana"));
     }
 }
