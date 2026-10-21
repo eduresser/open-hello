@@ -2,6 +2,9 @@ use cryptoki::mechanism::Mechanism;
 use cryptoki::object::{Attribute, AttributeType, KeyType, ObjectClass};
 use zeroize::Zeroizing;
 
+use crate::certificate::{
+    assemble, linux_user_name, pem, tbs_certificate, tbs_digest, upsert_mapping,
+};
 use crate::tpm::{decode_hex, failure, lock, p11_failure, DumpedObject, Guard, TokenDump};
 use crate::{validate_uid, KeydConfig, KeydError, Secret};
 
@@ -9,6 +12,7 @@ const TOKEN_LABEL_PREFIX: &str = "openhello-";
 const PRIMARY_ID: &str = "1";
 const KEY_ALGORITHM: &str = "ecc256";
 const SO_PIN_BYTES: usize = 20;
+const CLASS_CERTIFICATE: u64 = 1;
 const CLASS_PUBLIC_KEY: u64 = 2;
 const CLASS_PRIVATE_KEY: u64 = 3;
 const TPM_ALG_ECC: u16 = 0x0023;
@@ -66,6 +70,7 @@ impl Keyd {
 
     pub fn provision(&self, uid: u32, secret: &Secret) -> Result<Provisioned, KeydError> {
         let uid = validate_uid(uid)?;
+        let user = self.user_name(uid)?;
         let guard = lock();
         self.config.ensure_store_dir()?;
         if !crate::tpm::store_file(&self.config.store_dir).exists() {
@@ -74,8 +79,11 @@ impl Keyd {
         let label = token_label(uid);
         let dump = self.config.inspect(&guard, &label)?;
         if has_key(&dump) {
+            let key = self.describe(&guard, &label, &dump)?;
+            self.ensure_certificate(&guard, &label, &key, &dump, secret)?;
+            upsert_mapping(&self.config.mapfile, uid, &user)?;
             return Ok(Provisioned {
-                key: self.describe(&guard, &label, &dump)?,
+                key,
                 created: false,
             });
         }
@@ -113,6 +121,9 @@ impl Keyd {
             )?;
             let key = self.describe(&guard, &label, &self.config.inspect(&guard, &label)?)?;
             self.check_protection(&guard, &label, &key, secret)?;
+            let dump = self.config.inspect(&guard, &label)?;
+            self.ensure_certificate(&guard, &label, &key, &dump, secret)?;
+            upsert_mapping(&self.config.mapfile, uid, &user)?;
             Ok(key)
         })();
         match outcome {
@@ -138,6 +149,33 @@ impl Keyd {
             return Err(KeydError::NotProvisioned);
         }
         self.describe(&guard, &label, &dump)
+    }
+
+    pub fn certificate(&self, uid: u32) -> Result<Vec<u8>, KeydError> {
+        let uid = validate_uid(uid)?;
+        let guard = lock();
+        self.config.ensure_store_dir()?;
+        let label = token_label(uid);
+        let dump = self.dump_if_initialized(&guard, &label)?;
+        if !has_key(&dump) {
+            return Err(KeydError::NotProvisioned);
+        }
+        let key = self.describe(&guard, &label, &dump)?;
+        let token = self.config.open_token(&guard, &label)?;
+        let handle = find_object(&token, ObjectClass::CERTIFICATE, &key.handle, None)?;
+        token
+            .session
+            .get_attributes(handle, &[AttributeType::Value])
+            .map_err(|e| p11_failure("reading the certificate", &e))?
+            .into_iter()
+            .find_map(|a| {
+                if let Attribute::Value(der) = a {
+                    Some(der)
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| failure("reading the certificate", "token returned no value", &[]))
     }
 
     pub fn attribute(&self, uid: u32, attribute: KeyAttribute) -> Result<bool, KeydError> {
@@ -179,13 +217,56 @@ impl Keyd {
             return Err(KeydError::NotProvisioned);
         }
         let key = self.describe(&guard, &label, &dump)?;
-        let token = self.config.open_token(&guard, &label)?;
-        token.login(secret)?;
-        let handle = find_key(&token, ObjectClass::PRIVATE_KEY, &key.handle)?;
-        token
-            .session
-            .sign(&Mechanism::Ecdsa, handle, digest)
-            .map_err(|e| p11_failure("signing", &e))
+        sign_with_token(&self.config, &guard, &label, &key, secret, digest)
+    }
+
+    fn user_name(&self, uid: u32) -> Result<String, KeydError> {
+        let resolve = self.config.user_name.unwrap_or(linux_user_name);
+        resolve(uid).ok_or_else(|| {
+            KeydError::Config(format!(
+                "uid {uid} has no Linux user name to map the certificate to"
+            ))
+        })
+    }
+
+    fn ensure_certificate(
+        &self,
+        guard: &Guard,
+        label: &str,
+        key: &KeyInfo,
+        dump: &TokenDump,
+        secret: &Secret,
+    ) -> Result<(), KeydError> {
+        let issued = dump
+            .objects
+            .iter()
+            .any(|o| o.class == CLASS_CERTIFICATE && o.id == key.handle);
+        if issued {
+            return Ok(());
+        }
+        let uid = uid_of_label(label)?;
+        let tbs = tbs_certificate(uid, &key.public_key)?;
+        let signature =
+            sign_with_token(&self.config, guard, label, key, secret, &tbs_digest(&tbs))?;
+        let certificate = pem(&assemble(&tbs, &signature)?);
+        let file = self.config.store_dir.join(format!("certificate-{uid}.pem"));
+        let outcome = write_private(&file, certificate.as_bytes()).and_then(|()| {
+            self.config.ptool(
+                guard,
+                &[
+                    "addcert",
+                    "--label",
+                    label,
+                    "--key-id",
+                    &key.handle,
+                    &file.to_string_lossy(),
+                ],
+                &[],
+            )
+        });
+        let _ = std::fs::remove_file(&file);
+        guard.reset_module();
+        outcome.map(|_| ())
     }
 
     fn dump_if_initialized(&self, guard: &Guard, label: &str) -> Result<TokenDump, KeydError> {
@@ -277,6 +358,43 @@ impl Keyd {
     }
 }
 
+fn sign_with_token(
+    config: &KeydConfig,
+    guard: &Guard,
+    label: &str,
+    key: &KeyInfo,
+    secret: &Secret,
+    digest: &[u8; DIGEST_LEN],
+) -> Result<Vec<u8>, KeydError> {
+    let token = config.open_token(guard, label)?;
+    token.login(secret)?;
+    let handle = find_key(&token, ObjectClass::PRIVATE_KEY, &key.handle)?;
+    token
+        .session
+        .sign(&Mechanism::Ecdsa, handle, digest)
+        .map_err(|e| p11_failure("signing", &e))
+}
+
+fn write_private(path: &std::path::Path, content: &[u8]) -> Result<(), KeydError> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let _ = std::fs::remove_file(path);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+        .and_then(|mut f| f.write_all(content))
+        .map_err(|e| failure("staging the certificate", &e.to_string(), &[]))
+}
+
+fn uid_of_label(label: &str) -> Result<u32, KeydError> {
+    label
+        .strip_prefix(TOKEN_LABEL_PREFIX)
+        .and_then(|uid| uid.parse().ok())
+        .ok_or_else(|| failure("reading the token label", "label carries no uid", &[]))
+}
+
 pub(crate) fn token_label(uid: u32) -> String {
     format!("{TOKEN_LABEL_PREFIX}{uid}")
 }
@@ -295,7 +413,10 @@ fn key_pair(dump: &TokenDump) -> Result<(&DumpedObject, &DumpedObject), KeydErro
     match (
         of(CLASS_PRIVATE_KEY).as_slice(),
         of(CLASS_PUBLIC_KEY).as_slice(),
-        dump.objects.len(),
+        dump.objects
+            .iter()
+            .filter(|o| o.class != CLASS_CERTIFICATE)
+            .count(),
     ) {
         ([private], [public], 2) if private.id == public.id => Ok((private, public)),
         _ => Err(failure(
@@ -311,15 +432,22 @@ fn find_key(
     class: ObjectClass,
     handle: &str,
 ) -> Result<cryptoki::object::ObjectHandle, KeydError> {
+    find_object(token, class, handle, Some(KeyType::EC))
+}
+
+fn find_object(
+    token: &crate::tpm::Token,
+    class: ObjectClass,
+    handle: &str,
+    key_type: Option<KeyType>,
+) -> Result<cryptoki::object::ObjectHandle, KeydError> {
     let id =
         decode_hex(handle).ok_or_else(|| failure("locating the key", "key id is not hex", &[]))?;
+    let mut template = vec![Attribute::Class(class), Attribute::Id(id)];
+    template.extend(key_type.map(Attribute::KeyType));
     let found = token
         .session
-        .find_objects(&[
-            Attribute::Class(class),
-            Attribute::KeyType(KeyType::EC),
-            Attribute::Id(id),
-        ])
+        .find_objects(&template)
         .map_err(|e| p11_failure("locating the key", &e))?;
     match found.as_slice() {
         [one] => Ok(*one),

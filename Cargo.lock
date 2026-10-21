@@ -845,6 +845,7 @@ dependencies = [
  "openhello-ticket",
  "openhellod",
  "p256",
+ "sha2",
  "tempfile",
  "thiserror",
  "zbus",

@@ -17,7 +17,9 @@ impl Protectors {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(&uid);
         self.shred_protectors(uid)?;
-        self.remove_token(uid)
+        self.remove_token(uid)?;
+        let _guard = lock();
+        crate::certificate::remove_mapping(&self.config.mapfile, uid)
     }
 
     fn shred_protectors(&self, uid: u32) -> Result<(), KeydError> {

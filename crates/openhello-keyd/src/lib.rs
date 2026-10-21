@@ -1,7 +1,8 @@
+mod certificate;
 pub mod config;
 pub mod dbus_service;
-pub mod polkit;
 pub mod logging;
+pub mod polkit;
 mod protector;
 mod provision;
 mod purge;
@@ -16,8 +17,8 @@ pub use ticket_socket::{
 };
 pub use tpm::KeydConfig;
 pub use unlock_socket::{
-    UnlockSocket, UnlockSocketConfig, OP_UNLOCK_PIN, OP_UNLOCK_RECOVERY, OP_UNLOCK_TAKE_GRANT,
-    RECOVERY_SEPARATOR,
+    UnlockSocket, UnlockSocketConfig, OP_UNLOCK_FOR_UID, OP_UNLOCK_PIN, OP_UNLOCK_RECOVERY,
+    OP_UNLOCK_TAKE_GRANT, RECOVERY_SEPARATOR,
 };
 
 use openhello_ticket::TicketError;
