@@ -288,6 +288,8 @@ fn bad_input_is_reported_without_echoing_the_pin() {
     protectors.purge(uid).unwrap();
 }
 
+const SHARED_PRIMARY_HANDLE: &str = "0x81000001";
+
 // @principle:P-008
 #[test]
 fn purge_destroys_the_key_and_makes_a_saved_copy_of_the_protectors_useless() {
@@ -311,6 +313,17 @@ fn purge_destroys_the_key_and_makes_a_saved_copy_of_the_protectors_useless() {
         .is_ok());
     assert_eq!(rig.listed_classes(&format!("openhello-{uid}")).len(), 3);
     let transient_before = transient_handles(&rig);
+    let persistent_provisioned = persistent_handles(&rig);
+    let created_by_provisioning: Vec<&str> = persistent_provisioned
+        .lines()
+        .filter(|line| !persistent_before.lines().any(|known| known == *line))
+        .collect();
+    assert!(
+        created_by_provisioning
+            .iter()
+            .all(|line| line.ends_with(SHARED_PRIMARY_HANDLE)),
+        "provisioning created a per-user persistent handle: {created_by_provisioning:?}"
+    );
 
     protectors.purge(uid).unwrap();
 
@@ -342,7 +355,7 @@ fn purge_destroys_the_key_and_makes_a_saved_copy_of_the_protectors_useless() {
         .unlock_with_ticket(uid, &ticket_for(&protectors, uid))
         .is_err());
     assert_eq!(transient_handles(&rig), transient_before);
-    assert_eq!(persistent_handles(&rig), persistent_before);
+    assert_eq!(persistent_handles(&rig), persistent_provisioned);
 
     restore(&rig, uid, &saved);
     let revived = protectors.unlock_with_pin(uid, PIN).unwrap();
