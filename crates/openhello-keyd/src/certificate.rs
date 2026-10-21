@@ -30,6 +30,10 @@ pub(crate) fn subject_for(uid: u32) -> String {
     format!("CN=openhello-uid-{uid}")
 }
 
+fn subjects_for(uid: u32) -> [String; 2] {
+    [subject_for(uid), format!("/{}", subject_for(uid))]
+}
+
 fn tlv(tag: u8, content: &[u8]) -> Vec<u8> {
     let mut out = vec![tag];
     match content.len() {
@@ -228,34 +232,29 @@ pub(crate) fn upsert_mapping(path: &Path, uid: u32, user: &str) -> Result<(), Ke
             &[],
         ));
     }
-    let subject = subject_for(uid);
-    let wanted = format!("{subject}{MAPPING_SEPARATOR}{user}");
+    let subjects = subjects_for(uid);
+    let wanted = subjects
+        .clone()
+        .map(|s| format!("{s}{MAPPING_SEPARATOR}{user}"));
     let lines = read_lines(path)?;
     let mode_ok = std::fs::metadata(path)
         .map(|m| m.permissions().mode() & 0o7777 == MAPFILE_MODE)
         .unwrap_or(false);
-    if mode_ok
-        && lines
-            .iter()
-            .filter(|l| subject_of(l) == Some(&subject))
-            .eq([&wanted])
-    {
+    let own = |l: &String| subject_of(l).is_some_and(|s| subjects.iter().any(|w| w == s));
+    if mode_ok && lines.iter().filter(|l| own(l)).eq(wanted.iter()) {
         return Ok(());
     }
-    let mut updated: Vec<String> = lines
-        .into_iter()
-        .filter(|l| subject_of(l) != Some(&subject))
-        .collect();
-    updated.push(wanted);
+    let mut updated: Vec<String> = lines.into_iter().filter(|l| !own(l)).collect();
+    updated.extend(wanted);
     write_atomically(path, &updated)
 }
 
 pub(crate) fn remove_mapping(path: &Path, uid: u32) -> Result<(), KeydError> {
-    let subject = subject_for(uid);
+    let subjects = subjects_for(uid);
     let lines = read_lines(path)?;
     let kept: Vec<String> = lines
         .iter()
-        .filter(|l| subject_of(l) != Some(&subject))
+        .filter(|l| !subject_of(l).is_some_and(|s| subjects.iter().any(|w| w == s)))
         .cloned()
         .collect();
     if kept.len() == lines.len() {
@@ -402,6 +401,7 @@ mod tests {
     }
 
     #[test]
+    // @covers:AC-027-subject-map
     fn mapping_is_idempotent_replaces_and_removes_only_its_subject() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sub/map");
@@ -410,13 +410,14 @@ mod tests {
         upsert_mapping(&path, 1000, "ana").unwrap();
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
-            "CN=openhello-uid-1000 -> ana\nCN=openhello-uid-1001 -> bia\n"
+            "CN=openhello-uid-1000 -> ana\n/CN=openhello-uid-1000 -> ana\n\
+             CN=openhello-uid-1001 -> bia\n/CN=openhello-uid-1001 -> bia\n"
         );
         upsert_mapping(&path, 1000, "ana2").unwrap();
         remove_mapping(&path, 1001).unwrap();
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
-            "CN=openhello-uid-1000 -> ana2\n"
+            "CN=openhello-uid-1000 -> ana2\n/CN=openhello-uid-1000 -> ana2\n"
         );
         assert_eq!(
             std::fs::metadata(&path).unwrap().permissions().mode() & 0o7777,

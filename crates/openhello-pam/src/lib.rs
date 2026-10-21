@@ -127,7 +127,10 @@ fn maps_user(mapfile: &str, user: &str) -> bool {
     mapfile.lines().any(|line| {
         line.split_once(MAPPING_SEPARATOR)
             .is_some_and(|(subject, mapped)| {
-                subject.starts_with("CN=openhello-uid-") && mapped.trim() == user
+                subject
+                    .trim_start_matches('/')
+                    .starts_with("CN=openhello-uid-")
+                    && mapped.trim() == user
             })
     })
 }
@@ -311,5 +314,6 @@ mod tests {
         assert!(!maps_user(map, "bia"));
         assert!(!maps_user(map, "an"));
         assert!(!maps_user("", "ana"));
+        assert!(maps_user("/CN=openhello-uid-1000 -> ana\n", "ana"));
     }
 }
