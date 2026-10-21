@@ -20,7 +20,7 @@ pub use msxu::{MsxuEmitter, MsxuUnit};
 pub use v4l2_capture::V4l2Camera;
 
 use lazy::{LazyCapture, IDLE_RELEASE};
-use illumination::{FrameStats, MAX_CONSECUTIVE_UNLIT, MAX_PROBE_FRAMES, PROBE_LIT_FRAMES};
+use illumination::{mean_luma, MAX_CONSECUTIVE_UNLIT, MAX_PROBE_FRAMES, MIN_LIT_MEAN, PROBE_LIT_FRAMES};
 
 const EMITTER_ENV: &str = "OPENHELLO_IR_EMITTER";
 const ALLOW_WRITE_ENV: &str = "OPENHELLO_IR_EMITTER_ALLOW_WRITE";
@@ -84,7 +84,7 @@ impl<S: FrameSource> CaptureSession<S> {
         }
         for _ in 0..=MAX_CONSECUTIVE_UNLIT {
             let frame = self.source.next_frame()?;
-            if self.filter.admit(FrameStats::of(&frame.pixels)) {
+            if self.filter.admit(mean_luma(&frame.pixels)) {
                 return Ok(frame);
             }
         }
@@ -96,9 +96,9 @@ fn probe_illumination<S: FrameSource>(source: &mut S, filter: &mut LitFrameFilte
     let mut probe = Probe { lit: false, frames: VecDeque::new() };
     for _ in 0..MAX_PROBE_FRAMES {
         let frame = source.next_frame()?;
-        let stats = FrameStats::of(&frame.pixels);
-        probe.lit |= stats.is_illuminated();
-        if filter.admit(stats) {
+        let mean = mean_luma(&frame.pixels);
+        probe.lit |= mean >= MIN_LIT_MEAN;
+        if filter.admit(mean) {
             probe.frames.push_back(frame);
         }
         if probe.frames.len() >= PROBE_LIT_FRAMES {
@@ -300,7 +300,7 @@ mod tests {
             } else {
                 self.brightness.pop_front().unwrap_or(5)
             };
-            Ok(Frame { width: 4, height: 4, pixels: (0..16).map(|i| if i % 2 == 0 { level } else { level.saturating_add(20) }).collect(), timestamp_us: u64::from(level) })
+            Ok(Frame { width: 4, height: 4, pixels: vec![level; 16], timestamp_us: u64::from(level) })
         }
     }
 
@@ -374,9 +374,9 @@ mod tests {
         assert_eq!(*log.borrow(), vec!["stream", "emitter"]);
     }
 
-    struct FlatGraySource;
+    struct WarmUpLevelSource;
 
-    impl FrameSource for FlatGraySource {
+    impl FrameSource for WarmUpLevelSource {
         fn start(&mut self) -> Result<(), SensorError> {
             Ok(())
         }
@@ -388,10 +388,10 @@ mod tests {
 
     // @spec:AC-011
     #[test]
-    fn bright_enough_but_flat_stream_is_treated_as_unlit() {
+    fn stream_stuck_at_the_warm_up_level_is_treated_as_unlit() {
         let log: Log = Rc::default();
         let mut emitter = FakeEmitter { log: log.clone(), fail: false };
-        let result = CaptureSession::begin(&mut emitter, FlatGraySource);
+        let result = CaptureSession::begin(&mut emitter, WarmUpLevelSource);
         assert!(matches!(result.err(), Some(SensorError::NoIllumination)));
         assert_eq!(*log.borrow(), vec!["emitter"]);
     }

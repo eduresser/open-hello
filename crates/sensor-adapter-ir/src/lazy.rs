@@ -68,7 +68,7 @@ mod tests {
                 return Err(SensorError::Device("unplugged".into()));
             }
             self.served += 1;
-            Ok(Frame { width: 8, height: 8, pixels: (0..64).map(|i| 80 + 30 * (i % 2) as u8).collect(), timestamp_us: 0 })
+            Ok(Frame { width: 2, height: 2, pixels: vec![80; 4], timestamp_us: 0 })
         }
     }
 
