@@ -25,8 +25,7 @@
 - Effort: high
 - Notes: depends on T-014. Idempotent provisioning; non-extractable key; no private bytes in any output (P-004).
 
-## T-017 — openhello-keyd: Protectors (biometric, PIN, recovery) and lockout [pending]
-
+## T-017 — openhello-keyd: Protectors (biometric, PIN, recovery) and lockout [done]
 - Refs: AC-019, AC-024, AC-025, AC-026, AC-031, AC-032
 - Files: crates/openhello-keyd/src/protector.rs, crates/openhello-keyd/src/ticket_socket.rs, crates/openhello-keyd/tests/protectors.rs
 - Model: claude-sonnet-5
