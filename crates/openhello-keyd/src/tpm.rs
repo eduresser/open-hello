@@ -80,6 +80,8 @@ pub struct KeydConfig {
     pub prefix: Option<PathBuf>,
     pub env: Vec<(String, String)>,
     pub mapfile: PathBuf,
+    pub nss_dir: Option<PathBuf>,
+    pub certutil: Option<PathBuf>,
     pub user_name: Option<fn(u32) -> Option<String>>,
 }
 
@@ -91,6 +93,8 @@ impl KeydConfig {
             prefix: None,
             env: Vec::new(),
             mapfile: PathBuf::from(crate::certificate::DEFAULT_MAPFILE),
+            nss_dir: None,
+            certutil: None,
             user_name: None,
         }
     }
@@ -114,6 +118,13 @@ impl KeydConfig {
         config.prefix = std::env::var_os("OPENHELLO_TPM2_PKCS11_PREFIX")
             .filter(|v| !v.is_empty())
             .map(PathBuf::from);
+        let path_of = |name| {
+            std::env::var_os(name)
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from)
+        };
+        config.nss_dir = path_of("OPENHELLO_KEYD_NSS_DIR");
+        config.certutil = path_of("OPENHELLO_KEYD_CERTUTIL");
         Ok(config)
     }
 
@@ -181,6 +192,31 @@ impl KeydConfig {
             stdin.push(0);
         }
         self.python(PTOOL_ENTRY, &[], &stdin, secrets)
+    }
+
+    pub(crate) fn certutil(&self, args: &[&str]) -> Result<CertutilOutput, KeydError> {
+        let program = self.certutil.clone().unwrap_or_else(|| match &self.prefix {
+            Some(prefix) => prefix.join("usr/bin/certutil"),
+            None => PathBuf::from("certutil"),
+        });
+        let output = Command::new(&program)
+            .args(args)
+            .current_dir("/")
+            .envs(self.tool_env())
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|e| {
+                failure(
+                    "starting certutil (package nss-tools / libnss3-tools / mozilla-nss-tools)",
+                    &e.to_string(),
+                    &[],
+                )
+            })?;
+        Ok(CertutilOutput {
+            success: output.status.success(),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        })
     }
 
     pub(crate) fn inspect(&self, _guard: &Guard, label: &str) -> Result<TokenDump, KeydError> {
@@ -295,6 +331,12 @@ impl KeydConfig {
             tcti: self.tcti.clone(),
         })
     }
+}
+
+pub(crate) struct CertutilOutput {
+    pub success: bool,
+    pub stdout: String,
+    pub stderr: String,
 }
 
 pub(crate) struct Token {

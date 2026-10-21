@@ -5,6 +5,7 @@ members = [
     "crates/openhello-ticket",
     "crates/openhello-keyd",
     "crates/openhello-pkcs11",
+    "crates/openhello-pam",
     "crates/sensor-adapter-ir",
     "crates/engine-adapter-face",
     "crates/storage-adapter-templates",

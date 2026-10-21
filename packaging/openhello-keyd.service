@@ -10,6 +10,7 @@ Environment=OPENHELLO_KEYD_TCTI=device:/dev/tpmrm0
 Environment=OPENHELLO_KEYD_TICKET_SOCKET=/run/openhello/keyd-ticket.sock
 Environment=OPENHELLO_KEYD_UNLOCK_SOCKET=/run/openhello/keyd-unlock.sock
 Environment=OPENHELLO_KEYD_TICKET_EXE=/usr/libexec/openhello/openhellod
+Environment=OPENHELLO_KEYD_NSS_DIR=/etc/openhello/nssdb
 EnvironmentFile=-/etc/openhello/openhello-keyd.env
 ExecStart=/usr/libexec/openhello/openhello-keyd
 Restart=on-failure
@@ -26,6 +27,7 @@ PrivateNetwork=yes
 RestrictAddressFamilies=AF_UNIX
 IPAddressDeny=any
 ProtectSystem=strict
+ReadWritePaths=/etc/openhello
 ProtectHome=yes
 ProtectKernelModules=yes
 ProtectKernelTunables=yes

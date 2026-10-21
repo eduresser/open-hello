@@ -71,10 +71,11 @@
 ## T-022 — PAM stack, installer and sudo end-to-end [pending]
 
 - Refs: AC-027, AC-029, AC-030
-- Files: packaging/pam/sudo-openhello, packaging/pam/pam_pkcs11.conf, scripts/install.sh, crates/openhello-cli/tests/pam_sudo.rs, crates/openhello-keyd/src/certificate.rs, crates/openhello-keyd/src/provision.rs, crates/openhello-keyd/src/purge.rs, crates/openhello-pkcs11/src/lib.rs
+- Files: Cargo.toml, packaging/pam/sudo-openhello, packaging/pam/pam_pkcs11.conf, packaging/pam/pkcs11.conf, packaging/openhello-keyd.service, scripts/install.sh, crates/openhello-pam/Cargo.toml, crates/openhello-pam/src/lib.rs, crates/openhello-cli/Cargo.toml, crates/openhello-cli/tests/pam_sudo.rs, crates/openhello-keyd/src/certificate.rs, crates/openhello-keyd/src/config.rs, crates/openhello-keyd/src/provision.rs, crates/openhello-keyd/src/purge.rs, crates/openhello-keyd/src/tpm.rs, crates/openhello-keyd/tests/certificate.rs, crates/openhello-pkcs11/src/lib.rs, crates/openhello-pkcs11/src/config.rs, crates/openhello-pkcs11/tests/privileged_config.rs
 - Model: claude-sonnet-5
 - Effort: high
 - Notes: depends on T-019, T-020, T-024. Tested with a `pam_wrapper` client (pamtester is not packaged) against a private service file. Fixes the wrapper and module paths in root-owned config instead of the caller's environment, supplies the `C_Login` placeholder to `pam_pkcs11`, and uses the root-owned certificate mapping from T-024. `pam_pkcs11` only accepts the self-signed certificate if it is imported as a trusted CA in a root-owned NSS database (`certutil -A -t "CT,C,C"`; the certificate must carry no extensions): Provision imports it there and Purge removes it.
+  `pam_openhello` (new crate) shows "Looking for your face..." and sets the `C_Login` placeholder as the first password; `pam_pkcs11` crashes without a first password, so the stack maps its answer with `[success=ignore ignore=2 default=ignore]` (ignore skips `pam_pkcs11`) and a trailing `pam_openhello.so clear` drops the placeholder before the password module. The PIN is an opt-in second `pam_pkcs11` line (no `use_first_pass`) because a password typed by habit would count against the TPM-wide lockout. The wrapper also exposes only the caller's own token to `pam_pkcs11`, pins the token store from the root-owned config when privileged, and caps `Verify` at 4 s so a silent camera falls through within 5 s.
 
 ## T-023 — KDE lock screen verification [pending]
 

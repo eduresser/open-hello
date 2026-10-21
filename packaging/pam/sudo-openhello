@@ -1,0 +1,8 @@
+#%PAM-1.0
+# Included from /etc/pam.d/sudo ahead of the password module; nothing here is required, so every failure falls through.
+auth    [success=ignore ignore=2 default=ignore]    pam_openhello.so
+auth    sufficient  pam_pkcs11.so use_first_pass config_file=/etc/openhello/pam_pkcs11.conf
+auth    optional    pam_openhello.so clear
+# PIN after a face miss: uncomment the next two lines. A password typed by habit at this prompt counts against the TPM-wide lockout.
+#auth   sufficient  pam_pkcs11.so config_file=/etc/openhello/pam_pkcs11.conf
+#auth   optional    pam_openhello.so clear
