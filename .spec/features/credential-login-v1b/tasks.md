@@ -158,7 +158,7 @@
 ## T-035 — pam_openhello verifies the signature itself; stacks drop pam_pkcs11 [pending]
 
 - Refs: AC-027, AC-029, AC-030
-- Files: crates/openhello-pam/Cargo.toml, crates/openhello-pam/src/lib.rs, crates/openhello-pam/src/challenge.rs, packaging/pam/sudo-openhello, packaging/pam/openhello-lockscreen, packaging/pam/openhello-common-auth, crates/openhello-cli/tests/pam_sudo.rs
+- Files: crates/openhello-pam/Cargo.toml, crates/openhello-pam/src/lib.rs, crates/openhello-pam/src/challenge.rs, packaging/pam/sudo-openhello, packaging/pam/openhello-lockscreen, packaging/pam/openhello-common-auth, crates/openhello-cli/tests/pam_sudo.rs, crates/openhello-cli/Cargo.toml, Cargo.lock
 - Model: claude-sonnet-5
 - Effort: xhigh
 - Notes: depends on T-034. `pam_openhello` generates the challenge (getrandom), asks openhellod `Verify` (4 s ceiling as in T-022), asks keyd to sign, verifies with the root-owned public key (pure Rust P-256, no OpenSSL or NSS), and returns SUCCESS only on a valid signature; every other outcome falls through as today (IGNORE/AUTH_ERR to the password). Same silence for users without a credential and for ssh/allowlist rules. The packaged stacks lose their `pam_pkcs11` lines. The tests no longer need `pam_pkcs11`, so they run the same on every distribution. Keep the `// @spec` proofs of AC-027, AC-029 and AC-030 passing. The verification runs inside the PAM process (accepted trade-off, ASM-014); a missing public key, or one not owned by root, makes the module return `PAM_IGNORE`.
