@@ -100,7 +100,7 @@ unsafe fn arguments(argc: c_int, argv: *const *const c_char) -> Vec<String> {
 }
 
 fn service_available(settings: &Settings, started: Instant) -> bool {
-    let Some(socket) = settings.unlock_socket.as_deref() else {
+    let Some(socket) = settings.token_socket.as_deref() else {
         return false;
     };
     let remaining = || BUDGET.saturating_sub(started.elapsed());

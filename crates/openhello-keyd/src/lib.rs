@@ -7,6 +7,7 @@ mod protector;
 mod provision;
 mod purge;
 mod ticket_socket;
+mod token_socket;
 mod tpm;
 mod unlock_socket;
 
@@ -15,11 +16,9 @@ pub use provision::{KeyAttribute, KeyInfo, Keyd, Provisioned, TpmAttributes};
 pub use ticket_socket::{
     TicketSocket, TicketSocketConfig, OP_TICKET, OP_TICKET_KEY, STATUS_ACCEPTED, STATUS_REFUSED,
 };
+pub use token_socket::*;
 pub use tpm::KeydConfig;
-pub use unlock_socket::{
-    UnlockSocket, UnlockSocketConfig, OP_UNLOCK_FOR_UID, OP_UNLOCK_PIN, OP_UNLOCK_RECOVERY,
-    OP_UNLOCK_TAKE_GRANT, RECOVERY_SEPARATOR,
-};
+pub use unlock_socket::{UnlockSocket, UnlockSocketConfig, OP_UNLOCK_FOR_UID, OP_UNLOCK_RECOVERY};
 
 use openhello_ticket::TicketError;
 use thiserror::Error;
@@ -71,6 +70,12 @@ impl Secret {
     }
 
     pub(crate) fn expose(&self) -> &str {
+        &self.0
+    }
+
+    // Debug builds only (tests prove K never leaves keyd); a release build cannot reveal it.
+    #[cfg(debug_assertions)]
+    pub fn expose_for_tests(&self) -> &str {
         &self.0
     }
 }
