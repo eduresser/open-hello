@@ -45,8 +45,6 @@ pub enum KeydError {
     Tpm,
 }
 
-/// Auth value of a user's token (K). Protectors generate it and seal it in the TPM; provisioning
-/// only needs it to arrive as a parameter.
 pub struct Secret(Zeroizing<String>);
 
 impl Secret {

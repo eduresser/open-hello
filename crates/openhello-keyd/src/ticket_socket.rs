@@ -93,7 +93,7 @@ fn serve(protectors: &Protectors, config: &TicketSocketConfig, mut stream: UnixS
     }
     while let Some((op, payload)) = read_frame(&mut stream) {
         let reply = match (op, payload.len()) {
-            // openhellod obtains the ephemeral ticket key here, after the peer check; it is lost on a keyd restart and must be fetched again.
+            // The ticket key is lost on a keyd restart; openhellod must fetch it again.
             (OP_TICKET_KEY, 0) => {
                 let mut reply = vec![STATUS_ACCEPTED];
                 reply.extend_from_slice(&*protectors.ticket_key_bytes());
