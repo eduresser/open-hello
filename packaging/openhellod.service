@@ -6,7 +6,7 @@ ConditionPathExists=/etc/openhello/engine.json
 [Service]
 Type=simple
 EnvironmentFile=/etc/openhello/openhello.env
-ExecStart=/usr/libexec/openhello/openhellod \
+ExecStart=@LIBEXECDIR@/openhellod \
   --sensor-lib /usr/lib/openhello/libsensor_adapter_ir.so \
   --engine-lib /usr/lib/openhello/libengine_adapter_face.so \
   --storage-lib /usr/lib/openhello/libstorage_adapter_templates.so \
