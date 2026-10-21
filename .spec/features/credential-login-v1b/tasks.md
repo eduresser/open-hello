@@ -47,8 +47,7 @@
 - Effort: xhigh
 - Notes: depends on T-014, T-017, T-018. Forwards all other calls to `tpm2-pkcs11`; refuses templates and embeddings. `C_Login` with the fixed placeholder runs the face flow (openhellod `Verify` -> ticket -> keyd grant); any other PIN runs the PIN Protector. The wrapper never holds the Protector longer than the `C_Login` call. keyd gains an unlock socket where the peer uid must equal the target uid (the user's own process), separate from the root-only ticket socket.
 
-## T-020 — openhello-keyd: D-Bus service, polkit and systemd sandbox [pending]
-
+## T-020 — openhello-keyd: D-Bus service, polkit and systemd sandbox [done]
 - Refs: AC-034
 - Files: crates/openhello-keyd/src/main.rs, crates/openhello-keyd/src/dbus_service.rs, crates/openhello-keyd/src/polkit.rs, crates/openhello-keyd/src/purge.rs, crates/openhello-keyd/tests/dbus_service.rs, packaging/io.openhello.Keyd1.conf, packaging/openhello-keyd.service
 - Model: claude-sonnet-5
