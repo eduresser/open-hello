@@ -182,6 +182,7 @@ install_key_daemon() {
 install_pam_module() {
   local pam_dir
   pam_dir="$(pam_module_dir)"
+  run /usr/local/bin/openhello-cli pam migrate || echo "warning: could not migrate PAM files left by an earlier installer; run openhello-cli pam migrate as root before using sudo" >&2
   run install -d -m 0755 "$pam_dir"
   run install -m 0755 "$T/libpam_openhello.so" "$pam_dir/pam_openhello.so"
   PAM_MODULE_DIR="$pam_dir"
