@@ -848,6 +848,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "openhello-pkcs11"
+version = "0.1.0"
+dependencies = [
+ "async-io",
+ "cryptoki",
+ "cryptoki-sys",
+ "libc",
+ "libloading 0.8.9",
+ "openhello-keyd",
+ "openhello-ticket",
+ "p256",
+ "tempfile",
+ "zbus",
+ "zeroize",
+]
+
+[[package]]
 name = "openhello-plugin-abi"
 version = "0.1.0"
 

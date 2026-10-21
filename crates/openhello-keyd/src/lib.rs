@@ -2,6 +2,7 @@ mod protector;
 mod provision;
 mod ticket_socket;
 mod tpm;
+mod unlock_socket;
 
 pub use protector::{LockoutPolicy, Protectors, RecoveryCode};
 pub use provision::{KeyAttribute, KeyInfo, Keyd, Provisioned, TpmAttributes};
@@ -9,6 +10,10 @@ pub use ticket_socket::{
     TicketSocket, TicketSocketConfig, OP_TICKET, OP_TICKET_KEY, STATUS_ACCEPTED, STATUS_REFUSED,
 };
 pub use tpm::KeydConfig;
+pub use unlock_socket::{
+    UnlockSocket, UnlockSocketConfig, OP_UNLOCK_PIN, OP_UNLOCK_RECOVERY, OP_UNLOCK_TAKE_GRANT,
+    RECOVERY_SEPARATOR,
+};
 
 use openhello_ticket::TicketError;
 use thiserror::Error;
