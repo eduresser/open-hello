@@ -73,19 +73,19 @@ impl Kind {
     }
 }
 
-struct Grant {
+pub(crate) struct Grant {
     secret: Secret,
     created: Instant,
 }
 
 // Weakest point (ASM-008): the biometric Protector has no authValue, so root in keyd can unseal K without a face match; only the 5 s single-use ticket and the match FAR bound it.
 pub struct Protectors {
-    config: KeydConfig,
+    pub(crate) config: KeydConfig,
     keyd: Keyd,
     ticket_key: Zeroizing<[u8; KEY_LEN]>,
     verifier: Mutex<Verifier>,
-    grants: Mutex<HashMap<u32, Grant>>,
-    store: Mutex<()>,
+    pub(crate) grants: Mutex<HashMap<u32, Grant>>,
+    pub(crate) store: Mutex<()>,
 }
 
 impl Protectors {
@@ -151,7 +151,7 @@ impl Protectors {
         Ok(RecoveryCode(code))
     }
 
-    // Unseals K through the biometric Protector, so authorizing the caller is T-020's job.
+    // Unseals K through the biometric Protector, so the caller must be authorized before this runs (dbus_service).
     pub fn set_pin(&self, uid: u32, pin: &str) -> Result<(), KeydError> {
         let uid = validate_uid(uid)?;
         validate_pin(pin)?;
@@ -270,7 +270,7 @@ impl Protectors {
         Ok(())
     }
 
-    fn user_dir(&self, uid: u32) -> PathBuf {
+    pub(crate) fn user_dir(&self, uid: u32) -> PathBuf {
         self.config
             .store_dir
             .join(PROTECTORS_DIR)

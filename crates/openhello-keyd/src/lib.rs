@@ -1,5 +1,9 @@
+pub mod config;
+pub mod dbus_service;
+pub mod polkit;
 mod protector;
 mod provision;
+mod purge;
 mod ticket_socket;
 mod tpm;
 mod unlock_socket;

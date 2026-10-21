@@ -67,6 +67,12 @@ pub(crate) fn lock() -> Guard {
     }
 }
 
+impl Guard {
+    pub(crate) fn reset_module(&self) {
+        **self.loaded.borrow_mut() = None;
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct KeydConfig {
     pub store_dir: PathBuf,

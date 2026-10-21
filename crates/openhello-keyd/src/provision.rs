@@ -277,7 +277,7 @@ impl Keyd {
     }
 }
 
-fn token_label(uid: u32) -> String {
+pub(crate) fn token_label(uid: u32) -> String {
     format!("{TOKEN_LABEL_PREFIX}{uid}")
 }
 

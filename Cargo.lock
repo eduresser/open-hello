@@ -837,6 +837,8 @@ dependencies = [
 name = "openhello-keyd"
 version = "0.1.0"
 dependencies = [
+ "async-io",
+ "blocking",
  "cryptoki",
  "getrandom 0.2.17",
  "libc",
@@ -844,6 +846,7 @@ dependencies = [
  "p256",
  "tempfile",
  "thiserror",
+ "zbus",
  "zeroize",
 ]
 
