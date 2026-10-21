@@ -1,0 +1,5 @@
+#%PAM-1.0
+# Optional level B: paste above the first auth line of the distro common stack (common-auth, system-auth). Local sessions of the services listed in /etc/openhello/allowed-services only; ssh, cron and headless runs return ignore at once.
+auth    [success=ignore ignore=2 default=ignore]    pam_openhello.so allowlist=/etc/openhello/allowed-services
+auth    sufficient  pam_pkcs11.so use_first_pass config_file=/etc/openhello/pam_pkcs11.conf
+auth    optional    pam_openhello.so clear

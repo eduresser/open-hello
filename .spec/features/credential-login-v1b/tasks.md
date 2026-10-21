@@ -86,7 +86,7 @@
 ## T-023 — KDE lock screen verification [pending]
 
 - Refs: AC-028
-- Files: packaging/pam/kde-openhello, .spec/features/credential-login-v1b/lockscreen.md
+- Files: packaging/pam/openhello-lockscreen, packaging/pam/openhello-common-auth, .spec/features/credential-login-v1b/lockscreen.md, scripts/install.sh, scripts/pam-survey.sh, crates/openhello-pam/src/lib.rs, crates/openhello-pkcs11/src/config.rs, crates/openhello-cli/tests/pam_sudo.rs
 - Model: claude-sonnet-5
 - Effort: medium
 - Notes: depends on T-025. Manual check on the Plasma session (ASM-011), recorded as evidence; an unprivileged PAM test through the `kde` service file covers the same path in CI.

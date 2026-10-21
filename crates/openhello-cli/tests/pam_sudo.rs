@@ -22,6 +22,9 @@ const INCLUDED: &str = "sudo-openhello";
 const BUS_NAME: &str = "io.openhello.Biometrics1";
 const OBJECT_PATH: &str = "/io/openhello/Biometrics1";
 const STACK: &str = include_str!("../../../packaging/pam/sudo-openhello");
+const LOCKSCREEN_SERVICE: &str = "openhello-lockscreen";
+const COMMON_STACK: &str = include_str!("../../../packaging/pam/openhello-common-auth");
+const LOCKSCREEN_STACK: &str = include_str!("../../../packaging/pam/openhello-lockscreen");
 const PAM_PKCS11_CONF: &str = include_str!("../../../packaging/pam/pam_pkcs11.conf");
 const WITHIN_BUDGET: Duration = Duration::from_secs(5);
 const STRICT_CLEAR: &str = "[ignore=ignore default=die]";
@@ -53,6 +56,10 @@ int main(int argc, char **argv) {
   if (argc < 3) return 2;
   int rc = pam_start(argv[1], argv[2], &c, &h);
   if (rc != PAM_SUCCESS) return 2;
+  const char *tty = getenv("PAMTEST_TTY");
+  const char *rhost = getenv("PAMTEST_RHOST");
+  pam_set_item(h, PAM_TTY, tty ? tty : "/dev/pts/0");
+  if (rhost) pam_set_item(h, PAM_RHOST, rhost);
   pam_fail_delay(h, 0);
   rc = pam_authenticate(h, 0);
   printf("RESULT %d\n", rc);
@@ -371,6 +378,10 @@ struct Stack {
     typed: &'static str,
     token_socket: Option<PathBuf>,
     bus: Option<String>,
+    lock_screen: bool,
+    common: bool,
+    rhost: Option<&'static str>,
+    allowed_services: Option<&'static str>,
 }
 
 impl Stack {
@@ -381,6 +392,25 @@ impl Stack {
             typed: "",
             token_socket: None,
             bus: None,
+            lock_screen: false,
+            common: false,
+            rhost: None,
+            allowed_services: None,
+        }
+    }
+
+    fn common(verify: Verify, allowed: &'static str) -> Self {
+        Self {
+            common: true,
+            allowed_services: Some(allowed),
+            ..Self::face(verify)
+        }
+    }
+
+    fn lock_screen(verify: Verify) -> Self {
+        Self {
+            lock_screen: true,
+            ..Self::face(verify)
         }
     }
 }
@@ -414,7 +444,12 @@ impl Outcome {
 
 fn service_text(rig: &Rig, stack: &Stack, pkcs11_conf: &Path, hooks_conf: &Path) -> String {
     let mut lines = Vec::new();
-    for line in STACK.lines() {
+    let text = match (stack.lock_screen, stack.common) {
+        (true, _) => LOCKSCREEN_STACK,
+        (_, true) => COMMON_STACK,
+        _ => STACK,
+    };
+    for line in text.lines() {
         let line = match line.strip_prefix("#auth") {
             Some(rest) if stack.pin_prompt => format!("auth{rest}"),
             _ => line.to_string(),
@@ -441,15 +476,36 @@ fn service_text(rig: &Rig, stack: &Stack, pkcs11_conf: &Path, hooks_conf: &Path)
             "pam_openhello.so" => {
                 format!("{} config={}", pam_module().display(), hooks_conf.display())
             }
+            "pam_deny.so" => system_module("pam_deny.so"),
             _ => pam_pkcs11_module(rig),
         };
-        let rest = rest.replace(
-            "/etc/openhello/pam_pkcs11.conf",
-            pkcs11_conf.to_str().unwrap(),
-        );
+        let rest = rest
+            .replace(
+                "/etc/openhello/pam_pkcs11.conf",
+                pkcs11_conf.to_str().unwrap(),
+            )
+            .replace(
+                "/etc/openhello",
+                pkcs11_conf.parent().unwrap().to_str().unwrap(),
+            );
         lines.push(format!("auth {control} {module} {rest}"));
     }
     lines.join("\n") + "\n"
+}
+
+fn system_module(name: &str) -> String {
+    [
+        "/usr/lib64/security",
+        "/lib64/security",
+        "/usr/lib/security",
+        "/usr/lib/x86_64-linux-gnu/security",
+    ]
+    .into_iter()
+    .map(|dir| Path::new(dir).join(name))
+    .find(|p| p.exists())
+    .unwrap_or_else(|| panic!("{name} not found: install the PAM modules to run the PAM tests"))
+    .display()
+    .to_string()
 }
 
 fn pam_pkcs11_module(rig: &Rig) -> String {
@@ -476,36 +532,44 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
     let hooks_conf = etc.join("pkcs11.conf");
     std::fs::write(
         &hooks_conf,
-        format!(
-            "token_socket = {}\nbus_address = {bus}\n",
-            token.display()
-        ),
+        format!("token_socket = {}\nbus_address = {bus}\n", token.display()),
     )
     .unwrap();
     let services = fixture.dir.path().join("services");
     std::fs::create_dir_all(&services).unwrap();
-    std::fs::write(
-        services.join(INCLUDED),
-        service_text(rig, stack, &fixture.pkcs11_conf, &hooks_conf),
-    )
-    .unwrap();
-    std::fs::write(
-        services.join(SERVICE),
-        format!(
-            "auth include {INCLUDED}\nauth required {} path={}\n",
-            fixture.recorder.display(),
-            fixture.dir.path().join("reached").display()
-        ),
-    )
-    .unwrap();
+    let stack_text = service_text(rig, stack, &fixture.pkcs11_conf, &hooks_conf);
+    let recorder = format!(
+        "auth required {} path={}\n",
+        fixture.recorder.display(),
+        fixture.dir.path().join("reached").display()
+    );
+    let service = if stack.lock_screen {
+        std::fs::write(services.join(LOCKSCREEN_SERVICE), stack_text + &recorder).unwrap();
+        LOCKSCREEN_SERVICE
+    } else {
+        std::fs::write(services.join(INCLUDED), stack_text).unwrap();
+        std::fs::write(
+            services.join(SERVICE),
+            format!("auth include {INCLUDED}\n{recorder}"),
+        )
+        .unwrap();
+        SERVICE
+    };
     let reached_file = fixture.dir.path().join("reached");
     let _ = std::fs::remove_file(&reached_file);
     set_verify(stack.verify, 0);
+    if let Some(allowed) = stack.allowed_services {
+        std::fs::write(etc.join("allowed-services"), allowed).unwrap();
+    }
 
     let lib64 = rig.prefix.join("usr/lib64");
     let started = Instant::now();
-    let output = Command::new(&fixture.client)
-        .args([SERVICE, &linux_user_name(uid()).unwrap()])
+    let mut client = Command::new(&fixture.client);
+    if let Some(host) = stack.rhost {
+        client.env("PAMTEST_RHOST", host);
+    }
+    let output = client
+        .args([service, &linux_user_name(uid()).unwrap()])
         .env("PAM_WRAPPER", "1")
         .env("PAM_WRAPPER_SERVICE_DIR", &services)
         .env("LD_PRELOAD", lib64.join("libpam_wrapper.so"))
@@ -792,6 +856,97 @@ fn the_optional_pin_line_accepts_the_pin_after_a_face_miss_and_a_wrong_pin_falls
         assert_eq!(wrong.reached, ["authtok=unset"]);
         assert_eq!(rig.lockout_counter(), 1);
         rig.clear_lockout();
+    });
+}
+
+// @covers:AC-028-pam-path
+#[test]
+fn the_generic_lock_screen_service_authenticates_a_face_without_privilege_and_falls_back_on_a_miss()
+{
+    assert_ne!(
+        unsafe { libc::geteuid() },
+        0,
+        "run as the regular user: the lock screen stack runs unprivileged"
+    );
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+
+        let granted = scenario(
+            &rig,
+            fixture,
+            &services,
+            Stack::lock_screen(Verify::Matches),
+        );
+        assert!(granted.granted(), "{:?}", granted.prompts);
+        assert!(granted.reached.is_empty() && granted.password_prompts() == 0);
+        assert!(granted.said_looking_for_your_face());
+        assert_eq!(granted.verify_calls, 1);
+
+        let miss = scenario(
+            &rig,
+            fixture,
+            &services,
+            Stack::lock_screen(Verify::NoMatch),
+        );
+        assert!(!miss.granted());
+        assert_eq!(miss.reached, ["authtok=unset"]);
+        assert_eq!(miss.password_prompts(), 0, "{:?}", miss.prompts);
+
+        let no_keyd = scenario(
+            &rig,
+            fixture,
+            &services,
+            Stack {
+                token_socket: Some(fixture.dir.path().join("absent.sock")),
+                ..Stack::lock_screen(Verify::Matches)
+            },
+        );
+        assert!(!no_keyd.granted());
+        assert_eq!(no_keyd.reached, ["authtok=unset"]);
+        assert_eq!(no_keyd.verify_calls, 0);
+        assert!(no_keyd.elapsed < WITHIN_BUDGET, "{:?}", no_keyd.elapsed);
+    });
+}
+
+// @covers:AC-028-pam-path
+#[test]
+fn the_common_stack_placement_acts_only_on_local_allowlisted_sessions() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+
+        let listed = scenario(
+            &rig,
+            fixture,
+            &services,
+            Stack::common(Verify::Matches, "# local\nsudo\n"),
+        );
+        assert!(listed.granted(), "{:?}", listed.prompts);
+        assert_eq!(listed.verify_calls, 1);
+
+        let unlisted = scenario(
+            &rig,
+            fixture,
+            &services,
+            Stack::common(Verify::Matches, "gdm-password\n"),
+        );
+        let ssh = scenario(
+            &rig,
+            fixture,
+            &services,
+            Stack {
+                rhost: Some("203.0.113.9"),
+                ..Stack::common(Verify::Matches, "sudo\n")
+            },
+        );
+        for ignored in [&unlisted, &ssh] {
+            assert!(!ignored.granted());
+            assert_eq!(ignored.reached, ["authtok=unset"]);
+            assert_eq!(ignored.verify_calls, 0, "the camera must not be touched");
+            assert!(!ignored.said_looking_for_your_face());
+            assert!(ignored.elapsed < WITHIN_BUDGET, "{:?}", ignored.elapsed);
+        }
     });
 }
 
