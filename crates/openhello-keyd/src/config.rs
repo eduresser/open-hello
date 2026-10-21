@@ -45,6 +45,7 @@ impl DaemonConfig {
             keyd.mapfile = PathBuf::from(mapfile);
         }
         keyd.prefix = get("OPENHELLO_TPM2_PKCS11_PREFIX").map(PathBuf::from);
+        keyd.module = get("OPENHELLO_TPM2_PKCS11_MODULE").map(PathBuf::from);
         keyd.nss_dir = get("OPENHELLO_KEYD_NSS_DIR").map(PathBuf::from);
         keyd.certutil = get("OPENHELLO_KEYD_CERTUTIL").map(PathBuf::from);
         let allowed_uid = match get("OPENHELLO_KEYD_TICKET_UID") {
