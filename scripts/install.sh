@@ -83,7 +83,7 @@ install_runtime_and_models() {
   work="$(mktemp -d)"
   fetch_verified "https://github.com/microsoft/onnxruntime/releases/download/v$ORT_VERSION/onnxruntime-linux-x64-$ORT_VERSION.tgz" "$ORT_SHA256" "$work/ort.tgz"
   run tar -xzf "$work/ort.tgz" --no-same-owner -C "$work"
-  run cp -a --no-preserve=ownership "$work/onnxruntime-linux-x64-$ORT_VERSION/lib/." "$LIB_DIR/"
+  run cp -a --no-preserve=ownership --remove-destination "$work/onnxruntime-linux-x64-$ORT_VERSION/lib/." "$LIB_DIR/"
   fetch_verified "$YUNET_URL" "$YUNET_SHA256" "$MODELS_DIR/yunet.onnx"
   fetch_verified "$AURAFACE_URL" "$AURAFACE_SHA256" "$MODELS_DIR/glintr100.onnx"
   rm -rf "$work"
@@ -123,6 +123,7 @@ run cargo build --release --manifest-path "$REPO/Cargo.toml" \
 
 if [ -n "${SUDO_USER:-}" ] && [ "$DRY_RUN" = 0 ]; then chown -R "$SUDO_USER" "$REPO/target"; fi
 T="$REPO/target/release"
+run systemctl stop openhellod openhello-keyd 2>/dev/null || true
 run install -d -m 0755 "$LIB_DIR" "$BIN_DIR" "$CONF_DIR"
 run install -d -m 0700 /var/lib/openhello
 for lib in libsensor_adapter_ir libengine_adapter_face libstorage_adapter_templates; do
@@ -229,11 +230,13 @@ install_sudo_login
 
 run systemctl daemon-reload
 run systemctl reload dbus 2>/dev/null || true
-run systemctl enable --now openhello-keyd 2>/dev/null || true
+run systemctl enable openhello-keyd 2>/dev/null || true
+run systemctl restart openhello-keyd 2>/dev/null || true
 
 if [ "$CALIBRATED" = 1 ]; then
   run systemctl reset-failed openhellod 2>/dev/null || true
-  run systemctl enable --now openhellod 2>/dev/null || true
+  run systemctl enable openhellod 2>/dev/null || true
+  run systemctl restart openhellod 2>/dev/null || true
   echo
   echo "open-hello installed and started. Check OPENHELLO_DEVICE (the IR camera node) in $CONF_DIR/openhello.env"
 else
