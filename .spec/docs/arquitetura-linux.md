@@ -48,7 +48,7 @@ Papel equivalente ao `WbioSrvc`: orquestra sensor/engine/storage, nunca toca em 
 
 - **Transporte**: D-Bus system bus, serviço `io.openhello.Biometrics1`. Cada chamada carrega o `SO_PEERCRED`/sender do D-Bus como identidade — equivalente direto ao `RpcImpersonateClient` por chamada do WinBio, sem precisar reconstruir o aparato NDR/ALPC completo.
 - **Operações**: `OpenSession`, `EnumUnits`, `CaptureSample`, `EnrollBegin/Capture/Commit/Discard`, `Identify`, `Verify`, `AcquireFocus/ReleaseFocus`, `LockUnit/UnlockUnit` — mesmo vocabulário do WinBio, mapeado 1:1 onde possível para facilitar auditoria cruzada com a documentação do Windows.
-- **Arbitragem de foco**: necessária desde o v1 — o greeter (GDM/SDDM) e uma sessão de usuário ativa podem disputar a mesma câmera/sensor ao mesmo tempo. Replica `AcquireFocus`/`ReleaseFocus` do Windows.
+- **Arbitragem de foco**: necessária desde o v1 — o greeter e uma sessão de usuário ativa podem disputar a mesma câmera/sensor ao mesmo tempo. Replica `AcquireFocus`/`ReleaseFocus` do Windows.
 - **Plugins**: contrato C simples — um `.so` por adapter, um símbolo de entrada (`openhello_sensor_interface()`, `openhello_engine_interface()`, `openhello_storage_interface()`) retornando uma struct de ponteiros de função, carregado via `dlopen`/`dlsym`. Réplica direta do `WbioQuery<Camada>Interface` do Windows — nada de D-Bus/COM entre o daemon e os plugins, é tudo in-process.
 
 ### Sensor + Engine Adapter — impressão digital
@@ -162,7 +162,7 @@ Interface D-Bus fina, `io.openhello.ConsentVerifier1`, método `RequestVerificat
 
 - **v1a — prova de reconhecimento (sem TPM/PAM ainda)**: `openhellod` sozinho, rodando por CLI. Sensor Adapter (V4L2 no nó IR + ativação do emissor via XU, usando o GUID já identificado) + Engine Adapter (embedding + matching + liveness básico) + Storage Adapter (templates cifrados). Critério de pronto: enrollment e verify funcionando de forma confiável na sua própria cara, sem nenhuma integração de login ainda. Esse é o maior risco técnico do projeto — validar isso primeiro, isolado, evita descobrir problemas de reconhecimento só depois de já ter construído a camada de credencial em cima.
 - **v1b — integração de credencial**: `openhello-keyd` com chave TPM/token PKCS#11 + `pam_pkcs11` configurado + shim de login que troca o PIN pelo resultado do `Verify` do v1a. Fecha o fluxo ponta a ponta: olhar pra câmera → desbloquear.
-- **v2**: anti-spoof mais robusto (hoje documentado como ponto fraco frente ao "Enhanced Sign-in Security" do Windows), UX de greeter (GDM/SDDM) com indicação visual de biometria disponível.
+- **v2**: anti-spoof mais robusto (hoje documentado como ponto fraco frente ao "Enhanced Sign-in Security" do Windows), UX de greeter com indicação visual de biometria disponível.
 - **v3 (opcional)**: Sensor+Engine Adapter de impressão digital via `fprintd`, caso o usuário ganhe/compre hardware com leitor — a arquitetura já foi desenhada para isso, é só mais um plugin. API de consentimento pontual para apps (D-Bus), integração LUKS/SSH via o mesmo token PKCS#11.
 - **Futuro, condicionado a hardware**: avaliar TEE (SGX/TDX/TrustZone/OP-TEE) para aproximar o nível de isolamento do trustlet VBS, caso o projeto queira mirar paridade total de segurança com "Enhanced Sign-in Security".
 

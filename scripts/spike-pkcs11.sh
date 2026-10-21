@@ -376,6 +376,6 @@ $PTOOL addkey --label ohhex --userpin "$HEXPIN" --algorithm ecc256 >/dev/null 2>
 check "40-char hex PIN works as C_Login secret for a P-256 key" bash -c "P11PROBE_LABEL=ohhex '$BIN/p11probe' '$P11_REAL' sign '$HEXPIN' 2>/dev/null | grep -q 'sign_rv=0x0'"
 
 say
-say "== not covered here: ASM-011 (KDE lock screen runs the PAM service), real /dev/tpm0 behavior, real kscreenlocker conversation"
+say "== not covered here: real /dev/tpm0 behavior, a real screen locker conversation"
 if [ "$FAILS" -eq 0 ]; then say "RESULT: all checks passed"; else say "RESULT: $FAILS check(s) failed"; fi
 exit "$FAILS"

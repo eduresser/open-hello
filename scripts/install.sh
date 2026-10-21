@@ -258,7 +258,7 @@ echo
 echo "open-hello installed and started. Check OPENHELLO_DEVICE (the IR camera node) in $CONF_DIR/openhello.env"
 echo "PAM module installed at $PAM_MODULE_DIR/pam_openhello.so"
 if [ "$PAM_ENABLED" = 1 ] || { [ "$DRY_RUN" = 1 ] && [ "$ENABLE_PAM" = 1 ]; }; then
-  echo "PAM module enabled once in the common auth stack (sudo, polkit, lock screen and greeters listed in $CONF_DIR/pam-services). It only acts for users who enrolled a face; passwords keep working. Undo with: sudo openhello-cli pam disable (check with: openhello-cli pam status)"
+  echo "PAM module enabled once in the common auth stack (every local service except login, su, sshd, cron and similar). It only acts for users who enrolled a face; passwords keep working. Undo with: sudo openhello-cli pam disable (check with: openhello-cli pam status)"
 else
   echo "PAM module not enabled. Enable it with: sudo openhello-cli pam enable (whole integration) or per service: sudo openhello-cli pam enable <service>..."
 fi

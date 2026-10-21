@@ -8,7 +8,7 @@
 `openhellod` already enrolls and recognizes a face (feature `face-recognition-proof`). Today a successful
 `Verify` is only a boolean. v1b turns it into authorization to use a per-user, TPM-sealed ECDSA P-256 key,
 exposed as a PKCS#11 token, so that `sudo` and the lock screen can accept a face (or a PIN fallback) through the
-existing `pam_pkcs11` stack. Scope is `sudo` and the lock screen; graphical login (GDM/SDDM) is roadmap v2.
+existing `pam_pkcs11` stack. Scope is `sudo` and the lock screen; graphical login through a display-manager greeter is roadmap v2.
 
 ## Stories
 
@@ -110,9 +110,9 @@ As a laptop owner on any Linux distribution and desktop, I want `sudo` and the l
 
 #### AC-028 — A matching face passes a lock screen's PAM authentication without a password
 
-- **Given** an enrolled and provisioned user on a locked graphical session whose screen locker authenticates through PAM, with the open-hello module enabled in that locker's PAM service
+- **Given** an enrolled and provisioned user on a locked graphical session whose screen locker authenticates through PAM, with the open-hello module enabled once in the common PAM auth stack
 - **When** the user looks at the camera
-- **Then** the locker's own PAM service authenticates the face with no password, as the unprivileged user and through the same path as `sudo`, with no desktop-specific code in open-hello; a miss, or an unavailable daemon, falls through to the password; completing the unlock afterwards is the locker's own behaviour (KDE shows one confirmation button, verified on Plasma 6.8)
+- **Then** the locker's own PAM service authenticates the face with no password, as the unprivileged user and through the same path as `sudo`, with no desktop-specific code, data or message in open-hello; the module acts for every local service except a compiled denylist of non-desktop services (`login`, `su`, `su-l`, `sshd`, `cron`, `crond`, `atd`, `passwd`, `chsh`, `chfn`, `runuser`, `runuser-l`, `other`) and stays silent for remote or headless sessions, root, and users without a registered credential; a miss, or an unavailable daemon, falls through to the password; completing the unlock afterwards is the locker's own behaviour
 
 #### AC-029 — A different face is never accepted and falls through to the password
 
@@ -192,7 +192,7 @@ As a person installing open-hello, I want the false-accept calibration to ship i
 
 ## Out of scope
 
-- GDM/SDDM graphical login and its UX (roadmap v2).
+- Graphical login through a display-manager greeter and its UX (roadmap v2).
 - Anti-spoofing improvements; the printed-photo risk stays accepted (see `face-recognition-proof` ASM-005).
 - SSH agent and LUKS use of the same token (follow-up, the token is built to allow it).
 - `io.openhello.ConsentVerifier1` (roadmap v3) and fingerprint support.
@@ -208,7 +208,7 @@ As a person installing open-hello, I want the false-accept calibration to ship i
 | ASM-008 | The biometric Protector secret (20 random bytes) is held by `openhello-keyd`, sealed in the TPM without an auth value and released only against a valid ticket. TPM lockout therefore throttles the PIN path only; the biometric path is bounded by the match FAR and the ticket lifetime. | open | Honest weaker point versus a PIN: a root-level compromise of `openhello-keyd` can unlock the key. Documented, not mitigated in v1b. |
 | ASM-009 | Ticket lifetime of 5 seconds, single use, is a provisional default. | open | Adjustable, like `face-recognition-proof` ASM-002; revisit after real `sudo` and lock-screen use. |
 | ASM-010 | `swtpm` supports ECC P-256 and the dictionary-attack lockout well enough to run the key and lockout tests in CI. | confirmed | Proved (spike.md): swtpm has P-256 and the dictionary-attack lockout; three wrong auths give `inLockout=1`, the right password is refused (0x921), `--clear-lockout` recovers. Needs a recovery time above zero and `tpm2-abrmd`. The lockout counter is global to the TPM, not per key: tests and T-017 must set `max-tries` and `recovery-time`. |
-| ASM-011 | A PAM-based screen locker can run the open-hello PAM module non-interactively through its own PAM service, on any distro and desktop with an IR camera. | open | open-hello ships a generic lock-screen PAM service; a manual test on this machine's KDE Plasma is the first check, and other lockers (GNOME, swaylock, i3lock, LightDM) are listed as unverified. AC-028 stays unproven until the manual test. |
+| ASM-011 | A PAM-based screen locker can run the open-hello PAM module non-interactively through the common auth stack, on any distro and desktop with an IR camera. | confirmed | One line in the common stack (`auth sufficient pam_openhello.so`), no per-locker service or code. Live evidence on one VM (2026-10-21, `lockscreen.md`): the locker's own PAM service authenticated the face without a password. Other lockers are unverified; the module ignores services in the compiled denylist (T-044). |
 | ASM-012 | Purge destroys the user's key the way P-008 intends. | confirmed | Accepted by parity with Windows Hello, where NGC containers are logical and no persistent TPM handle exists either (MS-HOW, `windows-hello-alignment.md`). `tpm2-pkcs11` keeps the key as a wrapped blob in its store under a deterministic primary; Purge removes the token and every Protector, so nobody can unlock it. An attacker holding a copy of the store, the sealed Protector blobs and the same TPM could still sign (T-020 test); closing that would need a persistent TPM object per user and goes beyond Windows. AC-033 is worded accordingly. |
 | ASM-013 | The embedded calibration table, measured on visible-light photos (LFW) through the real detector and embedding model, is an acceptable provisional default for the infrared camera. | open | Not proven: infrared impostor scores may differ and the 2-person live test (ASM-001) does not measure FAR. Replace the table with one measured on infrared captures from the target camera once enough people are available; the table is one 1,072-byte file plus the golden test, so swapping it is cheap. |
 | ASM-014 | `pam_openhello` can ask keyd to sign a random challenge and verify the ECDSA P-256 signature itself against a root-owned public key, so the PAM path needs no `pam_pkcs11`, NSS database or certificate mapping (owner decision, 2026-10-21). | confirmed | Three failures on the first Ubuntu run came from `pam_pkcs11` build differences (search templates, NSS trust, subject format), and Arch has no official package. The PKCS#11 token and certificate stay for SSH and LUKS. ASM-006 and ASM-007 describe the earlier `pam_pkcs11` path and remain true for it, but the PAM stacks stop depending on it. Windows basis (`windows-hello-alignment.md`): the Entra/Cloud AP and AD key-trust flows sign a nonce and verify it against a registered public key without a PKI (MS-AUTH, confirmed); local-account Hello uses no asymmetric key (MS-OVR, confirmed), so this is an adaptation of the Entra pattern, not a copy of the local case. Verification runs inside the PAM process: equivalent to Windows under `sudo` (root), weaker on user-level lock screens where Windows verifies outside the UI process. Accepted for v1b; moving the check to a root helper or keyd is a later improvement. Live evidence (2026-10-21, KDE neon VM, Ubuntu noble, real vTPM): `sudo true` authenticated by face through `pam_openhello` alone (Verify accepted, ticket delivered, TPM signature of the PAM challenge verified against `/etc/openhello/auth/1000.pub`), no password prompt, exit 0; a single run reported by the owner, so it is evidence of the path, not a success rate or a timing. Not yet measured on the physical TPM or with a second person. |

@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 pub const PAM_USAGE: &str = "usage: openhello-cli pam <enable [service...] | disable [service...] | status | migrate> [--root DIR] [--arg flag|key=value]...";
 
 const MODULE: &str = "pam_openhello.so";
-const ALLOWLIST_PATH: &str = "/etc/openhello/pam-services";
-const ALLOWLIST_DATA: &str = include_str!("../../../packaging/pam/pam-services");
+const LEGACY_SERVICES_PATH: &str = "/etc/openhello/pam-services";
+const LEGACY_SERVICES_HEADER: &str = "# Services where pam_openhello may use the camera";
 const FALLBACK: &str =
     "per-service fallback: sudo openhello-cli pam enable <service>... (one service per file in /etc/pam.d)";
 const COMMON_STACKS: &[&str] = &[
@@ -20,7 +20,7 @@ const COMMON_STACKS: &[&str] = &[
     "system-login",
     "postlogin",
 ];
-const OLD_STACK_FILES: &[&str] = &["sudo-openhello", "openhello-lockscreen", "kde-face"];
+const OLD_STACK_FILES: &[&str] = &["sudo-openhello", "openhello-lockscreen"];
 const OLD_INCLUDES: &[&str] = &["sudo-openhello", "openhello-lockscreen"];
 const BACKUP_SUFFIX: &str = ".openhello.bak";
 
@@ -377,13 +377,6 @@ fn disable_one(dirs: &Dirs, service: &str) -> Result<String, String> {
     Ok(format!("{service}: disabled, removed {removed} line(s)"))
 }
 
-fn allowlist_services(text: &str) -> Vec<&str> {
-    text.lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .collect()
-}
-
 fn include_target(line: &str) -> Option<&str> {
     let tokens: Vec<&str> = line.split_whitespace().collect();
     match tokens.as_slice() {
@@ -427,9 +420,7 @@ fn enable_common(
     if content.lines().any(is_our_line) {
         say(format!("{name}: already enabled in {}", path.display()));
     } else {
-        let mut args = vec![format!("allowlist={ALLOWLIST_PATH}")];
-        args.extend(module_args.iter().cloned());
-        let line = our_line(&args);
+        let line = our_line(module_args);
         rewrite(
             &path,
             &name,
@@ -437,41 +428,40 @@ fn enable_common(
         )?;
         say(format!("{name}: enabled in {}", path.display()));
     }
-    write_allowlist(dirs, say)?;
-    for service in allowlist_services(ALLOWLIST_DATA) {
-        if service == name {
-            continue;
+    for service in editable_names(dirs)? {
+        if service != name {
+            remove_service_lines(dirs, &service, say)?;
         }
-        remove_service_lines(dirs, service, say)?;
     }
     Ok(())
 }
 
-fn write_allowlist(dirs: &Dirs, say: &mut dyn FnMut(String)) -> Result<(), String> {
-    let path = allowlist_file(dirs);
-    if fs::symlink_metadata(&path).is_ok() {
-        say(format!(
-            "{}: kept as is (never overwritten)",
-            path.display()
-        ));
-        return Ok(());
-    }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
-    }
-    write_atomic(&path, ALLOWLIST_DATA.as_bytes(), 0o644, None)?;
-    say(format!("{}: written", path.display()));
-    Ok(())
-}
-
-fn allowlist_file(dirs: &Dirs) -> PathBuf {
+fn legacy_services_file(dirs: &Dirs) -> PathBuf {
     let root = dirs
         .etc
         .parent()
         .and_then(Path::parent)
         .unwrap_or(Path::new("/"));
-    root.join(ALLOWLIST_PATH.trim_start_matches('/'))
+    root.join(LEGACY_SERVICES_PATH.trim_start_matches('/'))
+}
+
+fn has_legacy_allowlist(line: &str) -> bool {
+    is_our_line(line) && line.split_whitespace().any(|t| t.starts_with("allowlist="))
+}
+
+fn without_legacy_allowlist(line: &str) -> String {
+    let (body, ending) = match line.strip_suffix('\n') {
+        Some(body) => (body, "\n"),
+        None => (line, ""),
+    };
+    let mut kept: Vec<&str> = body
+        .split_whitespace()
+        .filter(|t| !t.starts_with("allowlist="))
+        .collect();
+    if kept.is_empty() {
+        kept.push(MODULE);
+    }
+    format!("{}{ending}", kept.join(" "))
 }
 
 fn is_regular(path: &Path) -> bool {
@@ -527,9 +517,6 @@ fn disable_everywhere(dirs: &Dirs, say: &mut dyn FnMut(String)) -> Result<(), St
     if touched == 0 {
         say("not enabled anywhere".to_string());
     }
-    say(format!(
-        "{ALLOWLIST_PATH} was left in place; delete it by hand if you no longer need it"
-    ));
     Ok(())
 }
 
@@ -547,13 +534,6 @@ fn report_common_stack(dirs: &Dirs, say: &mut dyn FnMut(String)) {
             say(format!("common stack: {name}, {state}"));
         }
         Err(reason) => say(format!("common stack: not found ({reason})")),
-    }
-    match fs::read_to_string(allowlist_file(dirs)) {
-        Ok(text) => say(format!(
-            "allowlist {ALLOWLIST_PATH}: {}",
-            allowlist_services(&text).join(", ")
-        )),
-        Err(_) => say(format!("allowlist {ALLOWLIST_PATH}: missing")),
     }
 }
 
@@ -591,7 +571,7 @@ fn list_names(dir: &Path) -> Result<Vec<String>, String> {
 }
 
 fn is_ours(text: &str) -> bool {
-    text.contains(MODULE) || text.contains("include openhello-lockscreen")
+    text.contains(MODULE)
 }
 
 fn migrate(dirs: &Dirs, say: &mut dyn FnMut(String)) -> Result<usize, String> {
@@ -619,6 +599,36 @@ fn migrate(dirs: &Dirs, say: &mut dyn FnMut(String)) -> Result<usize, String> {
             changes += removed;
         }
     }
+    for name in &names {
+        let path = dirs.etc.join(name);
+        let regular = fs::symlink_metadata(&path).is_ok_and(|m| m.is_file());
+        let Some(content) = regular.then(|| fs::read_to_string(&path).ok()).flatten() else {
+            continue;
+        };
+        if name.ends_with(BACKUP_SUFFIX)
+            || name.starts_with('.')
+            || !content.lines().any(has_legacy_allowlist)
+        {
+            continue;
+        }
+        let migrated: String = content
+            .split_inclusive('\n')
+            .map(|l| {
+                if has_legacy_allowlist(l) {
+                    without_legacy_allowlist(l)
+                } else {
+                    l.to_string()
+                }
+            })
+            .collect();
+        rewrite(&path, name, &migrated)?;
+        say(format!(
+            "migrated: dropped the retired `allowlist=` argument from {}",
+            path.display()
+        ));
+        changes += 1;
+    }
+    remove_legacy_services_file(dirs, say, &mut changes)?;
     for name in OLD_STACK_FILES {
         let path = dirs.etc.join(name);
         let Ok(meta) = fs::symlink_metadata(&path) else {
@@ -640,4 +650,20 @@ fn migrate(dirs: &Dirs, say: &mut dyn FnMut(String)) -> Result<usize, String> {
         }
     }
     Ok(changes)
+}
+
+fn remove_legacy_services_file(
+    dirs: &Dirs,
+    say: &mut dyn FnMut(String),
+    changes: &mut usize,
+) -> Result<(), String> {
+    let path = legacy_services_file(dirs);
+    let ours = fs::symlink_metadata(&path).is_ok_and(|m| m.is_file())
+        && fs::read_to_string(&path).is_ok_and(|t| t.starts_with(LEGACY_SERVICES_HEADER));
+    if ours {
+        fs::remove_file(&path).map_err(|e| format!("cannot remove {}: {e}", path.display()))?;
+        say(format!("migrated: removed retired {}", path.display()));
+        *changes += 1;
+    }
+    Ok(())
 }

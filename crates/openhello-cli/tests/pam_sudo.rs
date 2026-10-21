@@ -21,9 +21,24 @@ const INCLUDED: &str = "sudo-openhello";
 const BUS_NAME: &str = "io.openhello.Biometrics1";
 const OBJECT_PATH: &str = "/io/openhello/Biometrics1";
 const STACK: &str = include_str!("../../../packaging/pam/sudo-openhello");
-const LOCKSCREEN_SERVICE: &str = "openhello-lockscreen";
-const COMMON_STACK: &str = "auth sufficient pam_openhello.so allowlist=/etc/openhello/allowed-services\n";
-const LOCKSCREEN_STACK: &str = include_str!("../../../packaging/pam/openhello-lockscreen");
+const INTERACTIVE_SERVICE: &str = "openhello-interactive";
+const COMMON_STACK: &str = "auth sufficient pam_openhello.so\n";
+const INTERACTIVE_STACK: &str = "auth sufficient pam_openhello.so\nauth required pam_deny.so\n";
+const DENIED_SERVICES: [&str; 13] = [
+    "login",
+    "su",
+    "su-l",
+    "sshd",
+    "cron",
+    "crond",
+    "atd",
+    "passwd",
+    "chsh",
+    "chfn",
+    "runuser",
+    "runuser-l",
+    "other",
+];
 const WITHIN_BUDGET: Duration = Duration::from_secs(5);
 const STRICT_CONTROL: &str = "[success=done ignore=ignore default=die]";
 const PAM_AUTH_ERR: i32 = 7;
@@ -355,11 +370,10 @@ struct Stack {
     root_owned_keys_only: bool,
     token_socket: Option<PathBuf>,
     bus: Option<String>,
-    lock_screen: bool,
+    direct: Option<&'static str>,
     common: bool,
     rhost: Option<&'static str>,
     user: Option<&'static str>,
-    allowed_services: Option<&'static str>,
 }
 
 impl Stack {
@@ -370,18 +384,17 @@ impl Stack {
             root_owned_keys_only: false,
             token_socket: None,
             bus: None,
-            lock_screen: false,
+            direct: None,
             common: false,
             rhost: None,
             user: None,
-            allowed_services: None,
         }
     }
 
-    fn common(verify: Verify, allowed: &'static str) -> Self {
+    fn common(verify: Verify, service: &'static str) -> Self {
         Self {
             common: true,
-            allowed_services: Some(allowed),
+            direct: Some(service),
             ..Self::face(verify)
         }
     }
@@ -393,9 +406,9 @@ impl Stack {
         }
     }
 
-    fn lock_screen(verify: Verify) -> Self {
+    fn interactive(verify: Verify) -> Self {
         Self {
-            lock_screen: true,
+            direct: Some(INTERACTIVE_SERVICE),
             ..Self::face(verify)
         }
     }
@@ -433,9 +446,9 @@ impl Outcome {
 }
 
 fn service_text(stack: &Stack, hooks_conf: &Path, auth_dir: &Path, etc: &Path) -> String {
-    let text = match (stack.lock_screen, stack.common) {
-        (true, _) => LOCKSCREEN_STACK,
+    let text = match (stack.direct, stack.common) {
         (_, true) => COMMON_STACK,
+        (Some(_), _) => INTERACTIVE_STACK,
         _ => STACK,
     };
     let trust = if stack.root_owned_keys_only {
@@ -521,9 +534,9 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
         fixture.recorder.display(),
         fixture.dir.path().join("reached").display()
     );
-    let service = if stack.lock_screen {
-        std::fs::write(services.join(LOCKSCREEN_SERVICE), stack_text + &recorder).unwrap();
-        LOCKSCREEN_SERVICE
+    let service = if let Some(name) = stack.direct {
+        std::fs::write(services.join(name), stack_text + &recorder).unwrap();
+        name
     } else {
         std::fs::write(services.join(INCLUDED), stack_text).unwrap();
         std::fs::write(
@@ -536,9 +549,6 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
     let reached_file = fixture.dir.path().join("reached");
     let _ = std::fs::remove_file(&reached_file);
     set_verify(stack.verify, 0);
-    if let Some(allowed) = stack.allowed_services {
-        std::fs::write(etc.join("allowed-services"), allowed).unwrap();
-    }
 
     let lib64 = rig.prefix.join("usr/lib64");
     let started = Instant::now();
@@ -956,12 +966,11 @@ fn the_built_module_declares_libpam_as_a_needed_library() {
 
 // @spec:AC-028
 #[test]
-fn the_generic_lock_screen_service_authenticates_a_face_without_privilege_and_falls_back_on_a_miss()
-{
+fn a_local_interactive_service_authenticates_a_face_without_privilege_and_falls_back_on_a_miss() {
     assert_ne!(
         unsafe { libc::geteuid() },
         0,
-        "run as the regular user: the lock screen stack runs unprivileged"
+        "run as the regular user: an interactive service runs unprivileged"
     );
     let rig = rig();
     with_fixture(&rig, |fixture| {
@@ -971,7 +980,7 @@ fn the_generic_lock_screen_service_authenticates_a_face_without_privilege_and_fa
             &rig,
             fixture,
             &services,
-            Stack::lock_screen(Verify::Matches),
+            Stack::interactive(Verify::Matches),
         );
         assert!(granted.granted(), "{:?}", granted.prompts);
         assert!(granted.reached.is_empty() && granted.password_prompts() == 0);
@@ -982,7 +991,7 @@ fn the_generic_lock_screen_service_authenticates_a_face_without_privilege_and_fa
             &rig,
             fixture,
             &services,
-            Stack::lock_screen(Verify::NoMatch).lenient(),
+            Stack::interactive(Verify::NoMatch).lenient(),
         );
         assert!(!miss.granted());
         assert_eq!(miss.reached, ["authtok=unset"]);
@@ -994,7 +1003,7 @@ fn the_generic_lock_screen_service_authenticates_a_face_without_privilege_and_fa
             &services,
             Stack {
                 token_socket: Some(fixture.dir.path().join("absent.sock")),
-                ..Stack::lock_screen(Verify::Matches)
+                ..Stack::interactive(Verify::Matches)
             },
         );
         assert!(!no_keyd.granted());
@@ -1006,41 +1015,76 @@ fn the_generic_lock_screen_service_authenticates_a_face_without_privilege_and_fa
 
 // @covers:AC-028-pam-path
 #[test]
-fn the_common_stack_placement_acts_only_on_local_allowlisted_sessions() {
+fn the_common_stack_placement_acts_on_local_services_and_ignores_the_denylist_remote_and_root() {
     let rig = rig();
     with_fixture(&rig, |fixture| {
         let services = services(&rig, fixture);
 
-        let listed = scenario(
-            &rig,
-            fixture,
-            &services,
-            Stack::common(Verify::Matches, "# local\nsudo\n"),
-        );
-        assert!(listed.granted(), "{:?}", listed.prompts);
-        assert_eq!(listed.verify_calls, 1);
+        for service in ["sudo", "polkit-1", INTERACTIVE_SERVICE] {
+            let acted = scenario(
+                &rig,
+                fixture,
+                &services,
+                Stack::common(Verify::Matches, service),
+            );
+            assert!(acted.granted(), "{service}: {:?}", acted.prompts);
+            assert_eq!(acted.verify_calls, 1, "{service}");
+            assert!(acted.said_looking_for_your_face(), "{service}");
+        }
 
-        let unlisted = scenario(
-            &rig,
-            fixture,
-            &services,
-            Stack::common(Verify::Matches, "gdm-password\n"),
-        );
-        let ssh = scenario(
-            &rig,
-            fixture,
-            &services,
-            Stack {
-                rhost: Some("203.0.113.9"),
-                ..Stack::common(Verify::Matches, "sudo\n")
-            },
-        );
-        for ignored in [&unlisted, &ssh] {
-            assert!(!ignored.granted());
-            assert_eq!(ignored.reached, ["authtok=unset"]);
-            assert_eq!(ignored.verify_calls, 0, "the camera must not be touched");
-            assert!(!ignored.said_looking_for_your_face());
-            assert!(ignored.elapsed < WITHIN_BUDGET, "{:?}", ignored.elapsed);
+        let mut ignored = Vec::new();
+        for service in DENIED_SERVICES {
+            ignored.push((
+                service,
+                scenario(
+                    &rig,
+                    fixture,
+                    &services,
+                    Stack::common(Verify::Matches, service),
+                ),
+            ));
+        }
+        ignored.push((
+            "remote",
+            scenario(
+                &rig,
+                fixture,
+                &services,
+                Stack {
+                    rhost: Some("203.0.113.9"),
+                    ..Stack::common(Verify::Matches, "sudo")
+                },
+            ),
+        ));
+        ignored.push((
+            "root",
+            scenario(
+                &rig,
+                fixture,
+                &services,
+                Stack {
+                    user: Some("root"),
+                    ..Stack::common(Verify::Matches, "sudo")
+                },
+            ),
+        ));
+        for (label, outcome) in &ignored {
+            assert!(!outcome.granted(), "{label}");
+            assert!(
+                !outcome.reached.is_empty() && outcome.reached.iter().all(|r| r == "authtok=unset"),
+                "{label}: {:?}",
+                outcome.reached
+            );
+            assert_eq!(
+                outcome.verify_calls, 0,
+                "{label}: the camera must not be touched"
+            );
+            assert!(!outcome.said_looking_for_your_face(), "{label}");
+            assert!(
+                outcome.elapsed < WITHIN_BUDGET,
+                "{label}: {:?}",
+                outcome.elapsed
+            );
         }
     });
 }
