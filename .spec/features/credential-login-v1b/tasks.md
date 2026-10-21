@@ -177,8 +177,7 @@
 - Notes: owner rule (2026-10-21): no per-distro or per-desktop code unless unavoidable. Units to `/usr/lib/systemd/system`, D-Bus policy to `/usr/share/dbus-1/system.d`, polkit actions to `/usr/share/polkit-1/actions`, daemon directory written into the units by template, PAM directory from `dirname $(ldconfig -p | awk '/libpam\.so\.0/{print $NF; exit}')/security`; no `/etc/systemd/system` or `/etc/dbus-1` branches. The installer no longer installs packages: every `apt`, `dnf`, `zypper` and `pacman` branch goes, replaced by a capability check (`command -v tpm2_createprimary tpm2_ptool`, `python3 -c "import tpm2_pkcs11"`, a loader-cache probe for the TPM and PKCS#11 libraries, `polkitd` and a system bus) that prints what is missing as capabilities, never package names. The KDE-only `kde-face` code and the common-stack snippet (`openhello-common-auth`) are removed; the dependency lists drop `libpam-pkcs11`, `libnss3-tools` and the NSS paths (ASM-014); the `sed` edit of `/etc/pam.d/sudo` is replaced by T-038.
 
 
-## T-038 — One universal rule to enable the PAM module per service [pending]
-
+## T-038 — One universal rule to enable the PAM module per service [done]
 - Refs: AC-027
 - Files: crates/openhello-cli/src/pam_enable.rs, crates/openhello-cli/src/lib.rs, crates/openhello-cli/src/main.rs, crates/openhello-cli/tests/pam_enable.rs, scripts/install.sh
 - Model: claude-sonnet-5
