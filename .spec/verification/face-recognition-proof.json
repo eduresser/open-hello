@@ -1,79 +1,79 @@
 {
   "feature": "face-recognition-proof",
-  "timestamp": "2026-10-21T19:19:29.455Z",
-  "gitRev": "b040bfd",
+  "timestamp": "2026-10-21T19:21:47.672Z",
+  "gitRev": "b1f4da2",
   "command": "cargo test",
   "reporter": "exitcode",
-  "exitCode": 101,
+  "exitCode": 0,
   "testsParsed": 0,
   "results": {
     "AC-001": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-002": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-003": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-004": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-005": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-006": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-007": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-008": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-009": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-010": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-011": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-013": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-014": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     },
     "AC-015": {
-      "status": "fail",
+      "status": "pass",
       "testName": null,
       "method": "exitcode"
     }
