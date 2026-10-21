@@ -3,7 +3,7 @@ use std::io::Write;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
-pub const PAM_USAGE: &str = "usage: openhello-cli pam <enable [service...] | disable <service>... | status | migrate> [--root DIR] [--arg key=value]...";
+pub const PAM_USAGE: &str = "usage: openhello-cli pam <enable [service...] | disable <service>... | status | migrate> [--root DIR] [--arg flag|key=value]...";
 
 const MODULE: &str = "pam_openhello.so";
 const DEFAULT_SERVICES: &[&str] = &["sudo"];
@@ -83,7 +83,9 @@ fn parse(args: &[String]) -> Result<Request, PamFailure> {
                 ))
             }
             "--arg" => {
-                let pair = iter.next().ok_or_else(|| usage("--arg needs key=value"))?;
+                let pair = iter
+                    .next()
+                    .ok_or_else(|| usage("--arg needs a flag or key=value"))?;
                 validate_module_arg(pair)?;
                 module_args.push(pair.clone());
             }
@@ -111,13 +113,17 @@ fn parse(args: &[String]) -> Result<Request, PamFailure> {
 }
 
 fn validate_module_arg(pair: &str) -> Result<(), PamFailure> {
-    let well_formed = pair.split_once('=').is_some_and(|(key, _)| !key.is_empty())
-        && !pair.chars().any(|c| c.is_whitespace() || c.is_control());
+    let keyed = pair.split_once('=').is_some_and(|(key, _)| !key.is_empty());
+    let flag = !pair.is_empty()
+        && pair
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    let well_formed = (keyed || flag) && !pair.chars().any(|c| c.is_whitespace() || c.is_control());
     if well_formed {
         Ok(())
     } else {
         Err(usage(format!(
-            "module argument `{pair}` must be key=value without spaces"
+            "module argument `{pair}` must be a flag or key=value, without spaces"
         )))
     }
 }
