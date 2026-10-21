@@ -34,9 +34,12 @@ fn mapfile_lines(rig: &Rig) -> Vec<String> {
 }
 
 fn lines_of(rig: &Rig, uid: u32) -> Vec<String> {
-    let prefix = format!("CN=openhello-uid-{uid} ");
+    let prefixes = [
+        format!("CN=openhello-uid-{uid} "),
+        format!("/CN=openhello-uid-{uid} "),
+    ];
     let mut lines = mapfile_lines(rig);
-    lines.retain(|l| l.starts_with(&prefix));
+    lines.retain(|l| prefixes.iter().any(|p| l.starts_with(p)));
     lines
 }
 
@@ -92,7 +95,10 @@ fn provisioning_leaves_one_key_and_one_certificate_for_that_key_and_one_mapping_
 
     assert_eq!(
         lines_of(&rig, 3001),
-        ["CN=openhello-uid-3001 -> user3001".to_string()]
+        [
+            "CN=openhello-uid-3001 -> user3001".to_string(),
+            "/CN=openhello-uid-3001 -> user3001".to_string()
+        ]
     );
     let meta = std::fs::metadata(&rig.config.mapfile).unwrap();
     assert_eq!(meta.mode() & 0o7777, 0o644);
@@ -101,7 +107,13 @@ fn provisioning_leaves_one_key_and_one_certificate_for_that_key_and_one_mapping_
     let again = keyd.provision(3001, &secret()).unwrap();
     assert!(!again.created);
     assert_eq!(keyd.certificate(3001).unwrap(), certificate);
-    assert_eq!(lines_of(&rig, 3001).len(), 1);
+    assert_eq!(
+        lines_of(&rig, 3001),
+        [
+            "CN=openhello-uid-3001 -> user3001".to_string(),
+            "/CN=openhello-uid-3001 -> user3001".to_string()
+        ]
+    );
     assert_eq!(rig.listed_classes("openhello-3001").len(), 3);
 }
 
@@ -123,6 +135,21 @@ fn the_token_signature_verifies_against_the_issued_certificate() {
     let text = String::from_utf8(openssl(&["x509", "-in", pem, "-noout", "-text"], &[])).unwrap();
     assert!(text.contains("Subject: CN=openhello-uid-3002"), "{text}");
     assert!(text.contains("ecdsa-with-SHA256"), "{text}");
+
+    let oneline = String::from_utf8(openssl(
+        &["x509", "-noout", "-subject", "-nameopt", "compat"],
+        &pem_of(&certificate),
+    ))
+    .unwrap();
+    let subject = oneline.trim_end().strip_prefix("subject=").unwrap();
+    assert_eq!(subject, "/CN=openhello-uid-3002");
+    assert_eq!(
+        lines_of(&rig, 3002),
+        [
+            "CN=openhello-uid-3002 -> user3002".to_string(),
+            format!("{subject} -> user3002")
+        ]
+    );
 }
 
 #[test]
@@ -157,19 +184,24 @@ fn a_certificate_of_another_key_with_the_same_subject_does_not_match_the_token_k
     let signature = keyd.sign_digest(3003, &secret(), &DIGEST).unwrap();
     assert!(!verifies(&certificate_point(&forged), &signature));
     assert!(verifies(&certificate_point(&issued), &signature));
-    assert_eq!(lines_of(&rig, 3003).len(), 1);
+    assert_eq!(lines_of(&rig, 3003).len(), 2);
 }
 
 // @spec:AC-033
+// @covers:AC-027-subject-map
 #[test]
 fn purge_removes_the_certificate_and_only_its_own_mapping_line() {
     let rig = rig();
     let protectors = Protectors::new(rig.config.clone()).unwrap();
     protectors.provision_protectors(3004).unwrap();
     protectors.provision_protectors(3005).unwrap();
-    assert!(mapfile_lines(&rig)
-        .iter()
-        .any(|l| l.starts_with("CN=openhello-uid-3004 ")));
+    assert_eq!(
+        lines_of(&rig, 3004),
+        [
+            "CN=openhello-uid-3004 -> user3004".to_string(),
+            "/CN=openhello-uid-3004 -> user3004".to_string()
+        ]
+    );
 
     protectors.purge(3004).unwrap();
 
@@ -177,9 +209,14 @@ fn purge_removes_the_certificate_and_only_its_own_mapping_line() {
         protectors.keyd().certificate(3004),
         Err(KeydError::NotProvisioned)
     ));
-    let lines = mapfile_lines(&rig);
-    assert!(!lines.iter().any(|l| l.contains("openhello-uid-3004")));
-    assert!(lines.iter().any(|l| l.contains("openhello-uid-3005")));
+    assert!(lines_of(&rig, 3004).is_empty());
+    assert_eq!(
+        lines_of(&rig, 3005),
+        [
+            "CN=openhello-uid-3005 -> user3005".to_string(),
+            "/CN=openhello-uid-3005 -> user3005".to_string()
+        ]
+    );
     assert!(protectors.keyd().certificate(3005).is_ok());
 }
 
