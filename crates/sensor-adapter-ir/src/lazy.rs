@@ -153,5 +153,5 @@ mod tests {
         assert_eq!(fixture.released.load(Ordering::SeqCst), 1);
     }
 
-    const PROBE_FRAMES_FOR_TEST: usize = crate::illumination::PROBE_FRAMES;
+    const PROBE_FRAMES_FOR_TEST: usize = crate::illumination::PROBE_LIT_FRAMES;
 }

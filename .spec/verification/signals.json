@@ -329,73 +329,73 @@
       "code": "REF_MALFORMED",
       "feature": "face-recognition-proof",
       "ref": "T-002",
-      "occurrences": 11,
+      "occurrences": 12,
       "firstSeen": "2026-10-20T19:42:54.199Z",
-      "lastSeen": "2026-10-21T01:27:08.315Z",
-      "gitRev": "a3c1000"
+      "lastSeen": "2026-10-21T01:33:05.440Z",
+      "gitRev": "33fe742"
     },
     "REF_MALFORMED::face-recognition-proof::T-004": {
       "code": "REF_MALFORMED",
       "feature": "face-recognition-proof",
       "ref": "T-004",
-      "occurrences": 11,
+      "occurrences": 12,
       "firstSeen": "2026-10-20T19:42:54.200Z",
-      "lastSeen": "2026-10-21T01:27:08.315Z",
-      "gitRev": "a3c1000"
+      "lastSeen": "2026-10-21T01:33:05.440Z",
+      "gitRev": "33fe742"
     },
     "REF_MALFORMED::face-recognition-proof::T-005": {
       "code": "REF_MALFORMED",
       "feature": "face-recognition-proof",
       "ref": "T-005",
-      "occurrences": 11,
+      "occurrences": 12,
       "firstSeen": "2026-10-20T19:42:54.200Z",
-      "lastSeen": "2026-10-21T01:27:08.315Z",
-      "gitRev": "a3c1000"
+      "lastSeen": "2026-10-21T01:33:05.440Z",
+      "gitRev": "33fe742"
     },
     "REF_MALFORMED::face-recognition-proof::T-007": {
       "code": "REF_MALFORMED",
       "feature": "face-recognition-proof",
       "ref": "T-007",
-      "occurrences": 22,
+      "occurrences": 24,
       "firstSeen": "2026-10-20T19:42:54.200Z",
-      "lastSeen": "2026-10-21T01:27:08.315Z",
-      "gitRev": "a3c1000"
+      "lastSeen": "2026-10-21T01:33:05.440Z",
+      "gitRev": "33fe742"
     },
     "REF_MALFORMED::face-recognition-proof::T-008": {
       "code": "REF_MALFORMED",
       "feature": "face-recognition-proof",
       "ref": "T-008",
-      "occurrences": 11,
+      "occurrences": 12,
       "firstSeen": "2026-10-20T19:42:54.200Z",
-      "lastSeen": "2026-10-21T01:27:08.315Z",
-      "gitRev": "a3c1000"
+      "lastSeen": "2026-10-21T01:33:05.440Z",
+      "gitRev": "33fe742"
     },
     "REF_MALFORMED::face-recognition-proof::T-009": {
       "code": "REF_MALFORMED",
       "feature": "face-recognition-proof",
       "ref": "T-009",
-      "occurrences": 11,
+      "occurrences": 12,
       "firstSeen": "2026-10-20T19:42:54.200Z",
-      "lastSeen": "2026-10-21T01:27:08.315Z",
-      "gitRev": "a3c1000"
+      "lastSeen": "2026-10-21T01:33:05.440Z",
+      "gitRev": "33fe742"
     },
     "REF_MALFORMED::face-recognition-proof::T-010": {
       "code": "REF_MALFORMED",
       "feature": "face-recognition-proof",
       "ref": "T-010",
-      "occurrences": 11,
+      "occurrences": 12,
       "firstSeen": "2026-10-20T19:42:54.200Z",
-      "lastSeen": "2026-10-21T01:27:08.315Z",
-      "gitRev": "a3c1000"
+      "lastSeen": "2026-10-21T01:33:05.440Z",
+      "gitRev": "33fe742"
     },
     "REF_MALFORMED::face-recognition-proof::T-011": {
       "code": "REF_MALFORMED",
       "feature": "face-recognition-proof",
       "ref": "T-011",
-      "occurrences": 11,
+      "occurrences": 12,
       "firstSeen": "2026-10-20T19:42:54.200Z",
-      "lastSeen": "2026-10-21T01:27:08.315Z",
-      "gitRev": "a3c1000"
+      "lastSeen": "2026-10-21T01:33:05.440Z",
+      "gitRev": "33fe742"
     },
     "FILE_NOT_FOUND::face-recognition-proof::T-002": {
       "code": "FILE_NOT_FOUND",
@@ -509,100 +509,100 @@
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-001",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-21T01:27:08.315Z",
-      "gitRev": "a3c1000"
+      "lastSeen": "2026-10-21T01:33:05.440Z",
+      "gitRev": "33fe742"
     },
     "PROOF_WEAK::face-recognition-proof::AC-002": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-002",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-21T01:27:08.315Z",
-      "gitRev": "a3c1000"
+      "lastSeen": "2026-10-21T01:33:05.440Z",
+      "gitRev": "33fe742"
     },
     "PROOF_WEAK::face-recognition-proof::AC-003": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-003",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-21T01:27:08.315Z",
-      "gitRev": "a3c1000"
+      "lastSeen": "2026-10-21T01:33:05.440Z",
+      "gitRev": "33fe742"
     },
     "PROOF_WEAK::face-recognition-proof::AC-004": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-004",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-21T01:27:08.315Z",
-      "gitRev": "a3c1000"
+      "lastSeen": "2026-10-21T01:33:05.440Z",
+      "gitRev": "33fe742"
     },
     "PROOF_WEAK::face-recognition-proof::AC-005": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-005",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-21T01:27:08.315Z",
-      "gitRev": "a3c1000"
+      "lastSeen": "2026-10-21T01:33:05.440Z",
+      "gitRev": "33fe742"
     },
     "PROOF_WEAK::face-recognition-proof::AC-006": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-006",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-21T01:27:08.315Z",
-      "gitRev": "a3c1000"
+      "lastSeen": "2026-10-21T01:33:05.440Z",
+      "gitRev": "33fe742"
     },
     "PROOF_WEAK::face-recognition-proof::AC-007": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-007",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-21T01:27:08.315Z",
-      "gitRev": "a3c1000"
+      "lastSeen": "2026-10-21T01:33:05.440Z",
+      "gitRev": "33fe742"
     },
     "PROOF_WEAK::face-recognition-proof::AC-008": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-008",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-21T01:27:08.315Z",
-      "gitRev": "a3c1000"
+      "lastSeen": "2026-10-21T01:33:05.440Z",
+      "gitRev": "33fe742"
     },
     "PROOF_WEAK::face-recognition-proof::AC-009": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-009",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-21T01:27:08.315Z",
-      "gitRev": "a3c1000"
+      "lastSeen": "2026-10-21T01:33:05.440Z",
+      "gitRev": "33fe742"
     },
     "PROOF_WEAK::face-recognition-proof::AC-010": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-010",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-21T01:27:08.315Z",
-      "gitRev": "a3c1000"
+      "lastSeen": "2026-10-21T01:33:05.440Z",
+      "gitRev": "33fe742"
     },
     "PROOF_WEAK::face-recognition-proof::AC-011": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-011",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-21T01:27:08.315Z",
-      "gitRev": "a3c1000"
+      "lastSeen": "2026-10-21T01:33:05.440Z",
+      "gitRev": "33fe742"
     },
     "PROOF_WEAK::face-recognition-proof::AC-012": {
       "code": "PROOF_WEAK",
@@ -617,28 +617,28 @@
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-013",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-21T01:27:08.315Z",
-      "gitRev": "a3c1000"
+      "lastSeen": "2026-10-21T01:33:05.440Z",
+      "gitRev": "33fe742"
     },
     "PROOF_WEAK::face-recognition-proof::AC-014": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-014",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-21T01:27:08.315Z",
-      "gitRev": "a3c1000"
+      "lastSeen": "2026-10-21T01:33:05.440Z",
+      "gitRev": "33fe742"
     },
     "PROOF_WEAK::face-recognition-proof::AC-015": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-015",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-21T01:27:08.315Z",
-      "gitRev": "a3c1000"
+      "lastSeen": "2026-10-21T01:33:05.440Z",
+      "gitRev": "33fe742"
     },
     "VERIFY_FAILED::face-recognition-proof::AC-001": {
       "code": "VERIFY_FAILED",
@@ -779,10 +779,10 @@
       "code": "Q_STATUS_INVALID",
       "feature": "face-recognition-proof",
       "ref": "Q-001",
-      "occurrences": 2,
+      "occurrences": 3,
       "firstSeen": "2026-10-21T01:16:19.270Z",
-      "lastSeen": "2026-10-21T01:27:08.314Z",
-      "gitRev": "a3c1000"
+      "lastSeen": "2026-10-21T01:33:05.439Z",
+      "gitRev": "33fe742"
     }
   }
 }

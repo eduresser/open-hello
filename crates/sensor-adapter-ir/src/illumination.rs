@@ -4,7 +4,9 @@ pub const MIN_LIT_MEAN: f64 = 20.0;
 // Real lit frames spread well past this; a camera stuck at a flat gray level (seen on 2b7e:c757 with brightness 25 and
 // std dev ~0.5) passes the mean test but carries no image.
 pub const MIN_LIT_STD_DEV: f64 = 3.0;
-pub const PROBE_FRAMES: usize = 8;
+pub const PROBE_LIT_FRAMES: usize = 4;
+// 2b7e:c757 needs about 35 frames after the stream starts before the lit frames reach full exposure.
+pub const MAX_PROBE_FRAMES: usize = 90;
 pub const MAX_CONSECUTIVE_UNLIT: usize = 60;
 const WINDOW: usize = 8;
 const UNLIT_RATIO: f64 = 0.5;
