@@ -60,6 +60,9 @@ packaging/
 
 - The keyd ticket socket trusts uid 0 only. Checking the peer's executable (`OPENHELLO_KEYD_TICKET_EXE`) needs ptrace-read access to `/proc/<pid>/exe`, which the sandboxed keyd (only `CAP_DAC_OVERRIDE`) does not have, so the unit leaves it unset; granting `CAP_SYS_PTRACE` to the key daemon would cost more than the check protects against (a root attacker, already ASM-008). Found on the VM, 2026-10-21.
 
+- PAM without `pam_pkcs11` (owner decision, 2026-10-21): `pam_openhello` generates a random challenge, calls openhellod `Verify` (which delivers the ticket to keyd), asks keyd to sign a domain-separated hash of the challenge with the TPM key, and verifies the signature against a public key file written by Provision in a root-owned directory. No certificate, NSS database, `certutil` or mapper is involved, which removes the build differences between distributions. The Windows Hello counterpart is the credential provider talking to the key service directly (`windows-hello-arquitetura.md`, "Credential Provider").
+- Portability rules (`portability-paths.md`): our own files go to fixed neutral locations (units in `/usr/lib/systemd/system`, D-Bus policy in `/usr/share/dbus-1/system.d`, polkit actions in `/usr/share/polkit-1/actions`, daemons in a private directory written into the unit by template); third-party locations are discovered on the target (PAM directory from `ldconfig`, tpm2-pkcs11 module from `p11-kit` then by name); no path lists per distribution in Rust.
+
 ## Flows
 
 - **Unlock**: PAM → `pam_pkcs11` → `C_Login` in `openhello-pkcs11` → `openhellod` `Verify` → ticket →
