@@ -13,12 +13,6 @@ use cryptoki::types::AuthPin;
 use crate::{KeydError, Secret};
 
 const MODULE_FILE: &str = "libtpm2_pkcs11.so";
-const MODULE_DIRS: [&str; 4] = [
-    "/usr/lib64/pkcs11",
-    "/usr/lib/x86_64-linux-gnu/pkcs11",
-    "/usr/lib/aarch64-linux-gnu/pkcs11",
-    "/usr/lib/pkcs11",
-];
 const PKCS11_SUBPATH: &str = "usr/lib64/pkcs11/libtpm2_pkcs11.so";
 const DATABASE_FILE: &str = "tpm2_pkcs11.sqlite3";
 
@@ -145,9 +139,12 @@ impl KeydConfig {
     }
 
     fn module_path(&self) -> Result<PathBuf, KeydError> {
-        resolve_module(self.module.as_deref(), self.prefix.as_deref(), |path| {
-            path.exists()
-        })
+        resolve_module(
+            self.module.as_deref(),
+            self.prefix.as_deref(),
+            p11_kit_list_modules,
+            |name| unsafe { libloading::Library::new(name) }.is_ok(),
+        )
     }
 
     fn tool_env(&self) -> Vec<(OsString, OsString)> {
@@ -348,10 +345,33 @@ impl KeydConfig {
     }
 }
 
+fn p11_kit_list_modules() -> Option<String> {
+    let output = Command::new("p11-kit")
+        .arg("list-modules")
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn module_from_p11_kit(listing: &str) -> Option<PathBuf> {
+    listing
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("path:"))
+        .map(|path| path.trim())
+        .find(|path| path.ends_with(MODULE_FILE))
+        .map(PathBuf::from)
+}
+
 pub fn resolve_module(
     explicit: Option<&Path>,
     prefix: Option<&Path>,
-    exists: impl Fn(&Path) -> bool,
+    p11_kit_listing: impl FnOnce() -> Option<String>,
+    loads_by_name: impl FnOnce(&str) -> bool,
 ) -> Result<PathBuf, KeydError> {
     if let Some(module) = explicit {
         return Ok(module.to_path_buf());
@@ -359,21 +379,21 @@ pub fn resolve_module(
     if let Some(prefix) = prefix {
         return Ok(prefix.join(PKCS11_SUBPATH));
     }
-    let candidates: Vec<PathBuf> = MODULE_DIRS
-        .iter()
-        .map(|dir| Path::new(dir).join(MODULE_FILE))
-        .collect();
-    if let Some(found) = candidates.iter().find(|path| exists(path)) {
-        return Ok(found.clone());
+    if let Some(found) = p11_kit_listing().as_deref().and_then(module_from_p11_kit) {
+        return Ok(found);
     }
-    let tried: Vec<String> = candidates
-        .iter()
-        .map(|path| path.display().to_string())
-        .collect();
+    if loads_by_name(MODULE_FILE) {
+        return Ok(PathBuf::from(MODULE_FILE));
+    }
     crate::logging::log(
         crate::logging::Level::Error,
         "tpm2-pkcs11-module-not-found",
-        &[("tried", crate::logging::Value::Reason(tried.join(", ")))],
+        &[(
+            "tried",
+            crate::logging::Value::Reason(
+                "OPENHELLO_TPM2_PKCS11_MODULE, OPENHELLO_TPM2_PKCS11_PREFIX, p11-kit list-modules, loader cache by name".into(),
+            ),
+        )],
     );
     Err(KeydError::Config(
         "the tpm2-pkcs11 module was not found; install the tpm2-pkcs11 package or set OPENHELLO_TPM2_PKCS11_MODULE".into(),
