@@ -4,6 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lib]
+name = "openhello_keyd"
+path = "src/lib.rs"
+
+[[bin]]
+name = "openhello-keyd"
+path = "src/main.rs"
+
 [dependencies]
 thiserror.workspace = true
 openhello-ticket = { path = "../openhello-ticket" }
@@ -11,6 +19,9 @@ libc = "0.2"
 cryptoki = "0.12"
 getrandom = "0.2"
 zeroize = "1"
+zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
+blocking = "1"
+async-io = "2"
 
 [dev-dependencies]
 tempfile = "3"
