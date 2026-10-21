@@ -46,7 +46,7 @@ install_deps() {
     # A broken third-party index (e.g. a mirror mid-sync) must not block packages from the main archives
     run apt-get update || echo "warning: apt-get update reported errors; continuing with the cached indexes" >&2
     run apt-get install -y build-essential pkg-config curl ca-certificates tpm2-tools swtpm \
-      libtss2-tcti-swtpm0 dbus polkitd unzip libpam-pkcs11 libtpm2-pkcs11-1 tpm2-pkcs11-tools libnss3-tools
+      libtss2-tcti-swtpm0 dbus polkitd unzip libpam-pkcs11 libtpm2-pkcs11-1 libtpm2-pkcs11-tools libnss3-tools
   elif command -v dnf >/dev/null 2>&1; then
     run dnf install -y gcc make pkgconf-pkg-config curl unzip tpm2-tools swtpm tpm2-tss dbus-daemon polkit pam_pkcs11 tpm2-pkcs11 tpm2-pkcs11-tools nss-tools
   elif command -v zypper >/dev/null 2>&1; then
