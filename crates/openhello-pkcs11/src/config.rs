@@ -59,7 +59,7 @@ pub fn resolve(
     Ok(settings)
 }
 
-fn read_trusted(path: &Path, owner: u32) -> Result<String, String> {
+pub fn read_trusted(path: &Path, owner: u32) -> Result<String, String> {
     let mut file =
         std::fs::File::open(path).map_err(|e| format!("cannot open {}: {e}", path.display()))?;
     let meta = file

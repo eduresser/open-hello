@@ -25,6 +25,7 @@ BIN_DIR=/usr/libexec/openhello
 CONF_DIR=/etc/openhello
 MODELS_DIR=/usr/share/openhello/models
 STATE_DIR=/var/lib/openhello
+PAM_SERVICE_DIR=/etc/pam.d
 CALIBRATION_FILE="$STATE_DIR/calibration.bin"
 
 ORT_VERSION=1.31.0
@@ -41,20 +42,23 @@ run() {
 [ "$DRY_RUN" = 1 ] || [ "$(id -u)" = 0 ] || { echo "run as root (sudo)" >&2; exit 1; }
 
 install_deps() {
-  . /etc/os-release
-  case "${ID_LIKE:-$ID}" in
-    *debian*|*ubuntu*)
-      # A broken third-party index (e.g. a mirror mid-sync) must not block packages from the main archives
-      run apt-get update || echo "warning: apt-get update reported errors; continuing with the cached indexes" >&2
-      run apt-get install -y build-essential pkg-config curl ca-certificates tpm2-tools swtpm \
-        libtss2-tcti-swtpm0 dbus polkitd unzip libpam-pkcs11 libtpm2-pkcs11-1 tpm2-pkcs11-tools libnss3-tools ;;
-    *fedora*|*rhel*|*centos*)
-      run dnf install -y gcc make pkgconf-pkg-config curl unzip tpm2-tools swtpm tpm2-tss dbus-daemon polkit pam_pkcs11 tpm2-pkcs11 tpm2-pkcs11-tools nss-tools ;;
-    *suse*)
-      run zypper --non-interactive install gcc make pkg-config curl unzip tpm2.0-tools swtpm \
-        libtss2-tcti-swtpm0 dbus-1-daemon polkit pam_pkcs11 tpm2-pkcs11 mozilla-nss-tools ;;
-    *) echo "unsupported distro ($ID); install manually: rust, tpm2-tools, swtpm, libtss2-tcti-swtpm, dbus, polkit" >&2; exit 1 ;;
-  esac
+  if command -v apt-get >/dev/null 2>&1; then
+    # A broken third-party index (e.g. a mirror mid-sync) must not block packages from the main archives
+    run apt-get update || echo "warning: apt-get update reported errors; continuing with the cached indexes" >&2
+    run apt-get install -y build-essential pkg-config curl ca-certificates tpm2-tools swtpm \
+      libtss2-tcti-swtpm0 dbus polkitd unzip libpam-pkcs11 libtpm2-pkcs11-1 tpm2-pkcs11-tools libnss3-tools
+  elif command -v dnf >/dev/null 2>&1; then
+    run dnf install -y gcc make pkgconf-pkg-config curl unzip tpm2-tools swtpm tpm2-tss dbus-daemon polkit pam_pkcs11 tpm2-pkcs11 tpm2-pkcs11-tools nss-tools
+  elif command -v zypper >/dev/null 2>&1; then
+    run zypper --non-interactive install gcc make pkg-config curl unzip tpm2.0-tools swtpm \
+      libtss2-tcti-swtpm0 dbus-1-daemon polkit pam_pkcs11 tpm2-pkcs11 mozilla-nss-tools
+  elif command -v pacman >/dev/null 2>&1; then
+    run pacman -S --needed --noconfirm base-devel pkgconf curl unzip tpm2-tools swtpm tpm2-tss dbus polkit nss tpm2-pkcs11
+    echo "note: pam_pkcs11 is not in the Arch repositories; install it from the AUR before enabling the PAM stacks" >&2
+  else
+    echo "no supported package manager (apt, dnf, zypper, pacman); install manually: rust, tpm2-tools, swtpm, libtss2-tcti-swtpm, dbus, polkit, pam_pkcs11, tpm2-pkcs11, nss tools" >&2
+    exit 1
+  fi
 }
 
 ensure_rust() {
@@ -143,7 +147,9 @@ install_sudo_login() {
   run install -m 0644 "$REPO/packaging/io.openhello.Keyd1.conf" /usr/share/dbus-1/system.d/io.openhello.Keyd1.conf
   run install -m 0644 "$REPO/crates/openhello-keyd/io.openhello.Keyd1.policy" /usr/share/polkit-1/actions/io.openhello.Keyd1.policy
   run install -m 0644 "$REPO/packaging/openhello-keyd.service" /etc/systemd/system/openhello-keyd.service
-  run install -m 0644 "$REPO/packaging/pam/sudo-openhello" /etc/pam.d/sudo-openhello
+  run install -m 0644 "$REPO/packaging/pam/sudo-openhello" $PAM_SERVICE_DIR/sudo-openhello
+  run install -m 0644 "$REPO/packaging/pam/openhello-lockscreen" "$PAM_SERVICE_DIR/openhello-lockscreen"
+  run install -D -m 0644 "$REPO/packaging/pam/openhello-common-auth" /usr/share/openhello/pam/openhello-common-auth
   if [ "$DRY_RUN" = 1 ]; then
     echo "+ write $CONF_DIR/pam_pkcs11.conf and $CONF_DIR/pkcs11.conf (root-owned, 0644)"
   else
@@ -153,14 +159,33 @@ install_sudo_login() {
     chmod 0644 "$CONF_DIR/pam_pkcs11.conf" "$CONF_DIR/pkcs11.conf"
   fi
   enable_sudo_stack
+  enable_lock_screen_face
 }
 
-# A backup is kept; undo with `mv /etc/pam.d/sudo.openhello.bak /etc/pam.d/sudo`.
+# Only the stack is installed for every locker; wiring it into a locker is per environment (see .spec/features/credential-login-v1b/lockscreen.md).
+# KDE is the one adapter automated here: kscreenlocker_greet starts its "Face" authenticator only when kde-face exists, and the `kde` password service is never touched. Undo with `rm $PAM_SERVICE_DIR/kde-face`.
+enable_lock_screen_face() {
+  local face_file="$PAM_SERVICE_DIR/kde-face" include='auth include openhello-lockscreen'
+  [ "$DRY_RUN" = 1 ] || first_existing /usr/libexec/kscreenlocker_greet /usr/lib/kscreenlocker_greet /usr/lib64/libexec/kscreenlocker_greet >/dev/null || return 0
+  if [ "$DRY_RUN" = 0 ] && [ -e "$face_file" ] && ! grep -qxF "$include" "$face_file"; then
+    echo "$face_file already exists and is not ours; add '$include' to it manually" >&2
+    return
+  fi
+  if [ "$DRY_RUN" = 1 ]; then
+    echo "+ write $face_file ($include, account include common-account) when kscreenlocker is present"
+  else
+    printf '#%%PAM-1.0\n%s\naccount include common-account\n' "$include" > "$face_file"
+    chmod 0644 "$face_file"
+  fi
+}
+
+# A backup is kept; undo with `mv $PAM_SERVICE_DIR/sudo.openhello.bak $PAM_SERVICE_DIR/sudo`.
 enable_sudo_stack() {
-  local sudo_file=/etc/pam.d/sudo include='auth include sudo-openhello'
-  if [ ! -e "$sudo_file" ] && [ -e /usr/etc/pam.d/sudo ]; then run cp /usr/etc/pam.d/sudo "$sudo_file"; fi
+  local sudo_file="$PAM_SERVICE_DIR/sudo" vendor_dir include='auth include sudo-openhello'
+  vendor_dir="$(first_existing /usr/lib/pam.d /usr/etc/pam.d)" || vendor_dir=/usr/lib/pam.d
+  if [ ! -e "$sudo_file" ] && [ -e "$vendor_dir/sudo" ]; then run cp "$vendor_dir/sudo" "$sudo_file"; fi
   if [ ! -e "$sudo_file" ] && [ "$DRY_RUN" = 0 ]; then
-    echo "no /etc/pam.d/sudo: add '$include' above the password module of your sudo PAM service" >&2
+    echo "no $sudo_file: add '$include' above the password module of your sudo PAM service" >&2
     return
   fi
   if [ "$DRY_RUN" = 0 ] && grep -qxF "$include" "$sudo_file"; then return; fi

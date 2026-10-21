@@ -1,0 +1,6 @@
+#%PAM-1.0
+# Face for any screen locker: include it from the locker's own PAM service. Nothing is required except the final deny, so a miss leaves the password path untouched.
+auth    [success=ignore ignore=2 default=ignore]    pam_openhello.so
+auth    sufficient  pam_pkcs11.so use_first_pass config_file=/etc/openhello/pam_pkcs11.conf
+auth    optional    pam_openhello.so clear
+auth    required    pam_deny.so

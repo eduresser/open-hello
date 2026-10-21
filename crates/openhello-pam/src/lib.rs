@@ -14,6 +14,9 @@ use config::{Settings, PLACEHOLDER_PIN};
 
 const PAM_SUCCESS: c_int = 0;
 const PAM_IGNORE: c_int = 25;
+const PAM_SERVICE: c_int = 1;
+const PAM_TTY: c_int = 3;
+const PAM_RHOST: c_int = 4;
 const PAM_CONV: c_int = 5;
 const PAM_AUTHTOK: c_int = 6;
 const PAM_TEXT_INFO: c_int = 4;
@@ -65,6 +68,9 @@ pub unsafe extern "C" fn pam_sm_authenticate(
         return PAM_IGNORE;
     }
     let started = Instant::now();
+    if !local_session_allowed(pamh, &args) {
+        return PAM_IGNORE;
+    }
     let config = args
         .iter()
         .find_map(|a| a.strip_prefix("config=").map(PathBuf::from))
@@ -80,6 +86,52 @@ pub unsafe extern "C" fn pam_sm_authenticate(
         pam_set_item(pamh, PAM_AUTHTOK, placeholder.as_ptr().cast());
     }
     PAM_SUCCESS
+}
+
+unsafe fn item_text(pamh: *mut c_void, item: c_int) -> Option<String> {
+    let mut value: *const c_void = std::ptr::null();
+    if pam_get_item(pamh, item, &mut value) != PAM_SUCCESS || value.is_null() {
+        return None;
+    }
+    CStr::from_ptr(value.cast())
+        .to_str()
+        .ok()
+        .map(str::to_string)
+}
+
+unsafe fn local_session_allowed(pamh: *mut c_void, args: &[String]) -> bool {
+    let remote = item_text(pamh, PAM_RHOST).is_some_and(|h| !h.is_empty())
+        || std::env::var_os("SSH_CONNECTION").is_some();
+    let tty = item_text(pamh, PAM_TTY).is_some_and(|t| !t.is_empty());
+    let display = ["DISPLAY", "WAYLAND_DISPLAY"]
+        .iter()
+        .any(|v| std::env::var_os(v).is_some_and(|d| !d.is_empty()));
+    let service = item_text(pamh, PAM_SERVICE).unwrap_or_default();
+    let allowlist = args
+        .iter()
+        .find_map(|a| a.strip_prefix("allowlist=").map(PathBuf::from));
+    permitted(remote, tty || display, &service, allowlist.as_deref())
+}
+
+// A missing or untrusted allowlist denies: the common-stack placement must never reach the camera by default.
+fn permitted(remote: bool, local: bool, service: &str, allowlist: Option<&Path>) -> bool {
+    if remote || !local {
+        return false;
+    }
+    let Some(path) = allowlist else {
+        return true;
+    };
+    let (ruid, euid) = unsafe { (libc::getuid(), libc::geteuid()) };
+    let text = if config::is_privileged(ruid, euid) {
+        config::read_trusted(path, 0).ok()
+    } else {
+        std::fs::read_to_string(path).ok()
+    };
+    text.is_some_and(|t| {
+        t.lines()
+            .map(str::trim)
+            .any(|l| !l.is_empty() && !l.starts_with('#') && l == service)
+    })
 }
 
 #[no_mangle]
@@ -205,5 +257,17 @@ unsafe fn tell(pamh: *mut c_void, text: &CStr) {
     if !responses.is_null() {
         libc::free((*responses).text.cast());
         libc::free(responses.cast());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::permitted;
+
+    #[test]
+    fn remote_or_headless_sessions_are_ignored_before_the_allowlist() {
+        assert!(!permitted(true, true, "sudo", None));
+        assert!(!permitted(false, false, "sudo", None));
+        assert!(permitted(false, true, "sudo", None));
     }
 }
