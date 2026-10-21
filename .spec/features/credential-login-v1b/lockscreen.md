@@ -58,3 +58,12 @@ Resultado: passou, falhou ou parcial (rosto desbloqueia mas sem mensagem, por ex
 - O locker executa o módulo open-hello de forma não interativa por um serviço PAM próprio, como usuário, em qualquer distro/desktop com PAM.
 - O proxy PKCS#11 funciona sem root dentro do locker (T-025).
 - Com o KDE desta máquina aprovado, marque AC-028 como provado; os demais ambientes seguem como "não verificado" até terem linha no registro.
+
+## Live result on the KDE lock screen (2026-10-21)
+
+Tested on the KDE neon VM (Plasma 6.8.0, kscreenlocker 6.8.0) with `openhello-cli pam enable kde --arg debug`, which adds `auth sufficient pam_openhello.so debug` as the first `auth` line of `/etc/pam.d/kde` and nothing else (no `kde-face`, no `kscreenlockerrc` change).
+
+- `pam_openhello` logged `reason=success service=kde` at both lock attempts (19:01:51 and 19:06:01) and openhellod logged `verify uid=1000 accepted=true` plus `ticket delivery=delivered`: the face was recognised and the TPM signature verified inside the locker's own PAM service, as the unprivileged user.
+- The lock screen then showed only an **Unlock** button, with no password field. This is KDE behaviour, read in `LockScreenUi.qml` (`onSucceeded`): the regular authenticator expects a prompt, and when it succeeds without ever prompting the greeter shows `NoPasswordUnlock`, which needs one click. Authenticators that do not expect a prompt (fingerprint, smartcard, face) call `Qt.quit()` and unlock directly.
+- Decision (owner rule, no per-desktop adapters unless unavoidable): keep the one confirmation click. The direct unlock needs KDE's `Face` authenticator (`[Authenticators] Face=true`, the `kde-face` service and `[Greeter] Authenticator=Face`), which is KDE-only and has side effects; it stays an optional, explicit KDE step, never the default.
+- Not measured: the time between locking and the Unlock button, and a second person at the camera. Earlier attempts failed for two reasons that were not the module: the module was missing from `/etc/pam.d/kde` after a failed `pam enable` (the CLI then rejected `--arg debug`), and before that the `<uid>.pub` file was missing.
