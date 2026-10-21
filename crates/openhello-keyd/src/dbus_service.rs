@@ -6,6 +6,7 @@ use zbus::message::Header;
 use zbus::{fdo, interface, Connection};
 use zeroize::Zeroizing;
 
+use crate::logging::{log, Level, Value};
 use crate::{KeydError, Protectors};
 
 pub const BUS_NAME: &str = "io.openhello.Keyd1";
@@ -84,10 +85,14 @@ impl Service {
             .authorize(action, &caller, target_uid)
             .await
             .map_err(|reason| {
-                eprintln!(
-                    "openhello-keyd: authorization refused action={} caller_uid={} target_uid={target_uid}",
-                    action.polkit_id(),
-                    caller.uid
+                log(
+                    Level::Warn,
+                    "authorization-refused",
+                    &[
+                        ("action", Value::Label(action.polkit_id())),
+                        ("caller_uid", Value::Uid(caller.uid)),
+                        ("target_uid", Value::Uid(target_uid)),
+                    ],
                 );
                 fdo::Error::AuthFailed(format!("{}: {reason}", action.polkit_id()))
             })
@@ -101,10 +106,25 @@ impl Service {
     ) -> fdo::Result<T> {
         let protectors = self.protectors.clone();
         let outcome = blocking::unblock(move || operation(&protectors)).await;
+        if outcome.is_ok() {
+            log(
+                Level::Info,
+                "operation-done",
+                &[
+                    ("action", Value::Label(action.polkit_id())),
+                    ("uid", Value::Uid(uid)),
+                ],
+            );
+        }
         outcome.map_err(|error| {
-            eprintln!(
-                "openhello-keyd: {} failed for uid {uid}: {error}",
-                action.polkit_id()
+            log(
+                Level::Error,
+                "operation-failed",
+                &[
+                    ("action", Value::Label(action.polkit_id())),
+                    ("uid", Value::Uid(uid)),
+                    ("reason", Value::Reason(error.to_string())),
+                ],
             );
             match error {
                 KeydError::InvalidPin | KeydError::InvalidUid(_) | KeydError::InvalidSecret => {

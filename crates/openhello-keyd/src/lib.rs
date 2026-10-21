@@ -1,6 +1,7 @@
 pub mod config;
 pub mod dbus_service;
 pub mod polkit;
+pub mod logging;
 mod protector;
 mod provision;
 mod purge;

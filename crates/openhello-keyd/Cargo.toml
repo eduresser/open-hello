@@ -24,5 +24,6 @@ blocking = "1"
 async-io = "2"
 
 [dev-dependencies]
+openhellod = { path = "../openhellod" }
 tempfile = "3"
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }

@@ -4,6 +4,7 @@ use std::time::Instant;
 use crate::backends::{
     AuthVerdict, DaemonError, EngineBackend, EnrollProgress, EnrollState, SensorBackend, StorageBackend,
 };
+use crate::keyd_client::{KeyPurge, KeydClient};
 use crate::logging::{Level, Logger, Value};
 use crate::ticket_client::{TicketClient, TicketDelivery};
 
@@ -32,6 +33,8 @@ pub struct Biometrics {
     logger: Logger,
     tickets: Option<TicketClient>,
     last_delivery: Option<TicketDelivery>,
+    keyd: Option<KeydClient>,
+    last_key_purge: Option<KeyPurge>,
 }
 
 impl Biometrics {
@@ -41,7 +44,7 @@ impl Biometrics {
         storage: Box<dyn StorageBackend>,
         target_far: f64,
     ) -> Self {
-        Self { sensor, engine, storage, sessions: HashMap::new(), next_session: 1, started: Instant::now(), target_far, logger: Logger::stderr(Level::Info), tickets: None, last_delivery: None }
+        Self { sensor, engine, storage, sessions: HashMap::new(), next_session: 1, started: Instant::now(), target_far, logger: Logger::stderr(Level::Info), tickets: None, last_delivery: None, keyd: None, last_key_purge: None }
     }
 
     pub fn with_logger(mut self, logger: Logger) -> Self {
@@ -52,6 +55,15 @@ impl Biometrics {
     pub fn with_ticket_client(mut self, client: Option<TicketClient>) -> Self {
         self.tickets = client;
         self
+    }
+
+    pub fn with_keyd_client(mut self, client: Option<KeydClient>) -> Self {
+        self.keyd = client;
+        self
+    }
+
+    pub fn last_key_purge(&self) -> Option<KeyPurge> {
+        self.last_key_purge
     }
 
     pub fn last_ticket_delivery(&self) -> Option<TicketDelivery> {
@@ -162,9 +174,23 @@ impl Biometrics {
     }
 
     pub fn purge(&mut self, uid: u32) -> Result<(), DaemonError> {
-        self.storage.purge(uid)?;
-        self.logger.log(Level::Info, "purge", &[("uid", Value::Uid(uid))]);
-        Ok(())
+        let template = self.storage.purge(uid);
+        let key = self.keyd.as_ref().map(|client| client.purge(uid));
+        self.last_key_purge = key;
+        self.logger.log(
+            Level::Info,
+            "purge",
+            &[
+                ("uid", Value::Uid(uid)),
+                ("template", Value::Label(if template.is_ok() { "destroyed" } else { "failed" })),
+                ("key", Value::Label(key.map_or("not-configured", KeyPurge::as_str))),
+            ],
+        );
+        template?;
+        match key {
+            Some(KeyPurge::Destroyed) | None => Ok(()),
+            Some(_) => Err(DaemonError::Backend("key purge incomplete".into())),
+        }
     }
 
     fn deliver_ticket(&mut self, uid: u32) {
@@ -477,6 +503,18 @@ mod tests {
         let (mut core, _) = core_with(storage.clone(), true, b"mine");
         core.purge(1000).unwrap();
         assert!(storage.files.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_unreachable_keyd_still_purges_the_template_but_the_purge_is_reported_as_failed() {
+        use crate::keyd_client::{KeyPurge, KeydBus, KeydClient};
+        let storage = MemoryStorage::default();
+        storage.files.lock().unwrap().insert(1000, b"mine".to_vec());
+        let (core, _) = core_with(storage.clone(), true, b"mine");
+        let mut core = core.with_keyd_client(Some(KeydClient::new(KeydBus::Address("unix:path=/nonexistent/bus".into()))));
+        assert!(core.purge(1000).is_err());
+        assert!(storage.files.lock().unwrap().is_empty());
+        assert_eq!(core.last_key_purge(), Some(KeyPurge::Unavailable));
     }
 
     fn keyd_core(storage: MemoryStorage, live: bool, template: &[u8], socket: &std::path::Path) -> Biometrics {
