@@ -23,7 +23,12 @@ const NO_TOKEN_UID: u32 = 2997;
 const DIGEST: [u8; 32] = [0x3c; 32];
 const CKA_CLASS: u64 = 0x0;
 const CKA_VALUE: u64 = 0x11;
+const CKA_CERTIFICATE_TYPE: u64 = 0x80;
+const CKA_KEY_TYPE: u64 = 0x100;
 const CKA_ID: u64 = 0x102;
+const CKA_SIGN: u64 = 0x108;
+const CKC_X_509: u64 = 0;
+const CKK_EC: u64 = 3;
 const CKA_SENSITIVE: u64 = 0x103;
 const CKA_PRIVATE_EXPONENT: u64 = 0x123;
 const CKA_PRIME_1: u64 = 0x124;
@@ -208,6 +213,83 @@ fn the_private_key_value_and_every_private_read_are_refused_while_signing_works(
     client.ok(OP_TOKEN_CLOSE, &[]);
     assert!(!client.received.windows(k.len()).any(|w| w == k.as_slice()));
     assert!(!looks_like_secret(&client.received));
+}
+
+fn find_with(client: &mut TokenClient, attributes: &[(u64, &[u8])]) -> Vec<u64> {
+    let mut template = vec![attributes.len() as u8];
+    for (kind, value) in attributes {
+        template.extend_from_slice(&kind.to_be_bytes());
+        template.extend_from_slice(&(value.len() as u16).to_be_bytes());
+        template.extend_from_slice(value);
+    }
+    client
+        .ok(OP_TOKEN_FIND, &template)
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|c| u64::from_be_bytes(*c))
+        .collect()
+}
+
+// @covers:AC-027-openssl-templates
+#[test]
+fn the_search_templates_of_the_openssl_build_of_pam_pkcs11_find_the_certificate_then_the_key() {
+    let rig = rig();
+    let served = served(&rig);
+    let mut client = TokenClient::connect(served.socket.path(), uid());
+    client.ok(OP_TOKEN_OPEN, &[]);
+
+    let certificate_template = [
+        (CKA_CLASS, CKO_CERTIFICATE.to_ne_bytes().to_vec()),
+        (CKA_CERTIFICATE_TYPE, CKC_X_509.to_ne_bytes().to_vec()),
+    ];
+    let certificate_template: Vec<(u64, &[u8])> = certificate_template
+        .iter()
+        .map(|(k, v)| (*k, v.as_slice()))
+        .collect();
+    let certificates = find_with(&mut client, &certificate_template);
+    assert_eq!(certificates.len(), 1);
+    let id = attributes(&mut client, certificates[0], &[CKA_ID])
+        .remove(0)
+        .2;
+    assert!(!id.is_empty());
+
+    let class = CKO_PRIVATE_KEY.to_ne_bytes();
+    let key_template: [(u64, &[u8]); 3] = [(CKA_CLASS, &class), (CKA_SIGN, &[1]), (CKA_ID, &id)];
+    assert!(
+        find_with(&mut client, &key_template).is_empty(),
+        "no key before login"
+    );
+
+    client.ok(OP_TOKEN_LOGIN, PIN.as_bytes());
+    let without_id = find_with(&mut client, &key_template[..2]);
+    let keys = find_with(&mut client, &key_template);
+    assert_eq!(keys.len(), 1);
+    assert_eq!(without_id, keys);
+    let wrong_id: [(u64, &[u8]); 3] =
+        [(CKA_CLASS, &class), (CKA_SIGN, &[1]), (CKA_ID, &[0xEE; 16])];
+    assert!(find_with(&mut client, &wrong_id).is_empty());
+
+    let key_type = attributes(&mut client, keys[0], &[CKA_KEY_TYPE, CKA_ID, CKA_SIGN]);
+    assert!(key_type
+        .iter()
+        .all(|(_, state, _)| *state == ATTRIBUTE_READ));
+    assert_eq!(key_type[0].2, CKK_EC.to_ne_bytes());
+    assert_eq!(key_type[1].2, id);
+    assert_eq!(key_type[2].2, [1]);
+    let value = attributes(&mut client, keys[0], &[CKA_VALUE]);
+    assert_eq!(value[0].1, ATTRIBUTE_SENSITIVE);
+
+    let (status, signature) = client.sign(keys[0], &DIGEST).unwrap();
+    assert_eq!(status, TOKEN_OK);
+    assert_eq!(signature.len(), 64);
+    let public = client.find_class(CKO_PUBLIC_KEY)[0];
+    let point = attributes(&mut client, public, &[CKA_EC_POINT]).remove(0).2;
+    VerifyingKey::from_sec1_bytes(&point[2..])
+        .unwrap()
+        .verify_prehash(&DIGEST, &Signature::from_slice(&signature).unwrap())
+        .unwrap();
+    client.ok(OP_TOKEN_CLOSE, &[]);
 }
 
 // @principle:P-004

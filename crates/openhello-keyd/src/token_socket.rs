@@ -10,7 +10,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use cryptoki::mechanism::Mechanism;
-use cryptoki::object::{Attribute, AttributeType, ObjectClass, ObjectHandle};
+use cryptoki::object::{Attribute, AttributeType, CertificateType, ObjectClass, ObjectHandle};
 use cryptoki_sys::{CKM_ECDSA, CK_ATTRIBUTE};
 use zeroize::Zeroizing;
 
@@ -50,11 +50,13 @@ pub const SIGNATURE_LEN: usize = 64;
 const CKA_CLASS: u64 = 0x0;
 const CKA_TOKEN: u64 = 0x1;
 const CKA_VALUE: u64 = 0x11;
+const CKA_CERTIFICATE_TYPE: u64 = 0x80;
 const CKA_ISSUER: u64 = 0x81;
 const CKA_SERIAL_NUMBER: u64 = 0x82;
 const CKA_SUBJECT: u64 = 0x101;
 const CKA_LABEL: u64 = 0x3;
 const CKA_ID: u64 = 0x102;
+const CKA_SIGN: u64 = 0x108;
 const CKF_LOGIN_REQUIRED: u64 = 0x4;
 const CKF_USER_PIN_INITIALIZED: u64 = 0x8;
 const CKF_TOKEN_INITIALIZED: u64 = 0x400;
@@ -650,6 +652,11 @@ fn parse_template(payload: &[u8]) -> Option<Vec<Attribute>> {
                 Attribute::Class(ObjectClass::try_from(class).ok()?)
             }
             CKA_TOKEN => Attribute::Token(*value.first().filter(|_| value.len() == 1)? != 0),
+            CKA_SIGN => Attribute::Sign(*value.first().filter(|_| value.len() == 1)? != 0),
+            CKA_CERTIFICATE_TYPE => {
+                let kind = u64::from_ne_bytes(value.try_into().ok()?);
+                Attribute::CertificateType(CertificateType::try_from(kind).ok()?)
+            }
             CKA_ID => Attribute::Id(value.to_vec()),
             CKA_LABEL => Attribute::Label(value.to_vec()),
             CKA_VALUE => Attribute::Value(value.to_vec()),
@@ -700,4 +707,60 @@ fn read_frame(stream: &mut UnixStream) -> Option<(u8, Zeroizing<Vec<u8>>)> {
     let mut payload = Zeroizing::new(vec![0u8; len]);
     stream.read_exact(&mut payload).ok()?;
     Some((header[0], payload))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(kind: u64, value: &[u8]) -> Vec<u8> {
+        let mut bytes = kind.to_be_bytes().to_vec();
+        bytes.extend_from_slice(&u16::try_from(value.len()).unwrap().to_be_bytes());
+        bytes.extend_from_slice(value);
+        bytes
+    }
+
+    fn template(entries: &[Vec<u8>]) -> Vec<u8> {
+        let mut bytes = vec![u8::try_from(entries.len()).unwrap()];
+        bytes.extend(entries.concat());
+        bytes
+    }
+
+    // @covers:AC-027-openssl-templates
+    #[test]
+    fn parse_template_accepts_the_openssl_build_templates() {
+        let certificate = parse_template(&template(&[
+            entry(CKA_CLASS, &1u64.to_ne_bytes()),
+            entry(CKA_CERTIFICATE_TYPE, &0u64.to_ne_bytes()),
+        ]))
+        .unwrap();
+        assert!(matches!(
+            certificate.as_slice(),
+            [Attribute::Class(_), Attribute::CertificateType(_)]
+        ));
+        let key = parse_template(&template(&[
+            entry(CKA_CLASS, &3u64.to_ne_bytes()),
+            entry(CKA_SIGN, &[1]),
+            entry(CKA_ID, &[9; 16]),
+        ]))
+        .unwrap();
+        assert!(matches!(
+            key.as_slice(),
+            [Attribute::Class(_), Attribute::Sign(true), Attribute::Id(_)]
+        ));
+    }
+
+    // @covers:AC-027-openssl-templates
+    #[test]
+    fn parse_template_still_refuses_unknown_or_malformed_attributes() {
+        const CKA_MODULUS: u64 = 0x120;
+        assert!(parse_template(&template(&[entry(CKA_MODULUS, &[1])])).is_none());
+        assert!(parse_template(&template(&[entry(CKA_SIGN, &[1, 1])])).is_none());
+        assert!(parse_template(&template(&[entry(CKA_CERTIFICATE_TYPE, &[0])])).is_none());
+        assert!(parse_template(&template(&[entry(
+            CKA_CERTIFICATE_TYPE,
+            &99u64.to_ne_bytes()
+        )]))
+        .is_none());
+    }
 }
