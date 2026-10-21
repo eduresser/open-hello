@@ -175,7 +175,7 @@ install_sudo_login() {
 # KDE is the one adapter automated here: kscreenlocker_greet starts its "Face" authenticator only when kde-face exists, and the `kde` password service is never touched. Undo with `rm $PAM_SERVICE_DIR/kde-face`.
 enable_lock_screen_face() {
   local face_file="$PAM_SERVICE_DIR/kde-face" include='auth include openhello-lockscreen'
-  [ "$DRY_RUN" = 1 ] || first_existing /usr/libexec/kscreenlocker_greet /usr/lib/kscreenlocker_greet /usr/lib64/libexec/kscreenlocker_greet >/dev/null || return 0
+  [ "$DRY_RUN" = 1 ] || first_existing /usr/libexec/kscreenlocker_greet /usr/lib/kscreenlocker_greet /usr/lib64/libexec/kscreenlocker_greet /usr/lib/*/libexec/kscreenlocker_greet >/dev/null || return 0
   if [ "$DRY_RUN" = 0 ] && [ -e "$face_file" ] && ! grep -qxF "$include" "$face_file"; then
     echo "$face_file already exists and is not ours; add '$include' to it manually" >&2
     return
