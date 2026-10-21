@@ -220,6 +220,13 @@ ENV
   fi
 fi
 
+ensure_env() {
+  if [ "$DRY_RUN" = 1 ]; then echo "+ ensure $1 in $CONF_DIR/openhello.env"; return; fi
+  grep -q "^$1=" "$CONF_DIR/openhello.env" || printf '%s=%s\n' "$1" "$2" >> "$CONF_DIR/openhello.env"
+}
+ensure_env OPENHELLO_KEYD_TICKET_SOCKET /run/openhello/keyd-ticket.sock
+ensure_env OPENHELLO_KEYD_PURGE_BUS system
+
 CALIBRATED=0
 if [ -f "$CALIBRATION_FILE" ] || calibrate; then CALIBRATED=1; fi
 if [ "$CALIBRATED" = 1 ] && [ "$DRY_RUN" = 0 ]; then
