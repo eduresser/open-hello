@@ -47,6 +47,13 @@ for (raw,) in con.execute('select attrs from tobjects where tokid=? order by id'
     print('object', a.get(CLASS), a.get(ID, ''), int(bool(a.get(EXTRACTABLE))), int(bool(a.get(SENSITIVE))), a.get(CKA_TPM2_PUB_BLOB, '-'))
 ";
 
+const LIST_ENTRY: &str = "
+import sqlite3, sys
+con = sqlite3.connect('file:%s/%s?mode=ro' % (sys.argv[1], sys.argv[2]), uri=True)
+for (label,) in con.execute('select label from tokens order by id'):
+    print(label)
+";
+
 /// tpm2-pkcs11 reads its store and TCTI from the process environment and keeps a TPM connection per
 /// initialization, so the module is loaded once per process and every use is serialized.
 static MODULE: Mutex<Option<Loaded>> = Mutex::new(None);
@@ -241,6 +248,15 @@ impl KeydConfig {
                 &[],
             )
         })
+    }
+
+    pub(crate) fn token_labels(&self, _guard: &Guard) -> Result<Vec<String>, KeydError> {
+        if !store_file(&self.store_dir).exists() {
+            return Ok(Vec::new());
+        }
+        let store = self.store_dir.to_string_lossy().into_owned();
+        let out = self.python(LIST_ENTRY, &[&store, DATABASE_FILE], &[], &[])?;
+        Ok(out.lines().map(str::to_string).collect())
     }
 
     fn python(

@@ -4,7 +4,9 @@ use std::path::Path;
 
 use openhello_auth_proto::{encode_public_key, public_key_file_name};
 
-use crate::tpm::failure;
+use crate::logging::{log, Level, Value};
+use crate::provision::{token_uid, Keyd};
+use crate::tpm::{failure, lock};
 use crate::KeydError;
 
 pub(crate) const DEFAULT_AUTH_DIR: &str = "/etc/openhello/auth";
@@ -49,6 +51,33 @@ pub(crate) fn write_public_key(dir: &Path, uid: u32, point: &[u8]) -> Result<(),
     }
     let _ = std::fs::File::open(dir).and_then(|d| d.sync_all());
     Ok(())
+}
+
+pub(crate) fn sync_public_key(keyd: &Keyd, uid: u32) -> Result<(), KeydError> {
+    let key = keyd.key(uid)?;
+    write_public_key(&keyd.config.auth_dir, uid, &key.public_key)
+}
+
+impl Keyd {
+    pub fn backfill_auth_keys(&self) {
+        let labels = {
+            let guard = lock();
+            self.config.token_labels(&guard)
+        };
+        let Ok(labels) = labels else {
+            log(Level::Warn, "auth-key-backfill-skipped", &[]);
+            return;
+        };
+        for uid in labels.iter().filter_map(|label| token_uid(label)) {
+            if sync_public_key(self, uid).is_err() {
+                log(
+                    Level::Warn,
+                    "auth-key-backfill-skipped",
+                    &[("uid", Value::Uid(uid))],
+                );
+            }
+        }
+    }
 }
 
 pub(crate) fn remove_public_key(dir: &Path, uid: u32) -> Result<(), KeydError> {

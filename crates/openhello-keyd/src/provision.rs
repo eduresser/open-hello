@@ -60,7 +60,7 @@ pub enum KeyAttribute {
 }
 
 pub struct Keyd {
-    config: KeydConfig,
+    pub(crate) config: KeydConfig,
 }
 
 impl Keyd {
@@ -427,6 +427,13 @@ fn uid_of_label(label: &str) -> Result<u32, KeydError> {
         .strip_prefix(TOKEN_LABEL_PREFIX)
         .and_then(|uid| uid.parse().ok())
         .ok_or_else(|| failure("reading the token label", "label carries no uid", &[]))
+}
+
+pub(crate) fn token_uid(label: &str) -> Option<u32> {
+    label
+        .strip_prefix(TOKEN_LABEL_PREFIX)
+        .and_then(|uid| uid.parse().ok())
+        .and_then(|uid| validate_uid(uid).ok())
 }
 
 pub(crate) fn token_label(uid: u32) -> String {
