@@ -58,6 +58,8 @@ packaging/
 
 - The lock screen runs as the user and cannot open the root-owned token. The wrapper becomes a proxy: keyd keeps the PKCS#11 session and does the signing, so K and the private key never reach a user process (T-025, owner decision 2026-10-21).
 
+- The keyd ticket socket trusts uid 0 only. Checking the peer's executable (`OPENHELLO_KEYD_TICKET_EXE`) needs ptrace-read access to `/proc/<pid>/exe`, which the sandboxed keyd (only `CAP_DAC_OVERRIDE`) does not have, so the unit leaves it unset; granting `CAP_SYS_PTRACE` to the key daemon would cost more than the check protects against (a root attacker, already ASM-008). Found on the VM, 2026-10-21.
+
 ## Flows
 
 - **Unlock**: PAM → `pam_pkcs11` → `C_Login` in `openhello-pkcs11` → `openhellod` `Verify` → ticket →
