@@ -149,3 +149,61 @@
 - Effort: low
 - Notes: found on the KDE neon VM (2026-10-21) with pam_pkcs11 debug on: `certificate is valid but does not match the user`, `Mapper module subject match() returns 0`. The NSS build presents the subject as `CN=openhello-uid-1000`; the OpenSSL build (Debian, Ubuntu) as `/CN=openhello-uid-1000` (one-line form). Provision writes both lines to the root-owned map for the user, Purge removes both, and the check in `pam_openhello` that a user has a credential keeps working. AC-016's test, which asserts the exact map content, is updated to assert both exact lines (not weakened).
 
+
+
+## T-034 — keyd: root-owned public key and a challenge-signing operation [pending]
+
+- Refs: AC-027
+- Files: crates/openhello-keyd/src/auth_keys.rs, crates/openhello-keyd/src/token_socket.rs, crates/openhello-keyd/src/provision.rs, crates/openhello-keyd/src/purge.rs, crates/openhello-keyd/src/lib.rs, crates/openhello-keyd/tests/auth_challenge.rs
+- Model: claude-sonnet-5
+- Effort: high
+- Notes: first step of owner decision ASM-014. Provision writes the user's P-256 public key (SEC1 or SPKI PEM) to `/etc/openhello/auth/<uid>.pub` (root-owned, 0644, atomic, idempotent; directory configurable by `OPENHELLO_KEYD_AUTH_DIR` for tests); Purge removes it. New keyd operation: given a 32-byte challenge from the caller, keyd takes the grant that the ticket created for that uid, logs in to the token internally, signs a domain-separated hash (`"openhello-pam-v1" || uid || challenge`) with the TPM key and returns the 64-byte signature; no grant, no signature; one use per grant; private key and K never leave keyd.
+
+## T-035 — pam_openhello verifies the signature itself; stacks drop pam_pkcs11 [pending]
+
+- Refs: AC-027, AC-029, AC-030
+- Files: crates/openhello-pam/Cargo.toml, crates/openhello-pam/src/lib.rs, crates/openhello-pam/src/challenge.rs, packaging/pam/sudo-openhello, packaging/pam/openhello-lockscreen, packaging/pam/openhello-common-auth, crates/openhello-cli/tests/pam_sudo.rs
+- Model: claude-sonnet-5
+- Effort: xhigh
+- Notes: depends on T-034. `pam_openhello` generates the challenge (getrandom), asks openhellod `Verify` (4 s ceiling as in T-022), asks keyd to sign, verifies with the root-owned public key (pure Rust P-256, no OpenSSL or NSS), and returns SUCCESS only on a valid signature; every other outcome falls through as today (IGNORE/AUTH_ERR to the password). Same silence for users without a credential and for ssh/allowlist rules. The packaged stacks lose their `pam_pkcs11` lines. The tests no longer need `pam_pkcs11`, so they run the same on every distribution. Keep the `// @spec` proofs of AC-027, AC-029 and AC-030 passing.
+
+## T-036 — keyd discovers the tpm2-pkcs11 module through p11-kit, then by name [pending]
+
+- Refs: AC-016
+- Files: crates/openhello-keyd/src/tpm.rs, crates/openhello-keyd/tests/module_discovery.rs
+- Model: claude-sonnet-5
+- Effort: low
+- Notes: replaces the fixed list of directories from T-030 (portability-paths.md): order is `OPENHELLO_TPM2_PKCS11_MODULE`, the test prefix, `p11-kit list-modules` (entry whose `path:` ends in `libtpm2_pkcs11.so`), then `dlopen("libtpm2_pkcs11.so")` by name through the loader cache. Resolution stays pure and testable with injected lookups.
+
+## T-037 — Installer uses neutral locations and discovers third-party paths [pending]
+
+- Refs: AC-016
+- Files: scripts/install.sh, packaging/openhellod.service, packaging/openhello-keyd.service
+- Model: claude-sonnet-5
+- Effort: medium
+- Notes: units to `/usr/lib/systemd/system`, D-Bus policy to `/usr/share/dbus-1/system.d`, polkit actions to `/usr/share/polkit-1/actions`, daemon directory written into the units by template, PAM directory from `dirname $(ldconfig -p | awk '/libpam\.so\.0/{print $NF; exit}')/security`; no `/etc/systemd/system` or `/etc/dbus-1` branches; dependency lists drop `libpam-pkcs11`, `libnss3-tools` and the NSS paths (ASM-014); the sudo edit by `sed` is replaced by T-038.
+
+## T-038 — PAM manager profiles instead of editing /etc/pam.d by hand [pending]
+
+- Refs: AC-027
+- Files: packaging/pam/pam-auth-update/openhello, packaging/pam/authselect/openhello, packaging/pam/manual-snippet.md, scripts/install.sh
+- Model: claude-sonnet-5
+- Effort: medium
+- Notes: depends on T-035 and T-037. A `pam-auth-update` profile for the Debian family, an `authselect` custom feature for Fedora and RHEL, and a manual snippet with backup for openSUSE, Arch and the rest (portability.md). The profile applies the gated block with the service allowlist starting at `sudo` only. Nothing here may remove the password path; document how to remove the profile.
+
+## T-039 — Native deb and rpm packages from one definition [pending]
+
+- Refs: AC-016
+- Files: packaging/nfpm.yaml, packaging/scripts/postinstall.sh, packaging/scripts/preremove.sh, scripts/build-packages.sh
+- Model: claude-sonnet-5
+- Effort: high
+- Notes: depends on T-037. One definition with nfpm (portability-packaging.md), per-family dependency names through overrides, idempotent post-install scripts, models and ONNX Runtime fetched and verified after install, `install.sh` kept for development only. CI matrix (Ubuntu LTS, Fedora, openSUSE Tumbleweed) in containers with systemd, pam_wrapper and swtpm is a follow-up once the packages build.
+
+## T-040 — KDE lock screen adapter (kde-face) [pending]
+
+- Refs: AC-028
+- Files: scripts/install.sh, .spec/features/credential-login-v1b/lockscreen.md
+- Model: claude-sonnet-5
+- Effort: low
+- Notes: lowest priority, KDE only (kscreenlocker-face-diagnosis.md). The greeter starts `kde-face` only with `[Authenticators] Face=true` in `kscreenlockerrc` (`/etc/xdg/kscreenlockerrc` or per user), and the lock begins on Face only if `[Greeter] Authenticator=Face` in `~/.local/state/kscreenlockerrc`. The installer offers this as an explicit opt-in step, never silently, and the guide records the side effects.
+\n
