@@ -942,6 +942,18 @@ fn a_face_match_without_a_grant_at_keyd_is_refused_even_if_openhellod_says_yes()
     });
 }
 
+// @covers:AC-028-pam-local-session
+#[test]
+fn the_built_module_declares_libpam_as_a_needed_library() {
+    let dynamic = run_tool("readelf", &["-d", pam_module().to_str().unwrap()]);
+    assert!(
+        dynamic
+            .lines()
+            .any(|l| l.contains("(NEEDED)") && l.contains("[libpam.so.0]")),
+        "libpam.so.0 missing from NEEDED:\n{dynamic}"
+    );
+}
+
 // @covers:AC-028-pam-path
 #[test]
 fn the_generic_lock_screen_service_authenticates_a_face_without_privilege_and_falls_back_on_a_miss()
