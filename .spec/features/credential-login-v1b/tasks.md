@@ -54,8 +54,7 @@
 - Effort: high
 - Notes: depends on T-016, T-017. Same authorization pattern as `openhellod` (T-010). Methods Provision, SetPin and Purge; the keyd purge itself (evict the TPM key, delete Protectors, remove the token) lives in `purge.rs` so that AC-034 can be tested against a real Purge.
 
-## T-021 — Purge integration and log redaction [pending]
-
+## T-021 — Purge integration and log redaction [done]
 - Refs: AC-033, AC-035
 - Files: crates/openhello-keyd/src/logging.rs, crates/openhello-keyd/tests/purge_and_logs.rs, crates/openhellod/src/dbus_service.rs, crates/openhellod/src/core.rs
 - Model: claude-sonnet-5
