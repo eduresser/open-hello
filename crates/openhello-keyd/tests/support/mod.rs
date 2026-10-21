@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 #[path = "../../../../tests/support/swtpm_harness.rs"]
 mod swtpm_harness;
 
@@ -49,7 +51,7 @@ extern "C" fn teardown() {
 }
 
 /// A private swtpm, D-Bus session and `tpm2-abrmd`, plus a keyd config wired to them. The TPM-wide lockout
-/// allows 50 wrong auth values, enough for the wrong-secret cases of one run.
+/// allows 50 wrong auth values.
 pub struct Rig {
     pub config: KeydConfig,
     pub prefix: PathBuf,
@@ -87,7 +89,12 @@ impl Rig {
 
         let lib64 = prefix.join("usr/lib64");
         let abrmd = Command::new(&abrmd_binary)
-            .args(["--session", &format!("--tcti={}", swtpm.tcti)])
+            // abrmd's default of 27 connections ran out during a full run of this suite; cause not isolated.
+            .args([
+                "--session",
+                "--max-connections=100",
+                &format!("--tcti={}", swtpm.tcti),
+            ])
             .env("DBUS_SESSION_BUS_ADDRESS", &address)
             .env("LD_LIBRARY_PATH", &lib64)
             .stdout(Stdio::null())
@@ -147,6 +154,25 @@ impl Rig {
             .env("LD_LIBRARY_PATH", self.prefix.join("usr/lib64"))
             .output()
             .expect("tpm2-tools must be installed")
+    }
+
+    /// The TPM's own dictionary-attack failure counter (`TPM2_PT_LOCKOUT_COUNTER`).
+    pub fn lockout_counter(&self) -> u32 {
+        let out = self.tpm2("tpm2_getcap", &["properties-variable"]);
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("TPM2_PT_LOCKOUT_COUNTER:"))
+            .and_then(|v| u32::from_str_radix(v.trim().trim_start_matches("0x"), 16).ok())
+            .expect("TPM2_PT_LOCKOUT_COUNTER in tpm2_getcap output")
+    }
+
+    pub fn clear_lockout(&self) {
+        assert!(
+            self.tpm2("tpm2_dictionarylockout", &["--clear-lockout"])
+                .status
+                .success(),
+            "cannot clear the dictionary-attack lockout"
+        );
     }
 
     /// Objects `tpm2_ptool` lists for a token, one `CKO_*` class name per object.
