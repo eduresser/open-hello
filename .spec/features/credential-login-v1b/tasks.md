@@ -11,8 +11,7 @@
   prefix; proves ASM-006 (P-256 verified by `pam_pkcs11`), ASM-007 (a wrapper replacing only `C_Login`) and
   ASM-010 (swtpm ECC + dictionary-attack lockout). Writes the result into `spike.md` and updates the assumptions.
 
-## T-015 — Ticket library (HMAC, TTL, single use) [pending]
-
+## T-015 — Ticket library (HMAC, TTL, single use) [done]
 - Refs: AC-020, AC-021, AC-022
 - Files: crates/openhello-ticket/Cargo.toml, crates/openhello-ticket/src/lib.rs
 - Model: claude-sonnet-5
