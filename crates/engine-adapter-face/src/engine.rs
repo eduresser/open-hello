@@ -1,16 +1,17 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 
 use crate::detect::{best_face, Detection, FaceDetector};
 use crate::embedding::{embed_detected, FaceEmbedder};
 use crate::enrollment_quality::{
-    sharpness, EnrollmentConfig, EnrollmentError, EnrollmentSession, FrameOutcome, OcclusionDetector, SessionState,
+    EnrollmentConfig, EnrollmentError, EnrollmentSession, FrameOutcome, OcclusionDetector, SessionState,
 };
 use crate::liveness::{assess, LivenessConfig, LivenessSample};
 use crate::matching::{Matcher, Template};
 use crate::{EngineError, GrayImage};
 
 const MIN_OCCLUSION_FREE_SCORE: f32 = 0.9;
+const LIVENESS_WINDOW: usize = 10;
 
 pub struct ConfidenceOcclusionDetector;
 
@@ -42,15 +43,24 @@ pub struct EnrollProgress {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MatchOutcome {
-    pub live: bool,
-    pub accepted: bool,
+pub enum AuthVerdict {
+    Continue,
+    Accepted { uid: u32 },
+    Rejected,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct IdentifyOutcome {
-    pub live: bool,
-    pub matched_uid: Option<u32>,
+pub struct AuthProgress {
+    pub verdict: AuthVerdict,
+    pub scored_frames: usize,
+}
+
+struct AuthSession {
+    candidates: Vec<(u32, Template)>,
+    far_per_frame: f64,
+    max_scored_frames: usize,
+    scored_frames: usize,
+    window: VecDeque<LivenessSample>,
 }
 
 pub struct Engine {
@@ -60,6 +70,7 @@ pub struct Engine {
     enrollment: EnrollmentConfig,
     liveness: LivenessConfig,
     sessions: Mutex<HashMap<u64, EnrollmentSession<ConfidenceOcclusionDetector>>>,
+    auth_sessions: Mutex<HashMap<u64, AuthSession>>,
     next_session: Mutex<u64>,
 }
 
@@ -78,6 +89,7 @@ impl Engine {
             enrollment,
             liveness,
             sessions: Mutex::new(HashMap::new()),
+            auth_sessions: Mutex::new(HashMap::new()),
             next_session: Mutex::new(1),
         }
     }
@@ -137,45 +149,67 @@ impl Engine {
         self.sessions.lock().unwrap().remove(&id).is_some()
     }
 
-    pub fn verify(&self, frames: &[GrayImage], template: &Template, target_far: f64) -> Result<MatchOutcome, EngineError> {
-        let (live, probe) = self.probe(frames)?;
-        if !live {
-            return Ok(MatchOutcome { live, accepted: false });
-        }
-        Ok(MatchOutcome { live, accepted: self.matcher.verify(&probe, template, target_far)? })
-    }
-
-    pub fn identify(
+    pub fn auth_begin(
         &self,
-        frames: &[GrayImage],
-        enrolled: &[(u32, Template)],
+        candidates: Vec<(u32, Template)>,
         target_far: f64,
-    ) -> Result<IdentifyOutcome, EngineError> {
-        let (live, probe) = self.probe(frames)?;
-        if !live {
-            return Ok(IdentifyOutcome { live, matched_uid: None });
+        max_scored_frames: usize,
+    ) -> Result<u64, EngineError> {
+        if candidates.is_empty() || max_scored_frames == 0 || !(target_far > 0.0 && target_far < 1.0) {
+            return Err(EngineError::InvalidInput(format!(
+                "authentication needs candidates, a frame budget and a target FAR in (0, 1); got {} candidates, {max_scored_frames} frames, FAR {target_far}",
+                candidates.len()
+            )));
         }
-        let matched = self.matcher.identify(&probe, enrolled, target_far)?;
-        Ok(IdentifyOutcome { live, matched_uid: matched.map(|m| m.uid) })
+        let mut next = self.next_session.lock().unwrap();
+        let id = *next;
+        *next += 1;
+        self.auth_sessions.lock().unwrap().insert(
+            id,
+            AuthSession {
+                candidates,
+                far_per_frame: target_far / max_scored_frames as f64,
+                max_scored_frames,
+                scored_frames: 0,
+                window: VecDeque::new(),
+            },
+        );
+        Ok(id)
     }
 
-    fn probe(&self, frames: &[GrayImage]) -> Result<(bool, Vec<f32>), EngineError> {
-        let mut observed = Vec::new();
-        for image in frames {
-            if let Ok(detection) = best_face(self.detector.detect(image)?) {
-                observed.push((image, detection));
-            }
+    pub fn auth_submit(&self, id: u64, image: &GrayImage) -> Result<AuthProgress, EngineError> {
+        let mut sessions = self.auth_sessions.lock().unwrap();
+        let session = sessions
+            .get_mut(&id)
+            .ok_or_else(|| EngineError::InvalidInput(format!("unknown authentication session {id}")))?;
+        let detection = match best_face(self.detector.detect(image)?) {
+            Ok(detection) => detection,
+            Err(EngineError::NoFace) => return Ok(AuthProgress { verdict: AuthVerdict::Continue, scored_frames: session.scored_frames }),
+            Err(other) => return Err(other),
+        };
+        session.scored_frames += 1;
+        session.window.push_back(LivenessSample::observe(&detection));
+        if session.window.len() > LIVENESS_WINDOW {
+            session.window.pop_front();
         }
-        let samples: Vec<LivenessSample> = observed.iter().map(|(_, d)| LivenessSample::observe(d)).collect();
-        if samples.len() < self.liveness.min_frames {
-            return Err(EngineError::NoFace);
-        }
-        let live = assess(&samples, &self.liveness)?.live;
-        let (image, detection) = observed
-            .iter()
-            .max_by(|a, b| sharpness(a.0, &a.1).total_cmp(&sharpness(b.0, &b.1)))
-            .expect("samples is non-empty");
-        Ok((live, embed_detected(self.embedder.as_ref(), image, detection)?))
+        let live = session.window.len() >= self.liveness.min_frames
+            && assess(session.window.make_contiguous(), &self.liveness)?.live;
+        let matched = if live {
+            let probe = embed_detected(self.embedder.as_ref(), image, &detection)?;
+            self.matcher.identify(&probe, &session.candidates, session.far_per_frame)?
+        } else {
+            None
+        };
+        let verdict = match matched {
+            Some(found) => AuthVerdict::Accepted { uid: found.uid },
+            None if session.scored_frames >= session.max_scored_frames => AuthVerdict::Rejected,
+            None => AuthVerdict::Continue,
+        };
+        Ok(AuthProgress { verdict, scored_frames: session.scored_frames })
+    }
+
+    pub fn auth_end(&self, id: u64) -> bool {
+        self.auth_sessions.lock().unwrap().remove(&id).is_some()
     }
 }
 
@@ -243,10 +277,22 @@ mod tests {
         FarCalibration::from_impostor_scores(&scores).unwrap()
     }
 
+    struct FixedEmbedder(Vec<f32>);
+
+    impl FaceEmbedder for FixedEmbedder {
+        fn embed(&self, _: &GrayImage) -> Result<Vec<f32>, EngineError> {
+            Ok(self.0.clone())
+        }
+    }
+
     fn engine(script: Vec<Vec<Detection>>) -> Engine {
+        engine_with(script, Box::new(BrightnessEmbedder))
+    }
+
+    fn engine_with(script: Vec<Vec<Detection>>, embedder: Box<dyn FaceEmbedder + Send + Sync>) -> Engine {
         Engine::new(
             Box::new(ScriptedDetector { calls: AtomicUsize::new(0), script }),
-            Box::new(BrightnessEmbedder),
+            embedder,
             Matcher::new(calibration()),
             EnrollmentConfig::default(),
             LivenessConfig::default(),
@@ -280,22 +326,118 @@ mod tests {
         assert!(!engine.enroll_discard(session));
     }
 
+    fn moving_face_script() -> Vec<Vec<Detection>> {
+        (0..16).map(|i| vec![face(0.0, if i % 2 == 0 { 1.5 } else { -1.5 })]).collect()
+    }
+
+    fn probe_of(image: &GrayImage, detection: &Detection) -> Vec<f32> {
+        embed_detected(&BrightnessEmbedder, image, detection).unwrap()
+    }
+
+    fn template_with_cosine(probe: &[f32], cosine: f32) -> Template {
+        let orthogonal = [-probe[1], probe[0]];
+        let sine = (1.0 - cosine * cosine).sqrt();
+        Template::new(vec![vec![cosine * probe[0] + sine * orthogonal[0], cosine * probe[1] + sine * orthogonal[1]]]).unwrap()
+    }
+
+    fn run_until_decided(engine: &Engine, session: u64, frames: usize) -> AuthProgress {
+        let mut last = engine.auth_submit(session, &textured()).unwrap();
+        for _ in 1..frames {
+            if last.verdict != AuthVerdict::Continue {
+                break;
+            }
+            last = engine.auth_submit(session, &textured()).unwrap();
+        }
+        last
+    }
+
+    // @spec:AC-005
+    // @spec:AC-007
     #[test]
-    fn photo_like_burst_is_not_live_and_never_accepted() {
-        let still = vec![face(0.0, 0.0)];
-        let engine = engine(vec![still]);
-        let template = Template::new(vec![vec![0.7, 0.7]]).unwrap();
-        let frames = vec![textured(); 10];
-        let outcome = engine.verify(&frames, &template, 1e-5).unwrap();
-        assert_eq!(outcome, MatchOutcome { live: false, accepted: false });
-        assert_eq!(engine.identify(&frames, &[(1000, template)], 1e-5).unwrap(), IdentifyOutcome { live: false, matched_uid: None });
+    fn live_matching_face_is_accepted_as_soon_as_liveness_has_enough_frames() {
+        let engine = engine(moving_face_script());
+        let template = Template::new(vec![probe_of(&textured(), &face(0.0, 0.0))]).unwrap();
+        let session = engine.auth_begin(vec![(1000, template)], 1e-5, 16).unwrap();
+        let progress = run_until_decided(&engine, session, 16);
+        assert_eq!(progress.verdict, AuthVerdict::Accepted { uid: 1000 });
+        assert_eq!(progress.scored_frames, LivenessConfig::default().min_frames);
+        assert!(engine.auth_end(session));
+    }
+
+    // @spec:AC-007
+    #[test]
+    fn identification_picks_the_matching_account_among_several() {
+        let engine = engine(moving_face_script());
+        let probe = probe_of(&textured(), &face(0.0, 0.0));
+        let stranger = Template::new(vec![vec![-probe[1], probe[0]]]).unwrap();
+        let owner = Template::new(vec![probe]).unwrap();
+        let session = engine.auth_begin(vec![(1000, stranger), (1001, owner)], 1e-5, 16).unwrap();
+        assert_eq!(run_until_decided(&engine, session, 16).verdict, AuthVerdict::Accepted { uid: 1001 });
+    }
+
+    // @spec:AC-006
+    // @spec:AC-008
+    #[test]
+    fn non_matching_face_is_rejected_when_the_frame_budget_runs_out() {
+        let engine = engine(moving_face_script());
+        let probe = probe_of(&textured(), &face(0.0, 0.0));
+        let stranger = Template::new(vec![vec![-probe[1], probe[0]]]).unwrap();
+        let session = engine.auth_begin(vec![(1000, stranger)], 1e-5, 12).unwrap();
+        let progress = run_until_decided(&engine, session, 30);
+        assert_eq!(progress.verdict, AuthVerdict::Rejected);
+        assert_eq!(progress.scored_frames, 12);
+    }
+
+    // @spec:AC-012
+    #[test]
+    fn photo_like_still_face_is_never_accepted_even_when_it_matches() {
+        let engine = engine(vec![vec![face(0.0, 0.0)]]);
+        let template = Template::new(vec![probe_of(&textured(), &face(0.0, 0.0))]).unwrap();
+        let session = engine.auth_begin(vec![(1000, template)], 1e-5, 16).unwrap();
+        assert_eq!(run_until_decided(&engine, session, 40).verdict, AuthVerdict::Rejected);
+    }
+
+    // @spec:AC-005
+    #[test]
+    fn target_far_is_split_across_the_frame_budget() {
+        let min_frames = LivenessConfig::default().min_frames;
+        let probe = vec![1.0, 0.0];
+        let calibration = calibration();
+        let small_budget = calibration.score_threshold(1e-5 / min_frames as f64).unwrap();
+        let large_budget = calibration.score_threshold(1e-5 / (2 * min_frames) as f64).unwrap();
+        assert!(large_budget > small_budget);
+        let template = template_with_cosine(&probe, ((small_budget + large_budget) / 2.0) as f32);
+
+        let small = engine_with(moving_face_script(), Box::new(FixedEmbedder(probe.clone())));
+        let session = small.auth_begin(vec![(1000, template.clone())], 1e-5, min_frames).unwrap();
+        assert_eq!(run_until_decided(&small, session, 40).verdict, AuthVerdict::Accepted { uid: 1000 });
+
+        let large = engine_with(moving_face_script(), Box::new(FixedEmbedder(probe)));
+        let session = large.auth_begin(vec![(1000, template)], 1e-5, 2 * min_frames).unwrap();
+        assert_eq!(run_until_decided(&large, session, 40).verdict, AuthVerdict::Rejected);
     }
 
     #[test]
-    fn short_burst_without_enough_faces_is_an_error() {
-        let engine = engine(vec![vec![face(0.0, 0.0)]]);
+    fn frames_without_a_face_do_not_consume_the_frame_budget() {
+        let engine = engine(vec![vec![]]);
         let template = Template::new(vec![vec![0.7, 0.7]]).unwrap();
-        assert!(matches!(engine.verify(&vec![textured(); 2], &template, 1e-5), Err(EngineError::NoFace)));
+        let session = engine.auth_begin(vec![(1000, template)], 1e-5, 3).unwrap();
+        for _ in 0..10 {
+            let progress = engine.auth_submit(session, &textured()).unwrap();
+            assert_eq!(progress, AuthProgress { verdict: AuthVerdict::Continue, scored_frames: 0 });
+        }
+    }
+
+    #[test]
+    fn invalid_authentication_arguments_and_unknown_sessions_are_errors() {
+        let engine = engine(vec![vec![]]);
+        let template = Template::new(vec![vec![0.7, 0.7]]).unwrap();
+        assert!(engine.auth_begin(vec![], 1e-5, 8).is_err());
+        assert!(engine.auth_begin(vec![(1, template.clone())], 1e-5, 0).is_err());
+        assert!(engine.auth_begin(vec![(1, template.clone())], 0.0, 8).is_err());
+        assert!(engine.auth_begin(vec![(1, template)], 1.0, 8).is_err());
+        assert!(engine.auth_submit(999, &textured()).is_err());
+        assert!(!engine.auth_end(999));
     }
 
     #[test]

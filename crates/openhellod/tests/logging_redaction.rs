@@ -24,7 +24,10 @@ impl SensorBackend for Sensor {
     }
 }
 
-struct Engine;
+#[derive(Default)]
+struct Engine {
+    candidates: Vec<(u32, Vec<u8>)>,
+}
 
 impl EngineBackend for Engine {
     fn enroll_begin(&mut self, _: u64) -> Result<u64, DaemonError> {
@@ -43,12 +46,18 @@ impl EngineBackend for Engine {
         Ok(())
     }
 
-    fn verify(&mut self, _: &[CapturedFrame], template: &[u8], _: f64) -> Result<MatchDecision, DaemonError> {
-        Ok(MatchDecision { live: true, accepted: template == TEMPLATE })
+    fn auth_begin(&mut self, candidates: &[(u32, Vec<u8>)], _: f64, _: u32) -> Result<u64, DaemonError> {
+        self.candidates = candidates.to_vec();
+        Ok(1)
     }
 
-    fn identify(&mut self, _: &[CapturedFrame], candidates: &[(u32, Vec<u8>)], _: f64) -> Result<IdentifyDecision, DaemonError> {
-        Ok(IdentifyDecision { live: true, matched_uid: candidates.first().map(|(uid, _)| *uid) })
+    fn auth_submit(&mut self, _: u64, _: &CapturedFrame) -> Result<AuthProgress, DaemonError> {
+        let matched = self.candidates.iter().find(|(_, template)| template.as_slice() == TEMPLATE).map(|(uid, _)| *uid);
+        Ok(AuthProgress { verdict: matched.map_or(AuthVerdict::Rejected, AuthVerdict::Accepted), scored_frames: 1 })
+    }
+
+    fn auth_end(&mut self, _: u64) -> Result<(), DaemonError> {
+        Ok(())
     }
 }
 
@@ -97,7 +106,7 @@ fn forbidden_renderings() -> Vec<String> {
 fn a_full_cycle_at_trace_verbosity_never_logs_frame_or_template_bytes() {
     let capture = Arc::new(Capture::default());
     let logger = Logger::new(Level::Trace, capture.clone());
-    let mut core = Biometrics::new(Box::new(Sensor), Box::new(Engine), Box::new(Storage::default()), DEFAULT_TARGET_FAR).with_logger(logger);
+    let mut core = Biometrics::new(Box::new(Sensor), Box::new(Engine::default()), Box::new(Storage::default()), DEFAULT_TARGET_FAR).with_logger(logger);
 
     let handle = core.enroll_begin(1000).unwrap();
     core.enroll_capture(&handle).unwrap();

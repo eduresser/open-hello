@@ -2,12 +2,12 @@ use std::ffi::CStr;
 use std::os::raw::c_char;
 
 use openhello_plugin_abi::{
-    EngineHandle, EngineInterface, EnrollProgress, EnrollState, EnrollVerdict, FrameView, IdentifyDecision, MatchDecision,
-    Status, TemplateRef, ABI_VERSION,
+    AuthProgress, AuthState, EngineHandle, EngineInterface, EnrollProgress, EnrollState, EnrollVerdict, FrameView, Status,
+    TemplateRef, ABI_VERSION,
 };
 use serde::Deserialize;
 
-use crate::engine::{Engine, Verdict};
+use crate::engine::{AuthVerdict, Engine, Verdict};
 use crate::enrollment_quality::SessionState;
 use crate::matching::Template;
 use crate::{EngineError, GrayImage};
@@ -62,13 +62,6 @@ fn status_of(error: &EngineError) -> Status {
 
 unsafe fn engine<'a>(handle: EngineHandle) -> Option<&'a Engine> {
     (handle as *const Engine).as_ref()
-}
-
-unsafe fn images(frames: *const FrameView, count: usize) -> Result<Vec<GrayImage>, EngineError> {
-    if frames.is_null() {
-        return Err(EngineError::InvalidInput("null frame array".into()));
-    }
-    std::slice::from_raw_parts(frames, count).iter().map(|f| image(f)).collect()
 }
 
 unsafe fn image(frame: &FrameView) -> Result<GrayImage, EngineError> {
@@ -175,65 +168,67 @@ unsafe extern "C" fn engine_enroll_discard(handle: EngineHandle, session: u64) -
     }
 }
 
-unsafe extern "C" fn engine_verify(
+unsafe extern "C" fn engine_auth_begin(
     handle: EngineHandle,
-    frames: *const FrameView,
-    frame_count: usize,
-    template: *const u8,
-    template_len: usize,
+    candidates: *const TemplateRef,
+    candidate_count: usize,
     target_far: f64,
-    out: *mut MatchDecision,
+    max_scored_frames: u32,
+    out_session: *mut u64,
 ) -> Status {
-    let (Some(engine), false, false) = (engine(handle), template.is_null(), out.is_null()) else {
+    let (Some(engine), false, false) = (engine(handle), candidates.is_null(), out_session.is_null()) else {
         return Status::InvalidArgument;
     };
-    let result = images(frames, frame_count).and_then(|imgs| {
-        let template = Template::from_bytes(std::slice::from_raw_parts(template, template_len))?;
-        engine.verify(&imgs, &template, target_far)
-    });
+    let result = std::slice::from_raw_parts(candidates, candidate_count)
+        .iter()
+        .map(|c| {
+            if c.data.is_null() {
+                return Err(EngineError::InvalidInput("null template data".into()));
+            }
+            Ok((c.uid, Template::from_bytes(std::slice::from_raw_parts(c.data, c.len))?))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .and_then(|enrolled| engine.auth_begin(enrolled, target_far, max_scored_frames as usize));
     match result {
-        Ok(outcome) => {
-            *out = MatchDecision { live: outcome.live, accepted: outcome.accepted };
+        Ok(id) => {
+            *out_session = id;
             Status::Ok
         }
         Err(error) => status_of(&error),
     }
 }
 
-unsafe extern "C" fn engine_identify(
+unsafe extern "C" fn engine_auth_submit(
     handle: EngineHandle,
-    frames: *const FrameView,
-    frame_count: usize,
-    candidates: *const TemplateRef,
-    candidate_count: usize,
-    target_far: f64,
-    out: *mut IdentifyDecision,
+    session: u64,
+    frame: *const FrameView,
+    out: *mut AuthProgress,
 ) -> Status {
-    let (Some(engine), false, false) = (engine(handle), candidates.is_null(), out.is_null()) else {
+    let (Some(engine), Some(frame), false) = (engine(handle), frame.as_ref(), out.is_null()) else {
         return Status::InvalidArgument;
     };
-    let result = images(frames, frame_count).and_then(|imgs| {
-        let enrolled = std::slice::from_raw_parts(candidates, candidate_count)
-            .iter()
-            .map(|c| {
-                if c.data.is_null() {
-                    return Err(EngineError::InvalidInput("null template data".into()));
-                }
-                Ok((c.uid, Template::from_bytes(std::slice::from_raw_parts(c.data, c.len))?))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        engine.identify(&imgs, &enrolled, target_far)
-    });
-    match result {
-        Ok(outcome) => {
-            *out = IdentifyDecision {
-                live: outcome.live,
-                found: outcome.matched_uid.is_some(),
-                uid: outcome.matched_uid.unwrap_or(0),
+    match image(frame).and_then(|img| engine.auth_submit(session, &img)) {
+        Ok(progress) => {
+            let (state, uid) = match progress.verdict {
+                AuthVerdict::Continue => (AuthState::Continue, 0),
+                AuthVerdict::Accepted { uid } => (AuthState::Accepted, uid),
+                AuthVerdict::Rejected => (AuthState::Rejected, 0),
             };
+            *out = AuthProgress { state, uid, scored_frames: progress.scored_frames as u32 };
             Status::Ok
         }
         Err(error) => status_of(&error),
+    }
+}
+
+unsafe extern "C" fn engine_auth_end(handle: EngineHandle, session: u64) -> Status {
+    let Some(engine) = engine(handle) else {
+        return Status::InvalidArgument;
+    };
+    if engine.auth_end(session) {
+        Status::Ok
+    } else {
+        Status::NotFound
     }
 }
 
@@ -250,8 +245,9 @@ static ENGINE_INTERFACE: EngineInterface = EngineInterface {
     enroll_submit: engine_enroll_submit,
     enroll_commit: engine_enroll_commit,
     enroll_discard: engine_enroll_discard,
-    verify: engine_verify,
-    identify: engine_identify,
+    auth_begin: engine_auth_begin,
+    auth_submit: engine_auth_submit,
+    auth_end: engine_auth_end,
     destroy: engine_destroy,
 };
 

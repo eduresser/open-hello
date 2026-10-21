@@ -3,13 +3,13 @@ use std::path::Path;
 
 use libloading::{Library, Symbol};
 use openhello_plugin_abi::{
-    EngineEntry, EngineHandle, EngineInterface, EnrollState as AbiEnrollState, EnrollVerdict, FrameView, IdentifyDecision as AbiIdentify,
-    MatchDecision as AbiMatch, SensorEntry, SensorHandle, SensorInterface, Status, StorageEntry, StorageHandle, StorageInterface,
-    TemplateRef, ABI_VERSION, ENGINE_ENTRY_SYMBOL, SENSOR_ENTRY_SYMBOL, STORAGE_ENTRY_SYMBOL,
+    AuthProgress as AbiAuthProgress, AuthState as AbiAuthState, EngineEntry, EngineHandle, EngineInterface,
+    EnrollState as AbiEnrollState, EnrollVerdict, FrameView, SensorEntry, SensorHandle, SensorInterface, Status, StorageEntry,
+    StorageHandle, StorageInterface, TemplateRef, ABI_VERSION, ENGINE_ENTRY_SYMBOL, SENSOR_ENTRY_SYMBOL, STORAGE_ENTRY_SYMBOL,
 };
 
 use crate::backends::{
-    CapturedFrame, DaemonError, EngineBackend, EnrollProgress, EnrollState, IdentifyDecision, MatchDecision, SensorBackend,
+    AuthProgress, AuthVerdict, CapturedFrame, DaemonError, EngineBackend, EnrollProgress, EnrollState, SensorBackend,
     StorageBackend, Verdict,
 };
 
@@ -173,35 +173,35 @@ impl EngineBackend for EnginePlugin {
         check(unsafe { (self.interface.enroll_discard)(self.handle, session) }, "enroll discard")
     }
 
-    fn verify(&mut self, frames: &[CapturedFrame], template: &[u8], target_far: f64) -> Result<MatchDecision, DaemonError> {
-        let views = views(frames);
-        let mut out = AbiMatch::default();
-        check(
-            unsafe {
-                (self.interface.verify)(self.handle, views.as_ptr(), views.len(), template.as_ptr(), template.len(), target_far, &mut out)
-            },
-            "verify",
-        )?;
-        Ok(MatchDecision { live: out.live, accepted: out.accepted })
-    }
-
-    fn identify(
-        &mut self,
-        frames: &[CapturedFrame],
-        candidates: &[(u32, Vec<u8>)],
-        target_far: f64,
-    ) -> Result<IdentifyDecision, DaemonError> {
-        let views = views(frames);
+    fn auth_begin(&mut self, candidates: &[(u32, Vec<u8>)], target_far: f64, max_scored_frames: u32) -> Result<u64, DaemonError> {
         let refs: Vec<TemplateRef> =
             candidates.iter().map(|(uid, data)| TemplateRef { uid: *uid, data: data.as_ptr(), len: data.len() }).collect();
-        let mut out = AbiIdentify::default();
+        let mut session = 0u64;
         check(
             unsafe {
-                (self.interface.identify)(self.handle, views.as_ptr(), views.len(), refs.as_ptr(), refs.len(), target_far, &mut out)
+                (self.interface.auth_begin)(self.handle, refs.as_ptr(), refs.len(), target_far, max_scored_frames, &mut session)
             },
-            "identify",
+            "auth begin",
         )?;
-        Ok(IdentifyDecision { live: out.live, matched_uid: out.found.then_some(out.uid) })
+        Ok(session)
+    }
+
+    fn auth_submit(&mut self, session: u64, frame: &CapturedFrame) -> Result<AuthProgress, DaemonError> {
+        let view = views(std::slice::from_ref(frame));
+        let mut out = AbiAuthProgress { state: AbiAuthState::Continue, uid: 0, scored_frames: 0 };
+        check(unsafe { (self.interface.auth_submit)(self.handle, session, view.as_ptr(), &mut out) }, "auth submit")?;
+        Ok(AuthProgress {
+            verdict: match out.state {
+                AbiAuthState::Continue => AuthVerdict::Continue,
+                AbiAuthState::Accepted => AuthVerdict::Accepted(out.uid),
+                AbiAuthState::Rejected => AuthVerdict::Rejected,
+            },
+            scored_frames: out.scored_frames,
+        })
+    }
+
+    fn auth_end(&mut self, session: u64) -> Result<(), DaemonError> {
+        check(unsafe { (self.interface.auth_end)(self.handle, session) }, "auth end")
     }
 }
 
