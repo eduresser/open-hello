@@ -106,7 +106,6 @@ fn provisioning_leaves_one_key_and_one_certificate_for_that_key_and_one_mapping_
     assert_eq!(rig.listed_classes("openhello-3001").len(), 3);
 }
 
-// @spec:AC-027
 #[test]
 fn the_token_signature_verifies_against_the_issued_certificate() {
     let rig = rig();
@@ -127,7 +126,6 @@ fn the_token_signature_verifies_against_the_issued_certificate() {
     assert!(text.contains("ecdsa-with-SHA256"), "{text}");
 }
 
-// @spec:AC-029
 #[test]
 fn a_certificate_of_another_key_with_the_same_subject_does_not_match_the_token_key() {
     let rig = rig();
@@ -209,7 +207,6 @@ fn on_behalf_of(uid: u32, op: u8, payload: &str) -> Vec<u8> {
     out
 }
 
-// @spec:AC-027
 #[test]
 fn only_a_root_peer_may_name_the_uid_and_a_refused_request_never_reaches_the_tpm() {
     let rig = rig();

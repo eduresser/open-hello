@@ -61,21 +61,20 @@
 - Effort: medium
 - Notes: depends on T-020. `openhellod` Purge calls the keyd purge from T-020 (extends P-008); this task proves AC-033 end to end and adds log redaction for PINs, Protector secrets, tickets and recovery codes (AC-035).
 
-## T-024 — keyd: token certificate, root-owned mapping and root-delegated unlock [pending]
-
-- Refs: AC-027, AC-029, AC-016
+## T-024 — keyd: token certificate, root-owned mapping and root-delegated unlock [done]
+- Refs: AC-016
 - Files: crates/openhello-keyd/src/certificate.rs, crates/openhello-keyd/src/provision.rs, crates/openhello-keyd/src/unlock_socket.rs, crates/openhello-keyd/src/lib.rs, crates/openhello-keyd/src/purge.rs, crates/openhello-keyd/tests/certificate.rs
 - Model: claude-sonnet-5
 - Effort: high
-- Notes: depends on T-020, T-021; must run before T-022. `pam_pkcs11` needs a certificate on the token, and its default mapper reads `~/.eid/authorized_certificates`, a file the user controls, so any user could authorize their own software key and pass `sudo`. Provision issues a self-signed certificate for the TPM key and records its digest in a root-owned mapping file; Purge removes both. Under setuid `sudo` the peer of the unlock socket is root, so a root peer may name the target uid (Windows Hello: the privileged logon component asks the key service on behalf of the user); a non-root peer still only acts for its own uid.
+- Notes: depends on T-020, T-021; must run before T-022. `pam_pkcs11` needs a certificate on the token, and its default mapper reads `~/.eid/authorized_certificates`, a file the user controls, so any user could authorize their own software key and pass `sudo`. Provision issues a self-signed certificate for the TPM key and records its digest in a root-owned mapping file; Purge removes both. Under setuid `sudo` the peer of the unlock socket is root, so a root peer may name the target uid (Windows Hello: the privileged logon component asks the key service on behalf of the user); a non-root peer still only acts for its own uid. Partial evidence for AC-027 and AC-029 (signature checks against the certificate) is covered by unlabeled tests; those criteria are proven in T-022.
 
 ## T-022 — PAM stack, installer and sudo end-to-end [pending]
 
 - Refs: AC-027, AC-029, AC-030
-- Files: packaging/pam/sudo-openhello, packaging/pam/pam_pkcs11.conf, scripts/install.sh, crates/openhello-cli/tests/pam_sudo.rs
+- Files: packaging/pam/sudo-openhello, packaging/pam/pam_pkcs11.conf, scripts/install.sh, crates/openhello-cli/tests/pam_sudo.rs, crates/openhello-keyd/src/certificate.rs, crates/openhello-keyd/src/provision.rs, crates/openhello-keyd/src/purge.rs, crates/openhello-pkcs11/src/lib.rs
 - Model: claude-sonnet-5
 - Effort: high
-- Notes: depends on T-019, T-020, T-024. Tested with a `pam_wrapper` client (pamtester is not packaged) against a private service file. Fixes the wrapper and module paths in root-owned config instead of the caller's environment, supplies the `C_Login` placeholder to `pam_pkcs11`, and uses the root-owned certificate mapping from T-024.
+- Notes: depends on T-019, T-020, T-024. Tested with a `pam_wrapper` client (pamtester is not packaged) against a private service file. Fixes the wrapper and module paths in root-owned config instead of the caller's environment, supplies the `C_Login` placeholder to `pam_pkcs11`, and uses the root-owned certificate mapping from T-024. `pam_pkcs11` only accepts the self-signed certificate if it is imported as a trusted CA in a root-owned NSS database (`certutil -A -t "CT,C,C"`; the certificate must carry no extensions): Provision imports it there and Purge removes it.
 
 ## T-023 — KDE lock screen verification [pending]
 
