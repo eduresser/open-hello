@@ -106,16 +106,14 @@
 - Effort: low
 - Notes: depends on T-026. `install.sh` stops requiring calibration images (`--calibration-*` options stay as an optional override that writes `/var/lib/openhello/calibration.bin`); the daemon starts right after install. `openhellod` config makes the calibration path optional. The evaluation README explains how to regenerate the default calibration file from LFW or from infrared captures and where to record the results (`calibration-results.md`, the TOML provenance block).
 
-## T-028 — CLI: provision the key after enrollment, set a PIN, show the recovery code [pending]
-
+## T-028 — CLI: provision the key after enrollment, set a PIN, show the recovery code [done]
 - Refs: AC-016, AC-025, AC-031
 - Files: crates/openhello-cli/src/lib.rs, crates/openhello-cli/src/dbus_client.rs, crates/openhello-cli/src/keyd_client.rs, crates/openhello-cli/src/main.rs, crates/openhello-cli/tests/provisioning_flow.rs
 - Model: claude-sonnet-5
 - Effort: medium
 - Notes: found while testing on the VM (2026-10-21): nothing calls keyd `Provision` after `EnrollCommit`, so no user has a key and `sudo` face login cannot work. `openhello-cli enroll` calls keyd `Provision` for the same uid right after a successful commit and prints the recovery code once (never again, never logged); new `openhello-cli set-pin` reads the PIN from the terminal without echo and calls keyd `SetPin`; `purge` already reaches keyd through openhellod (T-021). If Provision fails after a committed enrollment the CLI says so plainly and does not discard the template. The polkit actions allow only an active local session (`allow_active`), so these commands are run from the desktop session, not over SSH.
 
-## T-029 — pam_openhello stays silent for users without an open-hello credential [pending]
-
+## T-029 — pam_openhello stays silent for users without an open-hello credential [done]
 - Refs: AC-030
 - Files: crates/openhello-pam/src/lib.rs, crates/openhello-cli/tests/pam_sudo.rs
 - Model: claude-sonnet-5
