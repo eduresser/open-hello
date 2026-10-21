@@ -100,7 +100,7 @@ guesses to be blocked by the TPM itself, so that a compromised process cannot re
 
 ### US-013 — Face or PIN authenticates `sudo` and the lock screen
 
-As a laptop owner, I want `sudo` and the lock screen to accept my face, so that I stop typing my password.
+As a laptop owner on any Linux distribution and desktop, I want `sudo` and the lock screen to accept my face, so that I stop typing my password.
 
 #### AC-027 — A matching face authenticates `sudo`
 
@@ -108,11 +108,11 @@ As a laptop owner, I want `sudo` and the lock screen to accept my face, so that 
 - **When** the user runs `sudo` and looks at the camera
 - **Then** authentication succeeds without a password, by verifying a challenge signed with the TPM key
 
-#### AC-028 — A matching face unlocks the lock screen
+#### AC-028 — A matching face unlocks a PAM-based lock screen
 
-- **Given** an enrolled and provisioned user on a locked KDE Plasma session
+- **Given** an enrolled and provisioned user on a locked graphical session whose screen locker authenticates through PAM (first verified on KDE Plasma)
 - **When** the user looks at the camera
-- **Then** the session unlocks through the same PAM path
+- **Then** the session unlocks through the same PAM path, with no desktop-specific code in open-hello
 
 #### AC-029 — A different face is never accepted and falls through to the password
 
@@ -186,7 +186,7 @@ out of logs, so that another process cannot plant, change or leak my credential.
 | ASM-008 | The biometric Protector secret (20 random bytes) is held by `openhello-keyd`, sealed in the TPM without an auth value and released only against a valid ticket. TPM lockout therefore throttles the PIN path only; the biometric path is bounded by the match FAR and the ticket lifetime. | open | Honest weaker point versus a PIN: a root-level compromise of `openhello-keyd` can unlock the key. Documented, not mitigated in v1b. |
 | ASM-009 | Ticket lifetime of 5 seconds, single use, is a provisional default. | open | Adjustable, like `face-recognition-proof` ASM-002; revisit after real `sudo` and lock-screen use. |
 | ASM-010 | `swtpm` supports ECC P-256 and the dictionary-attack lockout well enough to run the key and lockout tests in CI. | confirmed | Proved (spike.md): swtpm has P-256 and the dictionary-attack lockout; three wrong auths give `inLockout=1`, the right password is refused (0x921), `--clear-lockout` recovers. Needs a recovery time above zero and `tpm2-abrmd`. The lockout counter is global to the TPM, not per key: tests and T-017 must set `max-tries` and `recovery-time`. |
-| ASM-011 | The KDE lock screen can run the open-hello PAM module non-interactively through its own PAM service. | open | Needs a manual test on this Plasma session; AC-028 stays unproven until then. |
+| ASM-011 | A PAM-based screen locker can run the open-hello PAM module non-interactively through its own PAM service, on any distro and desktop with an IR camera. | open | open-hello ships a generic lock-screen PAM service; a manual test on this machine's KDE Plasma is the first check, and other lockers (GNOME, swaylock, i3lock, LightDM) are listed as unverified. AC-028 stays unproven until the manual test. |
 | ASM-012 | Purge destroys the user's key the way P-008 intends. | open | Not fully: `tpm2-pkcs11` keeps the key as a wrapped blob in its sqlite store under a deterministic primary, with no persistent TPM handle to evict. Purge removes the token and every Protector blob, so nobody can unlock it, but an attacker holding a copy of the store and the Protectors' sealed blobs, plus access to the same TPM, could still sign (T-020 test). Closing it needs one persistent TPM object per user that purge evicts. AC-033 is proven for what purge does today; the wording "TPM key is evicted" does not strictly apply. Owner decision needed. |
 
 ## Open questions
