@@ -201,3 +201,12 @@
 - Model: claude-sonnet-5
 - Effort: low
 - Notes: replaces the KDE-only `kde-face` plan (owner rule, 2026-10-21). Observed on the VM: at lock the KDE greeter starts the `kde` password worker; with `pam_openhello` first in that service the face is tried before the password prompt and needs no `[Authenticators] Face=true`. Verify with `openhello-cli pam enable kde` on the VM and record: unlock without typing, what the greeter shows while the module waits, and what happens to a password typed during the wait. Other lockers use the identical command with their service name; anything the guide cannot confirm stays marked unverified.
+
+## T-041 — keyd backfills the public key file for tokens provisioned before T-034 [pending]
+
+- Refs: AC-027
+- Files: crates/openhello-keyd/src/auth_keys.rs, crates/openhello-keyd/src/main.rs, crates/openhello-keyd/src/lib.rs, crates/openhello-keyd/tests/auth_backfill.rs
+- Model: claude-sonnet-5
+- Effort: medium
+- Notes: found on the KDE neon VM (2026-10-21) after upgrading: `/etc/openhello/auth` did not exist, because the user was provisioned before T-034, so `pam_openhello` found no credential and stayed silent (sudo and the KDE lock screen asked for the password). A repeated Provision cannot repair it (the key already exists). At start, and after each Provision, keyd reads the public key of every token `openhello-<uid>` (a public object, no login) and writes `<uid>.pub` when it is missing or differs, with the same format, owner, mode and atomic write as T-034; a token whose key cannot be read is skipped with a generic log line and never blocks startup. Purge still removes the file. The token's public key is authoritative.
+
