@@ -92,13 +92,13 @@ fn enable_appends_module_arguments() {
         "enable",
         "sudo",
         "--arg",
-        "allowlist=/etc/openhello/pam-services",
+        "authdir=/etc/openhello/auth",
         "--arg",
         "trusted_uid=0",
     ])
     .0
     .unwrap();
-    assert!(tree.read("sudo").starts_with("#%PAM-1.0\nauth sufficient pam_openhello.so allowlist=/etc/openhello/pam-services trusted_uid=0\nauth      include"));
+    assert!(tree.read("sudo").starts_with("#%PAM-1.0\nauth sufficient pam_openhello.so authdir=/etc/openhello/auth trusted_uid=0\nauth      include"));
 }
 
 // @covers:AC-027-pam-enable
@@ -146,10 +146,10 @@ fn enable_copies_the_vendor_file_first() {
 #[test]
 fn enable_fails_clearly_when_the_service_exists_nowhere() {
     let tree = Tree::new();
-    let (result, _) = tree.pam(&["enable", "swaylock"]);
+    let (result, _) = tree.pam(&["enable", "no-such-service"]);
     assert!(result
         .unwrap_err()
-        .contains("no PAM service file for `swaylock`"));
+        .contains("no PAM service file for `no-such-service`"));
 }
 
 // @covers:AC-027-pam-enable
@@ -290,14 +290,14 @@ fn status_lists_every_service() {
     let tree = Tree::new();
     tree.put("sudo", DEBIAN_SUDO);
     tree.put("login", SUSE_SUDO);
-    tree.put("kde", FEDORA_SUDO);
-    symlink(tree.etc("kde"), tree.etc("other")).unwrap();
+    tree.put("polkit-1", FEDORA_SUDO);
+    symlink(tree.etc("polkit-1"), tree.etc("other")).unwrap();
     tree.pam(&["enable", "sudo"]).0.unwrap();
     let (result, out) = tree.pam(&["status"]);
     result.unwrap();
     assert!(out.contains("sudo: enabled (per-service line)\n"));
     assert!(out.contains("login: disabled\n"));
-    assert!(out.contains("kde: disabled\n"));
+    assert!(out.contains("polkit-1: disabled\n"));
     assert!(out.contains("other: symlink"));
 }
 
@@ -315,11 +315,7 @@ fn enable_migrates_the_earlier_installer_and_says_what_it_removed() {
     tree.put("sudo-openhello", OLD_STACK);
     tree.put("openhello-lockscreen", OLD_STACK);
     tree.put(
-        "kde-face",
-        "#%PAM-1.0\nauth include openhello-lockscreen\naccount include common-account\n",
-    );
-    tree.put(
-        "kde",
+        "polkit-1",
         "auth include openhello-lockscreen\nauth required pam_unix.so\n",
     );
     let (result, out) = tree.pam(&["enable", "sudo"]);
@@ -328,17 +324,22 @@ fn enable_migrates_the_earlier_installer_and_says_what_it_removed() {
         tree.read("sudo"),
         with_line(DEBIAN_SUDO, "@include common-auth")
     );
-    assert_eq!(tree.read("kde"), "auth required pam_unix.so\n");
+    assert_eq!(tree.read("polkit-1"), "auth required pam_unix.so\n");
     assert_eq!(
         names(&tree.dir.path().join("etc/pam.d")),
-        ["kde", "kde.openhello.bak", "sudo", "sudo.openhello.bak"]
+        [
+            "polkit-1",
+            "polkit-1.openhello.bak",
+            "sudo",
+            "sudo.openhello.bak"
+        ]
     );
     assert_eq!(tree.read("sudo.openhello.bak"), DEBIAN_SUDO);
     assert_eq!(
-        tree.read("kde.openhello.bak"),
+        tree.read("polkit-1.openhello.bak"),
         "auth include openhello-lockscreen\nauth required pam_unix.so\n"
     );
-    for removed in ["sudo-openhello", "openhello-lockscreen", "kde-face"] {
+    for removed in ["sudo-openhello", "openhello-lockscreen"] {
         assert!(out.contains(removed), "{removed}: {out}");
     }
 }
@@ -348,11 +349,11 @@ fn enable_migrates_the_earlier_installer_and_says_what_it_removed() {
 fn migrate_alone_keeps_third_party_files_with_our_old_names() {
     let tree = Tree::new();
     let foreign = "#%PAM-1.0\nauth required pam_faillock.so\n";
-    tree.put("kde-face", foreign);
+    tree.put("openhello-lockscreen", foreign);
     tree.put("sudo-openhello", OLD_STACK);
     let (result, out) = tree.pam(&["migrate"]);
     result.unwrap();
-    assert_eq!(tree.read("kde-face"), foreign);
+    assert_eq!(tree.read("openhello-lockscreen"), foreign);
     assert!(!tree.etc("sudo-openhello").exists());
     assert!(out.contains("kept"));
     let (_, again) = tree.pam(&["migrate"]);
@@ -427,26 +428,19 @@ fn usage_errors_exit_with_code_two() {
 
 const DEBIAN_COMMON_AUTH: &str = "#\n# /etc/pam.d/common-auth - authentication settings common to all services\n#\n\n# here are the per-package modules (the \"Primary\" block)\nauth\t[success=2 default=ignore]\tpam_unix.so nullok\nauth\t[success=1 default=ignore]\tpam_sss.so use_first_pass\n# here's the fallback if no module succeeds\nauth\trequisite\t\t\tpam_deny.so\nauth\trequired\t\t\tpam_permit.so\n";
 const SYSTEM_AUTH: &str = "auth      required  pam_faillock.so preauth\nauth      [success=1 default=bad] pam_unix.so try_first_pass nullok\nauth      required  pam_deny.so\n";
-const COMMON_LINE: &str = "auth sufficient pam_openhello.so allowlist=/etc/openhello/pam-services";
-const SERVICES: [&str; 14] = [
-    "sudo",
-    "polkit-1",
-    "kde",
-    "gdm-password",
-    "sddm",
-    "lightdm",
-    "swaylock",
-    "hyprlock",
-    "i3lock",
-    "xscreensaver",
-    "xsecurelock",
-    "cinnamon-screensaver",
-    "mate-screensaver",
-    "xfce4-screensaver",
-];
+const COMMON_LINE: &str = "auth sufficient pam_openhello.so";
+const RETIRED_COMMON_LINE: &str =
+    "auth sufficient pam_openhello.so allowlist=/etc/openhello/pam-services";
+const RETIRED_SERVICES_FILE: &str = "# Services where pam_openhello may use the camera; read through allowlist=/etc/openhello/pam-services.\nsudo\npolkit-1\n";
 
-fn allowlist(tree: &Tree) -> PathBuf {
+fn retired_services(tree: &Tree) -> PathBuf {
     tree.dir.path().join("etc/openhello/pam-services")
+}
+
+fn written_files(tree: &Tree) -> Vec<String> {
+    let mut found = names(&tree.dir.path().join("etc/pam.d"));
+    found.retain(|n| !n.ends_with(".openhello.bak"));
+    found
 }
 
 fn debian() -> Tree {
@@ -509,7 +503,7 @@ fn managed_common_stack_symlink_is_refused_with_the_fallback() {
     assert!(message.contains("is a symlink"));
     assert!(message.contains("openhello-cli pam enable <service>"));
     assert_eq!(fs::read_to_string(&managed).unwrap(), DEBIAN_COMMON_AUTH);
-    assert!(!allowlist(&tree).exists());
+    assert!(!retired_services(&tree).exists());
     assert!(!tree.etc("common-auth.openhello.bak").exists());
 }
 
@@ -525,7 +519,7 @@ fn sudo_without_a_common_stack_include_is_reported_clearly() {
     let message = result.unwrap_err();
     assert!(message.contains("sudo includes no common auth stack"));
     assert!(message.contains("pam enable"));
-    assert!(!allowlist(&tree).exists());
+    assert!(!retired_services(&tree).exists());
 }
 
 // @covers:AC-027-pam-common-stack
@@ -546,15 +540,15 @@ fn enable_without_services_is_idempotent_with_a_single_backup() {
 #[test]
 fn enable_without_services_removes_the_per_service_lines_added_earlier() {
     let tree = debian();
-    tree.put("kde", "auth required pam_unix.so\n");
-    tree.pam(&["enable", "sudo", "kde"]).0.unwrap();
+    tree.put("polkit-1", "auth required pam_unix.so\n");
+    tree.pam(&["enable", "sudo", "polkit-1"]).0.unwrap();
     assert!(tree.read("sudo").contains(OUR_LINE));
     let (result, out) = tree.pam(&["enable"]);
     result.unwrap();
     assert_eq!(tree.read("sudo"), DEBIAN_SUDO);
-    assert_eq!(tree.read("kde"), "auth required pam_unix.so\n");
+    assert_eq!(tree.read("polkit-1"), "auth required pam_unix.so\n");
     assert!(out.contains("sudo: removed 1 per-service line"));
-    let all: usize = ["sudo", "kde", "common-auth"]
+    let all: usize = ["sudo", "polkit-1", "common-auth"]
         .iter()
         .map(|n| tree.read(n).matches("pam_openhello.so").count())
         .sum();
@@ -565,69 +559,104 @@ fn enable_without_services_removes_the_per_service_lines_added_earlier() {
 #[test]
 fn disable_without_services_restores_every_touched_file_byte_for_byte() {
     let tree = debian();
-    tree.put("kde", "auth required pam_unix.so\n");
-    tree.pam(&["enable", "kde"]).0.unwrap();
+    tree.put("polkit-1", "auth required pam_unix.so\n");
+    tree.pam(&["enable", "polkit-1"]).0.unwrap();
     tree.pam(&["enable"]).0.unwrap();
     tree.pam(&["enable", "sudo"]).0.unwrap();
-    let (result, out) = tree.pam(&["disable"]);
+    let (result, _) = tree.pam(&["disable"]);
     result.unwrap();
     assert_eq!(tree.read("common-auth"), DEBIAN_COMMON_AUTH);
     assert_eq!(tree.read("sudo"), DEBIAN_SUDO);
-    assert_eq!(tree.read("kde"), "auth required pam_unix.so\n");
-    assert!(allowlist(&tree).exists());
-    assert!(out.contains("left in place"));
+    assert_eq!(tree.read("polkit-1"), "auth required pam_unix.so\n");
+    assert!(!retired_services(&tree).exists());
+    let (_, again) = tree.pam(&["disable"]);
+    assert!(again.contains("not enabled anywhere"));
 }
 
 // @covers:AC-028-pam-common-stack
 #[test]
-fn allowlist_is_created_with_the_fourteen_services_and_a_header() {
+fn enable_writes_no_data_file_and_leaves_only_the_common_stack_line() {
     let tree = debian();
     tree.pam(&["enable"]).0.unwrap();
-    let text = fs::read_to_string(allowlist(&tree)).unwrap();
-    let listed: Vec<&str> = text
-        .lines()
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .collect();
-    assert_eq!(listed, SERVICES);
-    let header: String = text.lines().filter(|l| l.starts_with('#')).collect();
-    assert!(header.contains("sudo and kde"));
-    assert!(header.contains("NOT verified"));
-    for left_out in ["login", "su", "sshd", "cron"] {
-        assert!(header.contains(left_out));
-        assert!(!listed.contains(&left_out));
-    }
+    assert!(!retired_services(&tree).exists());
+    assert!(!tree.dir.path().join("etc/openhello").exists());
+    assert_eq!(written_files(&tree), ["common-auth", "sudo"]);
+    assert!(!tree.read("common-auth").contains("allowlist"));
+}
+
+// @covers:AC-028-pam-common-stack
+#[test]
+fn a_common_stack_line_with_the_retired_allowlist_argument_is_rewritten_once() {
+    let tree = debian();
+    tree.put(
+        "common-auth",
+        &with_retired_line(DEBIAN_COMMON_AUTH, " debug"),
+    );
+    let (result, out) = tree.pam(&["enable"]);
+    result.unwrap();
     assert_eq!(
-        fs::metadata(allowlist(&tree)).unwrap().permissions().mode() & 0o777,
-        0o644
+        tree.read("common-auth"),
+        DEBIAN_COMMON_AUTH.replacen(
+            "auth\t[success=2",
+            &format!("{COMMON_LINE} debug\nauth\t[success=2"),
+            1
+        )
+    );
+    assert!(out.contains("migrated"));
+    assert_eq!(
+        tree.read("common-auth.openhello.bak"),
+        with_retired_line(DEBIAN_COMMON_AUTH, " debug")
+    );
+    let once = tree.read("common-auth");
+    let (_, again) = tree.pam(&["enable"]);
+    assert_eq!(tree.read("common-auth"), once);
+    assert!(!again.contains("migrated"));
+    assert_eq!(once.matches("pam_openhello.so").count(), 1);
+    tree.pam(&["disable"]).0.unwrap();
+    assert_eq!(tree.read("common-auth"), DEBIAN_COMMON_AUTH,);
+}
+
+fn with_retired_line(content: &str, extra: &str) -> String {
+    content.replacen(
+        "auth\t[success=2",
+        &format!("{RETIRED_COMMON_LINE}{extra}\nauth\t[success=2"),
+        1,
+    )
+}
+
+// @covers:AC-028-pam-common-stack
+#[test]
+fn the_retired_services_file_is_deleted_only_when_it_carries_the_tools_header() {
+    let tree = debian();
+    fs::create_dir_all(retired_services(&tree).parent().unwrap()).unwrap();
+    fs::write(retired_services(&tree), RETIRED_SERVICES_FILE).unwrap();
+    let (result, out) = tree.pam(&["enable"]);
+    result.unwrap();
+    assert!(!retired_services(&tree).exists());
+    assert!(out.contains("removed retired"));
+
+    let edited = debian();
+    fs::create_dir_all(retired_services(&edited).parent().unwrap()).unwrap();
+    fs::write(retired_services(&edited), "sudo\n").unwrap();
+    edited.pam(&["enable"]).0.unwrap();
+    assert_eq!(
+        fs::read_to_string(retired_services(&edited)).unwrap(),
+        "sudo\n"
     );
 }
 
 // @covers:AC-028-pam-common-stack
 #[test]
-fn an_edited_allowlist_is_never_overwritten() {
-    let tree = debian();
-    fs::create_dir_all(allowlist(&tree).parent().unwrap()).unwrap();
-    fs::write(allowlist(&tree), "sudo\n").unwrap();
-    tree.pam(&["enable"]).0.unwrap();
-    assert_eq!(fs::read_to_string(allowlist(&tree)).unwrap(), "sudo\n");
-}
-
-// @covers:AC-028-pam-common-stack
-#[test]
-fn status_reports_the_common_stack_allowlist_and_per_service_lines() {
+fn status_reports_the_common_stack_and_per_service_lines() {
     let tree = debian();
     let (_, before) = tree.pam(&["status"]);
     assert!(before.contains("common stack: common-auth, line absent"));
-    assert!(before.contains("allowlist /etc/openhello/pam-services: missing"));
+    assert!(!before.contains("allowlist"));
     tree.pam(&["enable"]).0.unwrap();
-    tree.put("kde", "auth required pam_unix.so\n");
-    tree.pam(&["enable", "kde"]).0.unwrap();
+    tree.put("polkit-1", "auth required pam_unix.so\n");
+    tree.pam(&["enable", "polkit-1"]).0.unwrap();
     let (result, out) = tree.pam(&["status"]);
     result.unwrap();
     assert!(out.contains("common stack: common-auth, line present"));
-    assert!(out.contains(&format!(
-        "allowlist /etc/openhello/pam-services: {}",
-        SERVICES.join(", ")
-    )));
-    assert!(out.contains("kde: enabled (per-service line)"));
+    assert!(out.contains("polkit-1: enabled (per-service line)"));
 }

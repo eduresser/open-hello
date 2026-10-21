@@ -85,7 +85,7 @@
 
 ## T-023 — Lock screen verification [in-progress]
 - Refs: AC-028
-- Files: packaging/pam/openhello-lockscreen, packaging/pam/pam-services, .spec/features/credential-login-v1b/lockscreen.md, scripts/install.sh, scripts/pam-survey.sh, crates/openhello-pam/src/lib.rs, crates/openhello-pkcs11/src/config.rs, crates/openhello-cli/tests/pam_sudo.rs
+- Files: .spec/features/credential-login-v1b/lockscreen.md, scripts/install.sh, scripts/pam-survey.sh, crates/openhello-pam/src/lib.rs, crates/openhello-pkcs11/src/config.rs, crates/openhello-cli/tests/pam_sudo.rs
 - Model: claude-sonnet-5
 - Effort: medium
 - Notes: delivered 2026-10-21 (generic lock-screen PAM service, survey script, guide); stays in-progress until the manual check proves AC-028. Depends on T-025. Manual check on the Plasma session (ASM-011), recorded as evidence; an unprivileged PAM test through the `kde` service file covers the same path in CI.
@@ -157,7 +157,7 @@
 
 ## T-035 — pam_openhello verifies the signature itself; stacks drop pam_pkcs11 [done]
 - Refs: AC-027, AC-029, AC-030
-- Files: crates/openhello-pam/Cargo.toml, crates/openhello-pam/src/lib.rs, crates/openhello-pam/src/challenge.rs, packaging/pam/sudo-openhello, packaging/pam/openhello-lockscreen, packaging/pam/pam-services, crates/openhello-cli/tests/pam_sudo.rs, crates/openhello-cli/Cargo.toml, Cargo.lock
+- Files: crates/openhello-pam/Cargo.toml, crates/openhello-pam/src/lib.rs, crates/openhello-pam/src/challenge.rs, packaging/pam/sudo-openhello, crates/openhello-cli/tests/pam_sudo.rs, crates/openhello-cli/Cargo.toml, Cargo.lock
 - Model: claude-sonnet-5
 - Effort: xhigh
 - Notes: depends on T-034. `pam_openhello` generates the challenge (getrandom), asks openhellod `Verify` (4 s ceiling as in T-022), asks keyd to sign, verifies with the root-owned public key (pure Rust P-256, no OpenSSL or NSS), and returns SUCCESS only on a valid signature; every other outcome falls through as today (IGNORE/AUTH_ERR to the password). Same silence for users without a credential and for ssh/allowlist rules. The packaged stacks lose their `pam_pkcs11` lines. The tests no longer need `pam_pkcs11`, so they run the same on every distribution. Keep the `// @spec` proofs of AC-027, AC-029 and AC-030 passing. The verification runs inside the PAM process (accepted trade-off, ASM-014); a missing public key, or one not owned by root, makes the module return `PAM_IGNORE`.
@@ -171,7 +171,7 @@
 
 ## T-037 — Installer uses neutral locations, discovers third-party paths and checks capabilities [done]
 - Refs: AC-016
-- Files: scripts/install.sh, packaging/openhellod.service, packaging/openhello-keyd.service, packaging/pam/pam-services, crates/openhello-cli/tests/pam_sudo.rs
+- Files: scripts/install.sh, packaging/openhellod.service, packaging/openhello-keyd.service, crates/openhello-cli/tests/pam_sudo.rs
 - Model: claude-sonnet-5
 - Effort: medium
 - Notes: owner rule (2026-10-21): no per-distro or per-desktop code unless unavoidable. Units to `/usr/lib/systemd/system`, D-Bus policy to `/usr/share/dbus-1/system.d`, polkit actions to `/usr/share/polkit-1/actions`, daemon directory written into the units by template, PAM directory from `dirname $(ldconfig -p | awk '/libpam\.so\.0/{print $NF; exit}')/security`; no `/etc/systemd/system` or `/etc/dbus-1` branches. The installer no longer installs packages: every `apt`, `dnf`, `zypper` and `pacman` branch goes, replaced by a capability check (`command -v tpm2_createprimary tpm2_ptool`, `python3 -c "import tpm2_pkcs11"`, a loader-cache probe for the TPM and PKCS#11 libraries, `polkitd` and a system bus) that prints what is missing as capabilities, never package names. The KDE-only `kde-face` code and the common-stack snippet (`openhello-common-auth`) are removed; the dependency lists drop `libpam-pkcs11`, `libnss3-tools` and the NSS paths (ASM-014); the `sed` edit of `/etc/pam.d/sudo` is replaced by T-038.
@@ -217,8 +217,14 @@
 
 ## T-043 — Enable the module once in the common auth stack; the installer does it by default [done]
 - Refs: AC-027, AC-028
-- Files: crates/openhello-cli/src/pam_enable.rs, crates/openhello-cli/src/main.rs, crates/openhello-cli/tests/pam_enable.rs, scripts/install.sh, packaging/pam/pam-services
+- Files: crates/openhello-cli/src/pam_enable.rs, crates/openhello-cli/src/main.rs, crates/openhello-cli/tests/pam_enable.rs, scripts/install.sh
 - Model: claude-sonnet-5
 - Effort: high
 - Notes: owner principle (2026-10-21, `camera-on-at-auth-moments-common-stack`): no per-interface change or command; the camera may turn on for a few seconds at sudo, polkit, the lock screen and the SDDM greeter once the user has enrolled a face. Windows Hello (tier 1) offers the credential in every sign-in context; `pam_fprintd` (tier 2) is wired through the common stack. `openhello-cli pam enable` with no service arguments becomes the whole integration: (1) find the common auth stack by reading what `sudo` includes (`@include X` or `auth include X` in `/etc/pam.d/sudo`, or the vendor copy), never from a list of distribution names; (2) when that file is a regular file, insert `auth sufficient pam_openhello.so allowlist=/etc/openhello/pam-services` before its first `auth` line, with the existing backup, atomic write and idempotence; when it is a symlink or otherwise manager-owned, refuse, say so, and print the per-service fallback (`pam enable <service>...`); (3) write the root-owned data file `/etc/openhello/pam-services` (0644) from `packaging/pam/pam-services`: `sudo`, `polkit-1`, `kde`, `gdm-password`, `sddm`, `lightdm`, `swaylock`, `hyprlock`, `i3lock`, `xscreensaver`, `xsecurelock`, `cinnamon-screensaver`, `mate-screensaver`, `xfce4-screensaver`, with a header saying which entries have been verified on a real system (`sudo` and `kde` only) and that `login`, `su`, `sshd`, `cron` are deliberately absent; (4) remove the per-service lines this tool added earlier (`sudo`, `kde`) so the module never runs twice; (5) `pam disable` with no arguments removes every line the tool added and leaves the allowlist file for the user to delete, `pam status` reports the common stack, the allowlist and any per-service line. The installer runs `openhello-cli pam enable` by default after installing the module, because the module is inert for users without a credential file, unless `--no-pam` is given, and prints how to undo it. A face-enrolled user whose greeter supplies the login name (SDDM and GDM select the user first) is covered by the same line; typing a name is covered the same way once it reaches PAM; greeters are unverified and must be marked as such. Tests run on temporary roots with the Debian layout (`sudo` includes `common-auth`), the SUSE/Arch layout (`auth include system-auth`) and a managed symlink that is refused.
 
+## T-044 — Remove desktop-specific code and data; a denylist replaces the allowlist [done]
+- Refs: AC-027, AC-028
+- Files: crates/openhello-pam/src/lib.rs, crates/openhello-pam/src/debug.rs, crates/openhello-cli/src/pam_enable.rs, crates/openhello-cli/tests/pam_enable.rs, crates/openhello-cli/tests/pam_sudo.rs, scripts/install.sh, scripts/pam-survey.sh, scripts/spike-pkcs11.sh, .spec/features/credential-login-v1b/spec.md
+- Model: claude-sonnet-5
+- Effort: high
+- Notes: owner directive (2026-10-21): open-hello contains no desktop-environment-specific code, data, messages or commands. The module decides alone: ignore (silent) when remote, not local, uid 0, no root-owned `<uid>.pub`, or the service is in a compiled denylist (`login`, `su`, `su-l`, `sshd`, `cron`, `crond`, `atd`, `passwd`, `chsh`, `chfn`, `runuser`, `runuser-l`, `other`); otherwise act. The `allowlist=` argument, `packaging/pam/pam-services` and `packaging/pam/openhello-lockscreen` are removed; the reason code `service-not-allowed` becomes `service-denied`. `pam enable` writes `auth sufficient pam_openhello.so` once in the common stack, removes earlier per-service lines, rewrites a previous line carrying `allowlist=` (backup kept once) and deletes `/etc/openhello/pam-services` when it still has the tool's header; the `kde-face` legacy cleanup is gone. Allowlist tests were replaced by tests of the new rule.

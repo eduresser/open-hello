@@ -80,7 +80,7 @@ Sources (Microsoft):
 |---|---|
 | (a) Windows | PIN is a Protector of the same container, not the account password (WH-doc, [MS-OVR] "backed up with a PIN", **confirmed**). The account password is a separate credential provider tile (**inferred** from the credential-provider model); with local accounts both PIN and password remain available (community, **inferred**). |
 | (b) Ours | PIN opt-in (second PAM line, no `use_first_pass`, because wrong PINs count on the global TPM lockout), password via the next PAM module. PIN not supported on non-interactive lock screens. |
-| (c) Status | **aligned** in structure (Q-002 answered correctly). The missing PIN on the KDE lock screen (`kde-face` is non-interactive) is a Linux limitation, diverges-justifiable. |
+| (c) Status | **aligned** in structure (Q-002 answered correctly). The missing PIN in a non-interactive PAM service is a Linux limitation, diverges-justifiable. |
 | (d) Recommendation | None for the model. Document that on lock screens the fallback is the locker's own password path (Windows: PIN tile). Revisit when the greeter UX (v2) exists. |
 
 ### 8. Failure policy and user messages on the lock screen
@@ -97,8 +97,8 @@ Sources (Microsoft):
 | Aspect | Content |
 |---|---|
 | (a) Windows | LogonUI hosts credential providers side by side (face, fingerprint, PIN, password), each a COM DLL implementing `ICredentialProvider` (WH-doc, **confirmed**); [MS-AUTH] phase A: Winlogon shows the Hello credential provider, LSASS validates. |
-| (b) Ours | PAM services per locker (`kde-face`, `openhello-lockscreen`, gdm-fingerprint planned), generic stack; no desktop code. |
-| (c) Status | **aligned in role** (level 2 mapping "LSA/LogonUI... PAM" in `arquitetura-linux.md`); per-modality services match "provider per method" better than a shared common-auth edit. |
+| (b) Ours | One line in the common PAM auth stack, a compiled denylist of non-desktop services; no desktop code. |
+| (c) Status | **aligned in role** (level 2 mapping "LSA/LogonUI... PAM" in `arquitetura-linux.md`); a shared common-auth line is the Linux equivalent of one provider offered in every sign-in context. |
 | (d) Recommendation | Prefer the per-service (level A) integration over editing common-auth (level B) as the default, consistent with this mapping. |
 
 ## Effect on T-034 and T-035 (signed challenge design and PAM verification)
@@ -112,5 +112,5 @@ T-034 (keyd side):
 T-035 (PAM side):
 - Keep: PAM generates the nonce (getrandom), verifies in pure Rust against `/etc/openhello/auth/<uid>.pub`.
 - Add a documented decision: verification runs in the PAM module process. For `sudo` (root) it equals Windows in effect; on user-level lock screens it is weaker than Windows (verifier outside the UI process). Options: (A) accept and document (recommended for v1b: the locker is already user-owned); (B) later move verification to a root helper (like `unix_chkpwd`) or into keyd. Do not block T-035.
-- Add: reject a missing or non-root-owned public key file as "ignore" (fall through), like the allowlist rule.
+- Add: reject a missing or non-root-owned public key file as "ignore" (fall through), like the denylist rule.
 - ASM-014: add the Windows basis (MS-AUTH key trust/Cloud AP; WH-doc `NgcSerializeKeyCredential`) and note that Windows local accounts are not key-backed, so this is an MSA/Entra-pattern adaptation, not a copy of the local-account flow.

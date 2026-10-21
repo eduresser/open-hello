@@ -456,15 +456,15 @@ Non-negotiable rules:
 
 # ── sequential T-023 (tasks.md order) ──
 run_seq_T_023() {
-  info 'sequential T-023 — KDE lock screen verification'
+  info 'sequential T-023 — lock screen verification'
   if run_task seq 'T-023' 'You run ONE task of the "credential-login-v1b" feature (onp-spec flow, spec-anchored).
 Read first: .spec/features/credential-login-v1b/spec.md, .spec/features/credential-login-v1b/tasks.md and .spec/constitution.md.
 
 Your task (only this one):
-T-023 — "KDE lock screen verification"
+T-023 — "lock screen verification"
   criteria/refs: AC-028 (A matching face unlocks the lock screen)
-  allowed files (and their tests): packaging/pam/kde-openhello, .spec/features/credential-login-v1b/lockscreen.md
-  commit message: "T-023 credential-login-v1b: KDE lock screen verification"
+  allowed files (and their tests): .spec/features/credential-login-v1b/lockscreen.md
+  commit message: "T-023 credential-login-v1b: lock screen verification"
 
 Non-negotiable rules:
 - Every referenced acceptance criterion becomes a test with @spec:AC-xxx in the title.
@@ -474,7 +474,7 @@ Non-negotiable rules:
 - At the end of EACH task: `git add` only what you touched, and a commit of its own.' 'claude-sonnet-5' medium >> "$LOG_DIR/seq.log" 2>&1; then
     # safety commit if the agent forgot (traceability > perfection)
     if [ -n "$(git status --porcelain)" ]; then
-      git add -A && git commit -q -m 'T-023 credential-login-v1b: KDE lock screen verification (plan auto-commit)'
+      git add -A && git commit -q -m 'T-023 credential-login-v1b: lock screen verification (plan auto-commit)'
     fi
     mark_done T-023
     green "✔ T-023 done"

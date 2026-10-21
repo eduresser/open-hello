@@ -4,7 +4,7 @@ use std::ffi::CString;
 pub enum Reason {
     Remote,
     NotLocal,
-    ServiceNotAllowed,
+    ServiceDenied,
     NoUser,
     NoCredentialFile,
     CredentialFileUntrusted,
@@ -20,7 +20,7 @@ impl Reason {
     pub const ALL: [Reason; 11] = [
         Reason::Remote,
         Reason::NotLocal,
-        Reason::ServiceNotAllowed,
+        Reason::ServiceDenied,
         Reason::NoUser,
         Reason::NoCredentialFile,
         Reason::CredentialFileUntrusted,
@@ -35,7 +35,7 @@ impl Reason {
         match self {
             Reason::Remote => "remote",
             Reason::NotLocal => "not-local",
-            Reason::ServiceNotAllowed => "service-not-allowed",
+            Reason::ServiceDenied => "service-denied",
             Reason::NoUser => "no-user",
             Reason::NoCredentialFile => "no-credential-file",
             Reason::CredentialFileUntrusted => "credential-file-untrusted",

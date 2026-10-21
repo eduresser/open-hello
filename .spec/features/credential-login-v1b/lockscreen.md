@@ -1,6 +1,6 @@
 # Lock screen verification
 
-open-hello has no per-distro or per-desktop code and no per-interface command. `pam_openhello` sits once in the common PAM auth stack; any locker, greeter or `polkit` agent that authenticates through PAM reaches it by including that stack. The module acts only for a user with a registered credential (`/etc/openhello/auth/<uid>.pub`), only in a local session, only for services in the root-owned `/etc/openhello/pam-services`, and never as `required`.
+open-hello has no per-distro or per-desktop code and no per-interface command. `pam_openhello` sits once in the common PAM auth stack; any locker, greeter or `polkit` agent that authenticates through PAM reaches it by including that stack. The module acts only for a user with a registered credential (`/etc/openhello/auth/<uid>.pub`), only in a local session, for every service except a compiled denylist of non-desktop services (`login`, `su`, `sshd`, `cron` and similar), and never as `required`.
 
 Enable and undo: `sudo openhello-cli pam enable` (the installer runs it unless `--no-pam`), `sudo openhello-cli pam disable`, `openhello-cli pam status`.
 
@@ -14,7 +14,7 @@ Enable and undo: `sudo openhello-cli pam enable` (the installer runs it unless `
 ## Verification procedure (any desktop)
 
 1. Keep a second session or `sudo -s` open until the end.
-2. `sudo openhello-cli pam status` shows the common stack, the allowlist and the service in use.
+2. `sudo openhello-cli pam status` shows the common stack and any per-service line.
 3. Lock the screen and face the IR camera; expected: the face authenticates without a password.
 4. Failure path: `sudo systemctl stop openhellod`, lock again; the password must work within a few seconds.
 
@@ -24,6 +24,6 @@ Logs: `journalctl -b -u openhellod -u openhello-keyd`; with the `debug` module a
 
 | Distro | Desktop | Locker | PAM service | Result | Notes |
 |---|---|---|---|---|---|
-| KDE neon (Ubuntu noble) | KDE Plasma 6.8.0 | kscreenlocker | kde | passed | Face authenticated without a password (`reason=success service=kde`, 2026-10-21). The locker then shows its own single Unlock button; open-hello does not change that. |
+| KDE neon VM (Ubuntu noble) | graphical session | PAM-based locker | locker's own | passed | Face authenticated without a password (`reason=success`, 2026-10-21). The locker then shows its own confirmation; open-hello does not change that. |
 
-Only `sudo` and the service above are verified on a real system; the other allowlist entries are not verified. The face does not unlock a keyring that needs the password (for example KWallet or GNOME Keyring).
+Only `sudo` and the locker above are verified on a real system; others are not verified. The face does not unlock a keyring that needs the password.

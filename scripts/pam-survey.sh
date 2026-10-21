@@ -24,12 +24,6 @@ kv package_managers "$(for m in apt-get dnf zypper pacman; do have "$m" && print
 say
 say "## Session"
 kv XDG_SESSION_TYPE "${XDG_SESSION_TYPE:-}"
-kv XDG_CURRENT_DESKTOP "${XDG_CURRENT_DESKTOP:-}"
-kv DESKTOP_SESSION "${DESKTOP_SESSION:-}"
-kv display_manager "$(basename "$(readlink -f /etc/systemd/system/display-manager.service 2>/dev/null)" .service)"
-LOCKERS="kscreenlocker_greet plasmashell gnome-shell gnome-screensaver swaylock hyprlock i3lock xsecurelock xscreensaver light-locker cinnamon-screensaver mate-screensaver xfce4-screensaver slock waylock gtklock"
-kv lockers_running "$(for p in $LOCKERS; do pgrep -x "$p" >/dev/null 2>&1 && printf '%s ' "$p"; done)"
-kv lockers_installed "$(for p in $LOCKERS; do have "$p" && printf '%s ' "$p"; done)"
 
 say
 say "## PAM"
@@ -39,7 +33,7 @@ kv pam_dirs "${PAM_DIRS# }"
 say
 say "| service | where | includes |"
 say "|---|---|---|"
-SERVICES="login sudo su polkit-1 passwd sshd cron common-auth system-auth password-auth kde kde-fingerprint kde-smartcard kde-face kde-u2f gdm-password gdm-fingerprint gdm-autologin lightdm lightdm-greeter sddm swaylock hyprlock i3lock xscreensaver xsecurelock cinnamon-screensaver mate-screensaver xfce4-screensaver gnome-screensaver light-locker slock sudo-openhello openhello-lockscreen"
+SERVICES="login sudo su polkit-1 passwd sshd cron common-auth system-auth password-auth sudo-openhello openhello-lockscreen"
 for s in $SERVICES; do
   for d in $PAM_DIRS; do
     f="$d/$s"

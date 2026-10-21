@@ -34,6 +34,21 @@ const BUS_NAME: &str = "io.openhello.Biometrics1";
 const OBJECT_PATH: &str = "/io/openhello/Biometrics1";
 const DEFAULT_AUTH_DIR: &str = "/etc/openhello/auth";
 const ROOT_UID: u32 = 0;
+const DENIED_SERVICES: [&str; 13] = [
+    "login",
+    "su",
+    "su-l",
+    "sshd",
+    "cron",
+    "crond",
+    "atd",
+    "passwd",
+    "chsh",
+    "chfn",
+    "runuser",
+    "runuser-l",
+    "other",
+];
 const LOOKING_FOR_FACE: &CStr = c"Looking for your face...";
 
 #[repr(C)]
@@ -108,14 +123,17 @@ fn refuse(reason: Reason) -> Exit {
 
 unsafe fn authenticate(pamh: *mut c_void, args: &[String]) -> Result<(), Exit> {
     let started = Instant::now();
-    local_session_allowed(pamh, args).map_err(ignore)?;
+    local_session_allowed(pamh).map_err(ignore)?;
     let user = item_text(pamh, PAM_USER)
         .filter(|u| !u.is_empty())
         .ok_or(ignore(Reason::NoUser))?;
     let uid = uid_of(&user).ok_or(ignore(Reason::NoUser))?;
     let service = item_text(pamh, PAM_SERVICE).unwrap_or_default();
     if !openhello_auth_proto::valid_service(&service) {
-        return Err(ignore(Reason::ServiceNotAllowed));
+        return Err(ignore(Reason::ServiceDenied));
+    }
+    if uid == ROOT_UID {
+        return Err(ignore(Reason::NoCredentialFile));
     }
     let key = registered_key(args, uid).map_err(ignore)?;
     let config = args
@@ -230,7 +248,7 @@ unsafe fn item_text(pamh: *mut c_void, item: c_int) -> Option<String> {
         .map(str::to_string)
 }
 
-unsafe fn local_session_allowed(pamh: *mut c_void, args: &[String]) -> Result<(), Reason> {
+unsafe fn local_session_allowed(pamh: *mut c_void) -> Result<(), Reason> {
     let probes = session::Probes {
         rhost: item_text(pamh, PAM_RHOST).is_some_and(|h| !h.is_empty()),
         tty: item_text(pamh, PAM_TTY).is_some_and(|t| !t.is_empty()),
@@ -239,34 +257,19 @@ unsafe fn local_session_allowed(pamh: *mut c_void, args: &[String]) -> Result<()
         session: &session::process_session,
     };
     let service = item_text(pamh, PAM_SERVICE).unwrap_or_default();
-    let allowlist = args
-        .iter()
-        .find_map(|a| a.strip_prefix("allowlist=").map(PathBuf::from));
-    permitted(session::locate(&probes), &service, allowlist.as_deref())
+    permitted(session::locate(&probes), &service)
 }
 
-// A missing or untrusted allowlist denies: the common-stack placement must never reach the camera by default.
-fn permitted(locality: Locality, service: &str, allowlist: Option<&Path>) -> Result<(), Reason> {
+fn permitted(locality: Locality, service: &str) -> Result<(), Reason> {
     match locality {
         Locality::Remote => return Err(Reason::Remote),
         Locality::Unknown => return Err(Reason::NotLocal),
         Locality::Local => {}
     }
-    let Some(path) = allowlist else {
-        return Ok(());
-    };
-    let (ruid, euid) = unsafe { (libc::getuid(), libc::geteuid()) };
-    let text = if config::is_privileged(ruid, euid) {
-        config::read_trusted(path, 0).ok()
-    } else {
-        std::fs::read_to_string(path).ok()
-    };
-    let listed = text.is_some_and(|t| {
-        t.lines()
-            .map(str::trim)
-            .any(|l| !l.is_empty() && !l.starts_with('#') && l == service)
-    });
-    listed.then_some(()).ok_or(Reason::ServiceNotAllowed)
+    if DENIED_SERVICES.contains(&service) {
+        return Err(Reason::ServiceDenied);
+    }
+    Ok(())
 }
 
 #[no_mangle]
@@ -403,29 +406,29 @@ unsafe fn tell(pamh: *mut c_void, text: &CStr) {
 
 #[cfg(test)]
 mod tests {
-    use super::{permitted, Locality, Reason};
+    use super::{permitted, Locality, Reason, DENIED_SERVICES};
 
     #[test]
-    fn remote_or_headless_sessions_are_ignored_before_the_allowlist() {
-        assert_eq!(
-            permitted(Locality::Remote, "sudo", None),
-            Err(Reason::Remote)
-        );
-        assert_eq!(
-            permitted(Locality::Unknown, "sudo", None),
-            Err(Reason::NotLocal)
-        );
-        assert_eq!(permitted(Locality::Local, "sudo", None), Ok(()));
+    fn remote_or_headless_sessions_are_ignored_before_the_service_is_considered() {
+        for service in ["sudo", "sshd"] {
+            assert_eq!(permitted(Locality::Remote, service), Err(Reason::Remote));
+            assert_eq!(permitted(Locality::Unknown, service), Err(Reason::NotLocal));
+        }
     }
 
     // @covers:AC-028-pam-local-session
     #[test]
-    fn a_missing_allowlist_file_denies_with_service_not_allowed() {
-        let missing = std::path::Path::new("/nonexistent/openhello-allowlist");
-        assert_eq!(
-            permitted(Locality::Local, "sudo", Some(missing)),
-            Err(Reason::ServiceNotAllowed)
-        );
+    fn denylisted_services_are_ignored_and_every_other_local_service_acts() {
+        for service in DENIED_SERVICES {
+            assert_eq!(
+                permitted(Locality::Local, service),
+                Err(Reason::ServiceDenied),
+                "{service}"
+            );
+        }
+        for service in ["sudo", "polkit-1", "openhello-interactive", "loginx", ""] {
+            assert_eq!(permitted(Locality::Local, service), Ok(()), "{service}");
+        }
     }
 
     #[test]

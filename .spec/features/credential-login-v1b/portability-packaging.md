@@ -91,7 +91,7 @@ Minimal matrix (priority order; I as recommendation):
 | 5 | Arch | AUR, no native `pam_pkcs11` | PKGBUILD | manual |
 | 6 | NixOS | Declarative; separate module | flake | `security.pam.services` |
 
-Desktops: KDE and GNOME first (parallel per-method PAM services, see `portability.md`); everything else only through `sudo`/common stack.
+Desktops: none gets code or data; every PAM-based locker or greeter is reached through the common stack (see `portability.md`).
 
 CI without hardware (all I unless a source is cited):
 
@@ -120,7 +120,7 @@ Risks:
 
 | Risk | Mitigation |
 |---|---|
-| PAM dir and pam manager differ per distro; a wrong profile locks logins | Build-time PAM dir; opt-in profile; allowlist already in `pam_openhello`; test removal in CI (see `portability.md` check 16) |
+| PAM dir and pam manager differ per distro; a wrong profile locks logins | Build-time PAM dir; opt-in profile; denylist already in `pam_openhello`; test removal in CI (see `portability.md` check 16) |
 | `pam_pkcs11` is not in Arch's official repos (C) and the stack depends on it | Document as AUR dependency; evaluate moving the certificate logic into `pam_openhello` to drop the dependency (I) |
 | Debian multiarch path differences for PAM and PKCS#11 | Query `DEB_HOST_MULTIARCH` or `dpkg-architecture` at package time (C source above) |
 | Distro archives require vendored/packaged Rust crates and offline builds | Use `cargo vendor` or OBS `cargo_vendor` from day one (C for OBS service) |

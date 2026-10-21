@@ -1,6 +1,6 @@
 # Portability research: PAM integration across distros and lockers
 
-Research only; no code or spec changed. Marks: **C** = confirmed by the cited source (or measured on this machine, openSUSE Tumbleweed, KDE Plasma 6.8.0); **I** = inferred, needs a VM check. Fetched 2026-10-21.
+Historical research (2026-10-21), kept as evidence only: nothing here is implemented or required. Owner decision: open-hello has no desktop-specific code, data, messages or commands; it ships one common-stack line and a compiled denylist of non-desktop services (T-044). Marks: **C** = confirmed by the cited source (or measured on this machine, openSUSE Tumbleweed, KDE Plasma 6.8.0); **I** = inferred, needs a VM check. Fetched 2026-10-21.
 
 ## 1. Summary
 
@@ -33,13 +33,13 @@ Default: no
 Priority: 270
 Auth-Type: Primary
 Auth:
-	[success=ignore ignore=2 default=ignore]	pam_openhello.so allowlist=/etc/openhello/allowed-services
+	[success=ignore ignore=2 default=ignore]	pam_openhello.so
 	sufficient	pam_pkcs11.so use_first_pass config_file=/etc/openhello/pam_pkcs11.conf
 	optional	pam_openhello.so clear
 ```
 
 - `fprintd` ships `Default: no`, `Priority: 260`, above `unix` (256) (C). Higher priority lands earlier in `common-auth` (I; consistent with those values).
-- A Primary profile lands in `common-auth`, so it reaches every service including it: the existing allowlist gate in `pam_openhello` is mandatory (C, lib.rs `permitted`).
+- A Primary profile lands in `common-auth`, so it reaches every service including it: the service gate in `pam_openhello` is mandatory (C, lib.rs `permitted`).
 - Open: whether `pam-auth-update` keeps the numeric jump `ignore=2` and `success=ignore` verbatim in a multi-line Primary block (I). Check with `pam-auth-update --enable openhello` then read `/etc/pam.d/common-auth`.
 - Removal: `pam-auth-update --package --remove openhello` in prerm (C).
 
@@ -50,7 +50,7 @@ Profile directory is a template set: `README` (first line = name, only mandatory
 ```
 authselect create-profile openhello -b sssd --symlink-meta   # -> /etc/authselect/custom/openhello (C)
 # edit system-auth and password-auth, before the pam_unix line:
-auth [success=ignore ignore=2 default=ignore] pam_openhello.so allowlist=/etc/openhello/allowed-services {include if "with-openhello"}
+auth [success=ignore ignore=2 default=ignore] pam_openhello.so {include if "with-openhello"}
 auth sufficient pam_pkcs11.so use_first_pass config_file=/etc/openhello/pam_pkcs11.conf {include if "with-openhello"}
 auth optional pam_openhello.so clear {include if "with-openhello"}
 authselect select custom/openhello with-openhello
@@ -98,27 +98,20 @@ Local measurement (this machine): only `kscreenlocker6` (6.8.0) and `xscreensave
 | hyprlock starts PAM at lock time; its own fprintd client is the parallel path; info text is filtered to two substrings | [Pam.cpp](https://raw.githubusercontent.com/hyprwm/hyprlock/main/src/auth/Pam.cpp) | Face works without Enter; message only visible if text contains "Place your finger" | C |
 | swaylock + fprintd users report pressing Enter first, or no unlock | Alpine and Arch forum threads via [Alpine wiki](https://wiki.alpinelinux.org/wiki/Setting_up_fprintd_for_swaylock) | same as i3lock | C (reports) |
 | MATE forwards every PAM message to the GUI and blocks until answered | [gs-auth-pam.c](https://raw.githubusercontent.com/mate-desktop/mate-screensaver/master/src/gs-auth-pam.c) | `tell()` (PAM_TEXT_INFO) may need an acknowledgement and stall the stack if the GUI returns false (conv error) | C / I |
-| Pluggable modules in the common stack run for every service in it | Debian Primary profile semantics; `permitted()` in `lib.rs` | allowlist is required for level B | C |
+| Pluggable modules in the common stack run for every service in it | Debian Primary profile semantics; `permitted()` in `lib.rs` | a service gate is required for level B | C |
 | NixOS upstream guidance for `fprintAuth`: enable only "for clients that can ensure user attention, such as lockscreens" | [pam.nix](https://raw.githubusercontent.com/NixOS/nixpkgs/master/nixos/modules/security/pam.nix) | Same rule as our allowlist: not for sudo by default in a headless context | C |
 | Howdy (face PAM module) claims to work "everywhere you would otherwise need your password"; no per-locker compatibility list found | [README](https://raw.githubusercontent.com/boltgolt/howdy/master/README.md) | Not evidence of portability; treat as same risk class | C |
 
 ## 5. Recommendation
 
-Smallest set of integration points that covers most distros and desktops:
-
-1. **One generic stack file** (exists): `openhello-lockscreen` for services where the locker lets us pick the PAM service (KDE `kde-face`, hyprlock `auth:pam:module`, xsecurelock `XSECURELOCK_PAM_SERVICE`). Face-only, ends with `pam_deny`.
-2. **One gated block per PAM manager** (the level B three lines, with `allowlist=`), delivered as: pam-auth-update profile (Debian family), authselect custom feature (Fedora/RHEL), `pam-config`/manual snippet (openSUSE), manual snippet with backup (Arch, Gentoo, Alpine, Void), a NixOS module. This replaces hand-editing `/etc/pam.d` where a manager exists and covers lockers with a fixed service name (i3lock, swaylock, xscreensaver, MATE, XFCE, Cinnamon) through the stack they already include.
-3. **Per-locker adapters, only where the generic block fails**: KDE `kde-face` (done), GNOME `gdm-fingerprint` stack (face as a "fingerprint-like" service, if the GNOME hint text is acceptable), and nothing for i3lock/swaylock beyond documenting "press Enter".
-
-Start with the allowlist containing only `sudo`, then add lockers one by one (same rule as the current guide). Keep the face attempt budget finite everywhere.
+Superseded by the owner decision above. The integration is one line, `auth sufficient pam_openhello.so`, inserted once in the common auth stack that `sudo` includes (`openhello-cli pam enable`), with the per-service form (`pam enable <service>...`) as the generic fallback. The module decides by itself: it stays silent for remote or headless sessions, root, users without a root-owned credential and the compiled denylist (`login`, `su`, `su-l`, `sshd`, `cron`, `crond`, `atd`, `passwd`, `chsh`, `chfn`, `runuser`, `runuser-l`, `other`), and acts for every other local service. Keep the face attempt budget finite everywhere.
 
 Risks:
 
-- Common-stack placement affects login, polkit and cron; mitigated by `permitted()` but a manager profile applied by mistake can still break all logins. Keep a root TTY.
-- GNOME and KDE parallel services need the daemon to fail fast; KDE disables the authenticator after 3 failures in 2 s.
-- i3lock freezes its UI during the wait; swaylock/i3lock need Enter; MATE may stall on `PAM_TEXT_INFO`.
-- authselect and pam-auth-update rewrite the shared stacks; a profile update could drop hand edits (I).
-- Info text (`Looking for your face...`) is not displayed by i3lock/swaylock/hyprlock (unless matched) and is relabelled by GNOME.
+- Common-stack placement affects login, polkit and cron; mitigated by the denylist, but a manager profile applied by mistake can still break all logins. Keep a root TTY.
+- Parallel per-method services need the daemon to fail fast.
+- Some lockers freeze their UI during the wait, need Enter first, or do not show the info text.
+- Profile managers rewrite shared stacks; an update could drop hand edits (I).
 
 ## 6. Checks for the VMs (mark in the `lockscreen.md` table)
 
@@ -136,7 +129,5 @@ Risks:
 | 10 | UI frozen during the camera wait? | move mouse or type during the attempt | record: responsive / frozen |
 | 11 | Message `Looking for your face...` visible? | observe | visible / hidden / relabelled |
 | 12 | Wrong face or covered camera | cover camera | falls back to password within budget; no lockout loop |
-| 13 | KDE only: authenticator marked unavailable after quick failures | stop `openhellod`, lock 4 times fast | `journalctl -t kscreenlocker_greet` shows unavailable; password works |
-| 14 | GNOME only: `gdm-fingerprint` service shown/hinted | enable `org.gnome.login-screen enable-fingerprint-authentication` (I) | face attempt starts, hint text recorded |
-| 15 | sudo, ssh, cron untouched | `ssh localhost true`, `sudo -k; sudo true`, cron job | ssh and cron return `ignore` immediately (journal shows no camera use) |
-| 16 | Removal | remove profile / feature | stack back to original; password login intact |
+| 13 | sudo, ssh, cron untouched | `ssh localhost true`, `sudo -k; sudo true`, cron job | ssh and cron return `ignore` immediately (journal shows no camera use) |
+| 14 | Removal | remove profile / feature | stack back to original; password login intact |

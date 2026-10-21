@@ -153,7 +153,7 @@ logs, so that debugging or crash output cannot leak my biometric data.
 - TPM key backup/recovery code generation and verification (roadmap v1b, lives in `openhello-keyd`).
 - Anti-spoofing of any kind (printed photos, screens, masks). Accepted risk in v1a, see ASM-005; the planned
   mitigation is an appearance classifier on the lit/unlit IR pair, trained on captures from the target camera.
-- Greeter (GDM/SDDM) UX (roadmap v2).
+- Greeter UX (roadmap v2).
 
 ## Assumptions
 

@@ -13,7 +13,7 @@ crates/
   openhello-keyd/        # binary: root-only key daemon, D-Bus io.openhello.Keyd1, TPM key + Protectors
   openhello-pkcs11/      # cdylib: PKCS#11 wrapper over tpm2-pkcs11 that overrides only C_Login
 packaging/
-  io.openhello.Keyd1.conf, openhello-keyd.service, pam/ (allowlist of services)
+  io.openhello.Keyd1.conf, openhello-keyd.service, pam/ (PAM module configuration)
 ```
 
 ## Components
@@ -47,7 +47,7 @@ packaging/
   placeholder to keyd, which finishes the login. Several virtual sessions share one real session in keyd.
   Raw templates or embeddings are never accepted (AC-024). The direct path that loaded `tpm2-pkcs11` in the
   caller and received K over the unlock socket was removed: it cannot work without K crossing the socket.
-- **PAM** — `pam_pkcs11` configured against `openhello-pkcs11` in the common auth stack (allowlisted services such as `sudo` and screen lockers),
+- **PAM** — `pam_pkcs11` configured against `openhello-pkcs11` in the common auth stack (every local service except a compiled denylist of non-desktop services),
   marked `sufficient` and placed before `pam_unix`, so any failure, timeout or missing daemon falls through
   to the Linux password (AC-029/030). A PAM text line shows "Looking for your face..." (Q-003).
 
