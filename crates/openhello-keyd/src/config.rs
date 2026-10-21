@@ -1,10 +1,11 @@
 use std::path::PathBuf;
 
 use crate::logging::Level;
-use crate::{KeydConfig, TicketSocketConfig, UnlockSocketConfig};
+use crate::{KeydConfig, TicketSocketConfig, TokenSocketConfig, UnlockSocketConfig};
 
 pub const DEFAULT_TICKET_SOCKET: &str = "/run/openhello/keyd-ticket.sock";
 pub const DEFAULT_UNLOCK_SOCKET: &str = "/run/openhello/keyd-unlock.sock";
+pub const DEFAULT_TOKEN_SOCKET: &str = "/run/openhello/keyd-token.sock";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BusKind {
@@ -23,6 +24,7 @@ pub struct DaemonConfig {
     pub keyd: KeydConfig,
     pub ticket: TicketSocketConfig,
     pub unlock: UnlockSocketConfig,
+    pub token: TokenSocketConfig,
     pub bus: BusKind,
     pub auth: AuthMode,
     pub log_level: Level,
@@ -63,6 +65,11 @@ impl DaemonConfig {
                 .unwrap_or_else(|| DEFAULT_UNLOCK_SOCKET.into())
                 .into(),
         };
+        let token = TokenSocketConfig {
+            path: get("OPENHELLO_KEYD_TOKEN_SOCKET")
+                .unwrap_or_else(|| DEFAULT_TOKEN_SOCKET.into())
+                .into(),
+        };
         let bus = match get("OPENHELLO_KEYD_BUS").as_deref() {
             None | Some("system") => BusKind::System,
             Some("session") => BusKind::Session,
@@ -89,13 +96,14 @@ impl DaemonConfig {
                 )
             })?,
         };
-        if ticket.path == unlock.path {
-            return Err("the ticket and unlock sockets must use different paths".into());
+        if ticket.path == unlock.path || ticket.path == token.path || unlock.path == token.path {
+            return Err("the ticket, unlock and token sockets must use different paths".into());
         }
         Ok(Self {
             keyd,
             ticket,
             unlock,
+            token,
             bus,
             auth,
             log_level,
@@ -125,6 +133,7 @@ mod tests {
         assert_eq!(config.auth, AuthMode::Polkit);
         assert_eq!(config.ticket.allowed_uid, 0);
         assert_eq!(config.ticket.path, PathBuf::from(DEFAULT_TICKET_SOCKET));
+        assert_eq!(config.token.path, PathBuf::from(DEFAULT_TOKEN_SOCKET));
         assert!(DaemonConfig::from_lookup(lookup(&[]))
             .unwrap_err()
             .contains("OPENHELLO_KEYD_STORE_DIR"));
@@ -151,5 +160,11 @@ mod tests {
             ("OPENHELLO_KEYD_UNLOCK_SOCKET", "/run/x"),
         ]));
         assert!(same.unwrap_err().contains("different paths"));
+        let clash = DaemonConfig::from_lookup(lookup(&[
+            ("OPENHELLO_KEYD_STORE_DIR", "/s"),
+            ("OPENHELLO_KEYD_TOKEN_SOCKET", "/run/y"),
+            ("OPENHELLO_KEYD_UNLOCK_SOCKET", "/run/y"),
+        ]));
+        assert!(clash.unwrap_err().contains("different paths"));
     }
 }

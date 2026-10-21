@@ -226,6 +226,13 @@ impl Keyd {
         self.check_protection(&guard, &label, &key, secret)
     }
 
+    pub(crate) fn token_exists(&self, uid: u32) -> Result<bool, KeydError> {
+        let uid = validate_uid(uid)?;
+        let guard = lock();
+        let dump = self.dump_if_initialized(&guard, &token_label(uid))?;
+        Ok(has_key(&dump))
+    }
+
     // A wrong secret counts against the TPM-wide dictionary-attack lockout.
     pub fn sign_digest(
         &self,

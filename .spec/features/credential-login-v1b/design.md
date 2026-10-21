@@ -30,14 +30,23 @@ packaging/
      Protector mirrors `ngcrecovery.dll`: a separate secret, shown once, rotated on use (AC-031/032).
   3. Accept tickets only on a Unix socket, checking the peer with `SO_PEERCRED` (root, the `openhellod` binary)
      (AC-022).
-  4. Authorize provision/PIN/purge calls through D-Bus sender identity plus polkit, the same pattern as
+  4. Serve token sessions on a world-accessible Unix socket (T-025). Each connection is bound to the uid the
+     kernel reports (a root peer may name the target uid, as under `sudo`). keyd holds the real `tpm2-pkcs11`
+     session, logs in with the Protector internally (placeholder PIN: the single-use grant from the ticket;
+     any other PIN: the PIN Protector), and exposes only the certificate, the public key and an opaque
+     private-key handle that signs with ECDSA. `CKA_VALUE` and every other private-key attribute are refused,
+     and K never crosses a user socket (P-004).
+  5. Authorize provision/PIN/purge calls through D-Bus sender identity plus polkit, the same pattern as
      `openhellod` (AC-034). Redact secrets from logs (AC-035).
 - **`openhellod` change** — after a successful `Verify`/`Identify`, ask `openhello-ticket` for a ticket and send
   it to `openhello-keyd` for the matched UID. No match, no ticket (AC-023). It still never sees key material.
-- **`openhello-pkcs11`** — implements the PKCS#11 entry points by forwarding every call to `tpm2-pkcs11`, except
-  `C_Login`: it asks `openhello-keyd` for the Protector (biometric, PIN or recovery) and passes it to
-  `tpm2-pkcs11` as the user PIN. This is the "PIN swap" shim from the architecture doc (ASM-007). Raw
-  templates or embeddings are never accepted here (AC-024).
+- **`openhello-pkcs11`** — a thin PKCS#11 proxy (T-025). It never loads `tpm2-pkcs11`: it forwards the calls
+  `pam_pkcs11` makes (slot and token info, sessions, login, find, attributes, sign) to the keyd token socket and
+  answers `CKR_FUNCTION_NOT_SUPPORTED` to the rest. For the placeholder PIN it still calls `Verify` on
+  `openhellod` over D-Bus as the user (`openhellod` already delivers the ticket to keyd), then sends the
+  placeholder to keyd, which finishes the login. Several virtual sessions share one real session in keyd.
+  Raw templates or embeddings are never accepted (AC-024). The direct path that loaded `tpm2-pkcs11` in the
+  caller and received K over the unlock socket was removed: it cannot work without K crossing the socket.
 - **PAM** — `pam_pkcs11` configured against `openhello-pkcs11` for the `sudo` and KDE lock-screen services,
   marked `sufficient` and placed before `pam_unix`, so any failure, timeout or missing daemon falls through
   to the Linux password (AC-029/030). A PAM text line shows "Looking for your face..." (Q-003).
@@ -52,8 +61,10 @@ packaging/
 ## Flows
 
 - **Unlock**: PAM → `pam_pkcs11` → `C_Login` in `openhello-pkcs11` → `openhellod` `Verify` → ticket →
-  `openhello-keyd` validates → Protector → `tpm2-pkcs11` login → challenge signed by the TPM key → PAM success.
-- **PIN fallback**: same path, `C_Login` receives the PIN instead of a ticket.
+  `openhello-keyd` validates and keeps a single-use grant → the proxy sends the placeholder over the token socket →
+  keyd unseals the Protector and logs in to `tpm2-pkcs11` → challenge signed by the TPM key inside keyd → PAM success.
+- **PIN fallback**: same path, `C_Login` sends the PIN to keyd instead of the placeholder.
+- **Recovery**: the unlock socket takes a recovery code and returns only a fresh code; it never returns K.
 - **Purge**: `openhellod` Purge also calls `openhello-keyd` purge: evict the TPM key, delete Protectors, remove
   the token objects (AC-033, extends P-008).
 

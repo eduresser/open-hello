@@ -1,20 +1,19 @@
 mod support;
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::os::unix::fs::MetadataExt;
-use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
-use std::time::Duration;
 
 use openhello_keyd::{
-    Keyd, KeydError, Protectors, Secret, UnlockSocket, UnlockSocketConfig, OP_UNLOCK_FOR_UID,
-    OP_UNLOCK_PIN, STATUS_ACCEPTED,
+    Keyd, KeydError, Protectors, Secret, TokenSocket, TokenSocketConfig, OP_TOKEN_CLOSE,
+    OP_TOKEN_HELLO, OP_TOKEN_LOGIN, OP_TOKEN_OPEN, TOKEN_BAD_REQUEST, TOKEN_NO_TOKEN, TOKEN_OK,
+    TOKEN_PIN_INCORRECT, TOKEN_REFUSED,
 };
 use p256::ecdsa::signature::hazmat::PrehashVerifier;
 use p256::ecdsa::{Signature, VerifyingKey};
-use support::{rig, Rig};
+use support::{rig, Rig, TokenClient, CKO_PRIVATE_KEY};
 
 const SECRET: &str = "6f1d0c5a9e3b7d2480ac1f5e6b9d3a7c21e4f08b";
 const PIN: &str = "482913";
@@ -253,27 +252,10 @@ fn provisioning_trusts_the_certificate_in_a_readable_nss_database_and_purge_remo
     protectors.purge(3008).unwrap();
 }
 
-fn unlock(path: &Path, op: u8, payload: &[u8]) -> Option<Vec<u8>> {
-    let mut stream = UnixStream::connect(path).unwrap();
-    stream
-        .set_read_timeout(Some(Duration::from_secs(10)))
-        .unwrap();
-    let mut frame = vec![op];
-    frame.extend_from_slice(&(payload.len() as u16).to_be_bytes());
-    frame.extend_from_slice(payload);
-    let _ = stream.write_all(&frame);
-    let mut header = [0u8; 3];
-    stream.read_exact(&mut header).ok()?;
-    let mut body = vec![0u8; usize::from(u16::from_be_bytes([header[1], header[2]]))];
-    stream.read_exact(&mut body).ok()?;
-    (header[0] == STATUS_ACCEPTED).then_some(body)
-}
-
-fn on_behalf_of(uid: u32, op: u8, payload: &str) -> Vec<u8> {
-    let mut out = uid.to_be_bytes().to_vec();
-    out.push(op);
-    out.extend_from_slice(payload.as_bytes());
-    out
+fn hello(path: &Path, payload: &[u8]) -> Option<u8> {
+    TokenClient::connect_unnamed(path)
+        .send(OP_TOKEN_HELLO, payload)
+        .map(|(status, _)| status)
 }
 
 #[test]
@@ -285,44 +267,57 @@ fn only_a_root_peer_may_name_the_uid_and_a_refused_request_never_reaches_the_tpm
     protectors.set_pin(3006, PIN).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let serve = |name: &str, peer: u32| {
-        let config = UnlockSocketConfig {
+        let config = TokenSocketConfig {
             path: dir.path().join(name),
         };
-        UnlockSocket::bind_with_peer_uid(protectors.clone(), config, peer).unwrap()
+        TokenSocket::bind_with_peer_uid(protectors.clone(), config, peer).unwrap()
     };
     let user = serve("user.sock", 3007);
     let root = serve("root.sock", 0);
     let counter = rig.lockout_counter();
 
-    let other = |pin| on_behalf_of(3006, OP_UNLOCK_PIN, pin);
-    assert!(unlock(user.path(), OP_UNLOCK_FOR_UID, &other(PIN)).is_none());
-    assert!(unlock(user.path(), OP_UNLOCK_FOR_UID, &other(WRONG_PIN)).is_none());
-    assert!(unlock(user.path(), OP_UNLOCK_PIN, PIN.as_bytes()).is_none());
+    assert_eq!(
+        hello(user.path(), &3006u32.to_be_bytes()),
+        Some(TOKEN_REFUSED)
+    );
+    let mut named_self = TokenClient::connect(user.path(), 3007);
+    assert_eq!(
+        named_self.send(OP_TOKEN_OPEN, &[]).unwrap().0,
+        TOKEN_NO_TOKEN,
+        "a user without a token never reaches another user's PIN"
+    );
+    assert_eq!(
+        named_self.send(OP_TOKEN_LOGIN, PIN.as_bytes()).unwrap().0,
+        TOKEN_BAD_REQUEST
+    );
     assert_eq!(rig.lockout_counter(), counter);
 
-    assert!(unlock(root.path(), OP_UNLOCK_FOR_UID, &other(WRONG_PIN)).is_none());
+    assert_eq!(hello(root.path(), &[0, 0]), Some(TOKEN_BAD_REQUEST));
+    assert_eq!(
+        hello(root.path(), &0x1_0000u32.to_be_bytes()),
+        Some(TOKEN_REFUSED)
+    );
+
+    let mut named = TokenClient::connect(root.path(), 3006);
+    named.ok(OP_TOKEN_OPEN, &[]);
+    let wrong = named.send(OP_TOKEN_LOGIN, WRONG_PIN.as_bytes()).unwrap();
+    assert_eq!(wrong.0, TOKEN_PIN_INCORRECT);
     assert!(rig.lockout_counter() > counter);
     rig.clear_lockout();
 
-    let granted = unlock(root.path(), OP_UNLOCK_FOR_UID, &other(PIN)).expect("root names the uid");
-    let granted = Secret::new(String::from_utf8(granted).unwrap()).unwrap();
-    let signature = protectors
-        .keyd()
-        .sign_digest(3006, &granted, &DIGEST)
-        .unwrap();
+    named.ok(OP_TOKEN_LOGIN, PIN.as_bytes());
+    let key = named.find_class(CKO_PRIVATE_KEY)[0];
+    let (status, signature) = named.sign(key, &DIGEST).unwrap();
+    assert_eq!(status, TOKEN_OK);
+    named.ok(OP_TOKEN_CLOSE, &[]);
+    drop(named);
     let certificate = protectors.keyd().certificate(3006).unwrap();
     assert!(verifies(&certificate_point(&certificate), &signature));
 
-    assert!(unlock(root.path(), OP_UNLOCK_PIN, PIN.as_bytes()).is_none());
-    assert!(unlock(root.path(), OP_UNLOCK_FOR_UID, &[0, 0]).is_none());
-
     let own = serve("own.sock", 3006);
-    assert!(unlock(own.path(), OP_UNLOCK_PIN, PIN.as_bytes()).is_some());
-    assert!(unlock(
-        own.path(),
-        OP_UNLOCK_FOR_UID,
-        &on_behalf_of(3006, OP_UNLOCK_PIN, PIN)
-    )
-    .is_some());
+    let mut mine = TokenClient::connect(own.path(), 3006);
+    mine.ok(OP_TOKEN_OPEN, &[]);
+    mine.ok(OP_TOKEN_LOGIN, PIN.as_bytes());
+    mine.ok(OP_TOKEN_CLOSE, &[]);
     rig.clear_lockout();
 }

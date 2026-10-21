@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use openhello_keyd::{
-    KeyInfo, Protectors, TicketSocket, TicketSocketConfig, UnlockSocket, UnlockSocketConfig,
+    KeyInfo, Protectors, TicketSocket, TicketSocketConfig, TokenSocket, TokenSocketConfig,
     OP_TICKET, OP_TICKET_KEY, STATUS_ACCEPTED,
 };
 use openhello_ticket::{Issuer, TicketKey, KEY_LEN};
@@ -369,7 +369,7 @@ struct Stack {
     verify: Verify,
     pin_prompt: bool,
     typed: &'static str,
-    unlock_socket: Option<PathBuf>,
+    token_socket: Option<PathBuf>,
     bus: Option<String>,
 }
 
@@ -379,7 +379,7 @@ impl Stack {
             verify,
             pin_prompt: false,
             typed: "",
-            unlock_socket: None,
+            token_socket: None,
             bus: None,
         }
     }
@@ -468,20 +468,17 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
         .bus
         .clone()
         .unwrap_or_else(|| rig.config.env[0].1.clone());
-    let unlock = stack
-        .unlock_socket
+    let token = stack
+        .token_socket
         .clone()
-        .expect("every scenario names its unlock socket");
+        .expect("every scenario names its token socket");
     let etc = fixture.etc();
     let hooks_conf = etc.join("pkcs11.conf");
     std::fs::write(
         &hooks_conf,
         format!(
-            "module = {}\nunlock_socket = {}\nbus_address = {bus}\n",
-            rig.prefix
-                .join("usr/lib64/pkcs11/libtpm2_pkcs11.so")
-                .display(),
-            unlock.display()
+            "token_socket = {}\nbus_address = {bus}\n",
+            token.display()
         ),
     )
     .unwrap();
@@ -514,10 +511,11 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
         .env("LD_PRELOAD", lib64.join("libpam_wrapper.so"))
         .env("LD_LIBRARY_PATH", &lib64)
         .env(openhello_pkcs11::CONFIG_ENV, &hooks_conf)
-        .env("DBUS_SESSION_BUS_ADDRESS", &rig.config.env[0].1)
-        .env("TPM2_PKCS11_STORE", &fixture.config.store_dir)
-        .env("TPM2_PKCS11_BACKEND", "esysdb")
-        .env("TPM2_PKCS11_TCTI", fixture.config.tcti.as_ref().unwrap())
+        .env_remove("DBUS_SESSION_BUS_ADDRESS")
+        .env_remove("TPM2_PKCS11_STORE")
+        .env_remove("TPM2_PKCS11_TCTI")
+        .env_remove("TPM2_PKCS11_BACKEND")
+        .env_remove("TPM2TOOLS_TCTI")
         .env("PAMTEST_PIN", stack.typed)
         .output()
         .expect("the compiled PAM client must run");
@@ -573,16 +571,16 @@ fn verify_calls() -> u32 {
 }
 
 struct Services {
-    unlock_path: PathBuf,
+    token_path: PathBuf,
     _ticket: TicketSocket,
-    _unlock: UnlockSocket,
+    _token: TokenSocket,
     _dir: tempfile::TempDir,
 }
 
 fn services(rig: &Rig, fixture: &Fixture) -> Services {
     let dir = tempfile::tempdir().unwrap();
     let ticket_path = dir.path().join("ticket.sock");
-    let unlock_path = dir.path().join("unlock.sock");
+    let token_path = dir.path().join("token.sock");
     let ticket = TicketSocket::bind(
         fixture.protectors.clone(),
         TicketSocketConfig {
@@ -592,10 +590,10 @@ fn services(rig: &Rig, fixture: &Fixture) -> Services {
         },
     )
     .unwrap();
-    let unlock = UnlockSocket::bind(
+    let token = TokenSocket::bind(
         fixture.protectors.clone(),
-        UnlockSocketConfig {
-            path: unlock_path.clone(),
+        TokenSocketConfig {
+            path: token_path.clone(),
         },
     )
     .unwrap();
@@ -606,17 +604,17 @@ fn services(rig: &Rig, fixture: &Fixture) -> Services {
         calls: 0,
     });
     Services {
-        unlock_path,
+        token_path,
         _ticket: ticket,
-        _unlock: unlock,
+        _token: token,
         _dir: dir,
     }
 }
 
 fn scenario(rig: &Rig, fixture: &Fixture, services: &Services, mut stack: Stack) -> Outcome {
     stack
-        .unlock_socket
-        .get_or_insert(services.unlock_path.clone());
+        .token_socket
+        .get_or_insert(services.token_path.clone());
     run_stack(rig, fixture, &stack)
 }
 
@@ -719,7 +717,7 @@ fn a_missing_keyd_or_openhellod_or_a_silent_camera_falls_through_within_five_sec
             fixture,
             &services,
             Stack {
-                unlock_socket: Some(fixture.dir.path().join("absent.sock")),
+                token_socket: Some(fixture.dir.path().join("absent.sock")),
                 ..Stack::face(Verify::Matches)
             },
         );

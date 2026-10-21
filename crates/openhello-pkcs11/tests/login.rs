@@ -10,19 +10,19 @@ use std::time::Duration;
 
 use cryptoki::context::{CInitializeArgs, CInitializeFlags, Pkcs11};
 use cryptoki::mechanism::Mechanism;
-use cryptoki::object::{Attribute, ObjectClass};
+use cryptoki::object::{Attribute, AttributeType, ObjectClass};
 use cryptoki::session::UserType;
 use cryptoki::types::AuthPin;
 use openhello_keyd::{
-    KeyInfo, Protectors, TicketSocket, TicketSocketConfig, UnlockSocket, UnlockSocketConfig,
-    OP_TICKET, OP_TICKET_KEY, OP_UNLOCK_PIN, OP_UNLOCK_RECOVERY, OP_UNLOCK_TAKE_GRANT,
-    RECOVERY_SEPARATOR, STATUS_ACCEPTED,
+    KeyInfo, Protectors, TicketSocket, TicketSocketConfig, TokenSocket, TokenSocketConfig,
+    UnlockSocket, UnlockSocketConfig, OP_TICKET, OP_TICKET_KEY, OP_TOKEN_LOGIN, OP_TOKEN_OPEN,
+    OP_UNLOCK_RECOVERY, STATUS_ACCEPTED,
 };
-use openhello_pkcs11::{PLACEHOLDER_PIN, REAL_MODULE_ENV, TEST_BUS_ADDRESS_ENV, UNLOCK_SOCKET_ENV};
+use openhello_pkcs11::{PLACEHOLDER_PIN, TEST_BUS_ADDRESS_ENV, TOKEN_SOCKET_ENV};
 use openhello_ticket::{Issuer, TicketKey, KEY_LEN};
 use p256::ecdsa::signature::hazmat::PrehashVerifier;
 use p256::ecdsa::{Signature, VerifyingKey};
-use support::{rig, Rig};
+use support::{looks_like_secret, relay, rig, Rig, TokenClient};
 
 const DIGEST: [u8; 32] = [0x3c; 32];
 const PIN: &str = "482916";
@@ -32,6 +32,8 @@ const PROBE_NAME: &str = "wrapper_child_probe";
 const BUS_NAME: &str = "io.openhello.Biometrics1";
 const OBJECT_PATH: &str = "/io/openhello/Biometrics1";
 const OTHER_UID: u32 = 2999;
+const LEGACY_TAKE_GRANT: u8 = 1;
+const LEGACY_UNLOCK_PIN: u8 = 2;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Verify {
@@ -144,9 +146,11 @@ struct Harness<'a> {
     protectors: Arc<Protectors>,
     key: &'a KeyInfo,
     unlock_path: PathBuf,
+    token_path: PathBuf,
     ticket_path: PathBuf,
     _ticket: TicketSocket,
     _unlock: UnlockSocket,
+    _token: TokenSocket,
     _dir: tempfile::TempDir,
 }
 
@@ -157,6 +161,7 @@ fn harness(rig: &Rig, mode: Verify) -> Harness<'_> {
     let protectors = Arc::new(Protectors::new(rig.config.clone()).unwrap());
     let ticket_path = dir.path().join("ticket.sock");
     let unlock_path = dir.path().join("unlock.sock");
+    let token_path = dir.path().join("token.sock");
     let ticket = TicketSocket::bind(
         protectors.clone(),
         TicketSocketConfig {
@@ -173,6 +178,13 @@ fn harness(rig: &Rig, mode: Verify) -> Harness<'_> {
         },
     )
     .unwrap();
+    let token = TokenSocket::bind(
+        protectors.clone(),
+        TokenSocketConfig {
+            path: token_path.clone(),
+        },
+    )
+    .unwrap();
     serve_fake_biometrics(&rig.config.env[0].1);
     *VERIFY.lock().unwrap_or_else(PoisonError::into_inner) = Some(VerifyState {
         ticket_socket: ticket_path.clone(),
@@ -184,9 +196,11 @@ fn harness(rig: &Rig, mode: Verify) -> Harness<'_> {
         protectors,
         key: &fixture.key,
         unlock_path,
+        token_path,
         ticket_path,
         _ticket: ticket,
         _unlock: unlock,
+        _token: token,
         _dir: dir,
     }
 }
@@ -202,29 +216,22 @@ impl Harness<'_> {
     }
 
     fn login(&self, pin: &str) -> Probe {
-        let wrapper = std::env::current_exe()
-            .unwrap()
-            .parent()
-            .and_then(Path::parent)
-            .unwrap()
-            .join("libopenhello_pkcs11.so");
-        assert!(wrapper.exists(), "{} was not built", wrapper.display());
-        let config = &self.rig.config;
+        self.login_on(pin, &self.token_path)
+    }
+
+    fn login_on(&self, pin: &str, socket: &Path) -> Probe {
         let output = Command::new(std::env::current_exe().unwrap())
             .args(["--exact", PROBE_NAME, "--nocapture", "--test-threads=1"])
             .env(PROBE_PIN_ENV, pin)
-            .env(PROBE_MODULE_ENV, &wrapper)
-            .env(
-                REAL_MODULE_ENV,
-                self.rig.prefix.join("usr/lib64/pkcs11/libtpm2_pkcs11.so"),
-            )
-            .env(UNLOCK_SOCKET_ENV, &self.unlock_path)
-            .env(TEST_BUS_ADDRESS_ENV, &config.env[0].1)
-            .env("DBUS_SESSION_BUS_ADDRESS", &config.env[0].1)
-            .env("TPM2_PKCS11_STORE", &config.store_dir)
-            .env("TPM2_PKCS11_BACKEND", "esysdb")
-            .env("TPM2_PKCS11_TCTI", config.tcti.as_ref().unwrap())
-            .env("LD_LIBRARY_PATH", self.rig.prefix.join("usr/lib64"))
+            .env(PROBE_MODULE_ENV, wrapper_library())
+            .env(TOKEN_SOCKET_ENV, socket)
+            .env(TEST_BUS_ADDRESS_ENV, &self.rig.config.env[0].1)
+            .env_remove("DBUS_SESSION_BUS_ADDRESS")
+            .env_remove("TPM2_PKCS11_STORE")
+            .env_remove("TPM2_PKCS11_TCTI")
+            .env_remove("TPM2_PKCS11_BACKEND")
+            .env_remove("TPM2TOOLS_TCTI")
+            .env_remove("LD_LIBRARY_PATH")
             .output()
             .unwrap();
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -237,13 +244,19 @@ impl Harness<'_> {
                     String::from_utf8_lossy(&output.stderr)
                 )
             });
-        let (login, signature) = line.split_once(' ').unwrap();
+        let field = |name: &str| {
+            line.split_whitespace()
+                .find_map(|f| f.strip_prefix(name))
+                .unwrap_or_else(|| panic!("`{name}` missing in `{line}`"))
+        };
         Probe {
-            login: login.strip_prefix("login=").unwrap().to_string(),
-            signature: match signature.strip_prefix("sign=").unwrap() {
+            login: field("login=").to_string(),
+            signature: match field("sign=") {
                 "none" => None,
                 hex => Some(hex_to_bytes(hex)),
             },
+            token_module_mapped: field("mapped=") == "1",
+            private_value: field("value=").to_string(),
         }
     }
 
@@ -277,6 +290,19 @@ impl Harness<'_> {
 struct Probe {
     login: String,
     signature: Option<Vec<u8>>,
+    token_module_mapped: bool,
+    private_value: String,
+}
+
+fn wrapper_library() -> PathBuf {
+    let wrapper = std::env::current_exe()
+        .unwrap()
+        .parent()
+        .and_then(Path::parent)
+        .unwrap()
+        .join("libopenhello_pkcs11.so");
+    assert!(wrapper.exists(), "{} was not built", wrapper.display());
+    wrapper
 }
 
 fn hex_to_bytes(text: &str) -> Vec<u8> {
@@ -290,7 +316,7 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-// Runs inside a child process: the real tpm2-pkcs11 must not be initialized twice in the keyd test process.
+// Runs inside a child process with no store, TCTI or bus in its environment, as the lock screen would.
 #[test]
 fn wrapper_child_probe() {
     let Ok(pin) = std::env::var(PROBE_PIN_ENV) else {
@@ -307,13 +333,26 @@ fn wrapper_child_probe() {
         Err(cryptoki::error::Error::Pkcs11(rv, _)) => format!("{rv:?}"),
         Err(other) => format!("{other:?}"),
     };
-    let signature = session
+    let key = session
         .find_objects(&[Attribute::Class(ObjectClass::PRIVATE_KEY)])
         .ok()
-        .and_then(|found| found.first().copied())
+        .and_then(|found| found.first().copied());
+    let signature = key
         .and_then(|key| session.sign(&Mechanism::Ecdsa, key, &DIGEST).ok())
         .map_or("none".to_string(), |s| hex(&s));
-    println!("\nRESULT login={login} sign={signature}");
+    let private_value = key.map_or("nokey".to_string(), |key| {
+        match session.get_attribute_info(key, &[AttributeType::Value]) {
+            Ok(info) => format!("{:?}", info[0]),
+            Err(error) => format!("{error:?}"),
+        }
+    });
+    let mapped = std::fs::read_to_string("/proc/self/maps")
+        .map(|maps| maps.contains("tpm2_pkcs11"))
+        .unwrap_or(true);
+    println!(
+        "\nRESULT login={login} sign={signature} mapped={} value={private_value}",
+        u8::from(mapped)
+    );
 }
 
 fn placeholder() -> String {
@@ -329,6 +368,10 @@ fn a_ticket_from_a_verify_opens_the_session_through_the_placeholder_and_the_toke
     let probe = harness.login(&placeholder());
     assert_eq!(probe.login, "ok");
     assert!(harness.signature_verifies(&probe));
+    assert!(
+        !probe.token_module_mapped,
+        "the unprivileged process never loads tpm2-pkcs11"
+    );
     assert_eq!(harness.verify_calls(), 1);
 
     let again = harness.login(&placeholder());
@@ -411,65 +454,188 @@ fn nothing_but_the_placeholder_with_a_grant_or_the_pin_unlocks() {
 
 // @spec:AC-019
 #[test]
-fn the_unlock_socket_hands_out_a_grant_once_and_only_to_its_own_uid() {
+fn a_grant_is_used_once_by_its_own_uid_and_the_unlock_socket_never_hands_it_out() {
     let rig = rig();
-    let harness = harness(&rig, Verify::Matches);
+    let harness = harness(&rig, Verify::MatchesButNoTicket);
     let before = rig.lockout_counter();
 
-    assert!(harness.unlock_request(OP_UNLOCK_TAKE_GRANT, &[]).is_none());
     assert!(deliver_ticket(&harness.ticket_path, OTHER_UID));
-    assert!(
-        harness.unlock_request(OP_UNLOCK_TAKE_GRANT, &[]).is_none(),
-        "a grant for another uid is not mine"
-    );
-    assert!(harness.protectors.take_grant(OTHER_UID).is_some());
-
     assert!(deliver_ticket(&harness.ticket_path, uid()));
-    let secret = harness.unlock_request(OP_UNLOCK_TAKE_GRANT, &[]).unwrap();
-    assert_eq!(secret.len(), 40);
-    assert!(harness.unlock_request(OP_UNLOCK_TAKE_GRANT, &[]).is_none());
+    assert!(
+        harness.unlock_request(LEGACY_TAKE_GRANT, &[]).is_none(),
+        "the unlock socket no longer returns the secret"
+    );
+
+    let mine = harness.login(&placeholder());
+    assert_eq!(mine.login, "ok", "the grant for my uid opens my token");
+    let again = harness.login(&placeholder());
+    assert_eq!(again.login, "PinIncorrect", "a grant is single use");
+    assert!(
+        harness.protectors.take_grant(OTHER_UID).is_some(),
+        "the grant of another uid was never usable by mine"
+    );
     assert_eq!(rig.lockout_counter(), before);
 }
 
 // @spec:AC-024
 // @principle:P-003
 #[test]
-fn the_unlock_socket_refuses_unknown_frames_and_large_payloads_without_the_tpm() {
+fn the_sockets_refuse_unknown_frames_and_large_payloads_without_the_tpm() {
     let rig = rig();
     let harness = harness(&rig, Verify::Matches);
     let before = rig.lockout_counter();
 
     assert!(harness.unlock_request(99, &[]).is_none());
     assert!(harness
-        .unlock_request(OP_UNLOCK_TAKE_GRANT, b"extra")
+        .unlock_request(LEGACY_TAKE_GRANT, b"extra")
         .is_none());
-    assert!(harness.unlock_request(OP_UNLOCK_PIN, &[0xff; 20]).is_none());
     assert!(harness
-        .unlock_request(OP_UNLOCK_PIN, &vec![b'7'; 4000])
+        .unlock_request(LEGACY_UNLOCK_PIN, &[0xff; 20])
         .is_none());
-    assert!(harness.unlock_request(OP_UNLOCK_PIN, b"12").is_none());
+    assert!(harness
+        .unlock_request(LEGACY_UNLOCK_PIN, &vec![b'7'; 4000])
+        .is_none());
+    assert!(harness.unlock_request(LEGACY_UNLOCK_PIN, b"12").is_none());
     assert!(harness
         .unlock_request(OP_UNLOCK_RECOVERY, b"not a code")
         .is_none());
+
+    let mut token = TokenClient::connect(&harness.token_path, uid());
+    token.ok(OP_TOKEN_OPEN, &[]);
+    for refused in [vec![0xff; 20], vec![b'7'; 65], b"12".to_vec(), Vec::new()] {
+        let (status, _) = token.send(OP_TOKEN_LOGIN, &refused).unwrap();
+        assert_ne!(status, 0);
+    }
+    assert!(token.send(99, &[]).is_some_and(|(status, _)| status != 0));
     assert_eq!(rig.lockout_counter(), before);
 }
 
 // @spec:AC-025
 #[test]
-fn the_unlock_socket_returns_the_secret_for_the_pin_and_for_the_recovery_code() {
+fn recovery_returns_a_new_code_and_never_the_secret_and_the_old_code_stops_working() {
     let rig = rig();
     let harness = harness(&rig, Verify::Matches);
     let fixture = provisioned(&rig);
 
-    let by_pin = harness
-        .unlock_request(OP_UNLOCK_PIN, PIN.as_bytes())
-        .unwrap();
-    let reply = harness
+    let by_pin = harness.protectors.unlock_with_pin(uid(), PIN).unwrap();
+    let fresh = harness
         .unlock_request(OP_UNLOCK_RECOVERY, fixture.recovery.as_bytes())
         .unwrap();
-    let at = reply.iter().position(|b| *b == RECOVERY_SEPARATOR).unwrap();
-    let (by_recovery, fresh) = (&reply[..at], &reply[at + 1..]);
-    assert_eq!(by_pin, by_recovery, "both Protectors seal the same secret");
     assert_eq!(fresh.len(), 32);
     assert_ne!(fresh, fixture.recovery.as_bytes());
+    assert!(harness
+        .unlock_request(OP_UNLOCK_RECOVERY, fixture.recovery.as_bytes())
+        .is_none());
+
+    let (by_recovery, newest) = harness
+        .protectors
+        .unlock_with_recovery(uid(), std::str::from_utf8(&fresh).unwrap())
+        .unwrap();
+    assert_eq!(
+        by_pin.expose_for_tests(),
+        by_recovery.expose_for_tests(),
+        "both Protectors seal the same secret"
+    );
+    let _ = harness.unlock_request(OP_UNLOCK_RECOVERY, newest.reveal().as_bytes());
+}
+
+// @principle:P-004
+#[test]
+fn the_secret_never_crosses_a_user_socket_and_the_private_key_value_is_sensitive() {
+    let rig = rig();
+    let harness = harness(&rig, Verify::Matches);
+    let secret = harness.protectors.unlock_with_pin(uid(), PIN).unwrap();
+    let k = secret.expose_for_tests().as_bytes().to_vec();
+    let relay_path = harness._dir.path().join("relay.sock");
+    let recorded = relay(relay_path.clone(), harness.token_path.clone());
+
+    let by_face = harness.login_on(&placeholder(), &relay_path);
+    let by_pin = harness.login_on(PIN, &relay_path);
+    assert_eq!(by_face.login, "ok");
+    assert_eq!(by_pin.login, "ok");
+    for probe in [&by_face, &by_pin] {
+        assert!(harness.signature_verifies(probe));
+        assert_eq!(probe.private_value, "Sensitive");
+        assert!(!probe.token_module_mapped);
+    }
+
+    let seen = recorded.lock().unwrap();
+    assert!(!seen.from_keyd.is_empty());
+    assert!(!seen.from_keyd.windows(k.len()).any(|w| w == k.as_slice()));
+    assert!(!looks_like_secret(&seen.from_keyd));
+    assert!(
+        seen.to_keyd.windows(PIN.len()).any(|w| w == PIN.as_bytes()),
+        "the typed PIN is what travels towards keyd"
+    );
+}
+
+// @principle:P-004
+#[test]
+fn the_wrapper_binary_cannot_name_or_load_the_token_module() {
+    let wrapper = std::fs::read(wrapper_library()).unwrap();
+    for needle in ["tpm2_pkcs11", "TPM2_PKCS11_STORE", "dlopen"] {
+        assert!(
+            !wrapper
+                .windows(needle.len())
+                .any(|w| w == needle.as_bytes()),
+            "{needle} appears in the wrapper"
+        );
+    }
+}
+
+#[test]
+fn the_wire_constants_match_between_the_wrapper_and_keyd() {
+    use openhello_keyd as keyd;
+    use openhello_pkcs11::proxy as wrapper;
+    assert_eq!(
+        [
+            wrapper::OP_TOKEN_HELLO,
+            wrapper::OP_TOKEN_INFO,
+            wrapper::OP_TOKEN_OPEN,
+            wrapper::OP_TOKEN_CLOSE,
+            wrapper::OP_TOKEN_LOGIN,
+            wrapper::OP_TOKEN_LOGOUT,
+            wrapper::OP_TOKEN_FIND,
+            wrapper::OP_TOKEN_ATTRIBUTES,
+            wrapper::OP_TOKEN_SIGN_CHECK,
+            wrapper::OP_TOKEN_SIGN,
+            wrapper::TOKEN_OK,
+            wrapper::TOKEN_PIN_INCORRECT,
+            wrapper::TOKEN_NO_TOKEN,
+            wrapper::TOKEN_BAD_HANDLE,
+            wrapper::TOKEN_BAD_REQUEST,
+            wrapper::TOKEN_REFUSED,
+            wrapper::TOKEN_FAILED,
+            wrapper::TOKEN_BAD_MECHANISM,
+            wrapper::ATTRIBUTE_INVALID,
+            wrapper::ATTRIBUTE_SENSITIVE,
+            wrapper::ATTRIBUTE_READ,
+        ],
+        [
+            keyd::OP_TOKEN_HELLO,
+            keyd::OP_TOKEN_INFO,
+            keyd::OP_TOKEN_OPEN,
+            keyd::OP_TOKEN_CLOSE,
+            keyd::OP_TOKEN_LOGIN,
+            keyd::OP_TOKEN_LOGOUT,
+            keyd::OP_TOKEN_FIND,
+            keyd::OP_TOKEN_ATTRIBUTES,
+            keyd::OP_TOKEN_SIGN_CHECK,
+            keyd::OP_TOKEN_SIGN,
+            keyd::TOKEN_OK,
+            keyd::TOKEN_PIN_INCORRECT,
+            keyd::TOKEN_NO_TOKEN,
+            keyd::TOKEN_BAD_HANDLE,
+            keyd::TOKEN_BAD_REQUEST,
+            keyd::TOKEN_REFUSED,
+            keyd::TOKEN_FAILED,
+            keyd::TOKEN_BAD_MECHANISM,
+            keyd::ATTRIBUTE_INVALID,
+            keyd::ATTRIBUTE_SENSITIVE,
+            keyd::ATTRIBUTE_READ,
+        ]
+    );
+    assert_eq!(wrapper::TOKEN_INFO_LEN, keyd::TOKEN_INFO_LEN);
+    assert_eq!(wrapper::SIGNATURE_LEN, keyd::SIGNATURE_LEN);
+    assert_eq!(PLACEHOLDER_PIN, keyd::TOKEN_PLACEHOLDER_PIN);
 }

@@ -8,7 +8,7 @@ use openhello_keyd::dbus_service::{
     Authorizer, RootOnlyAuthorizer, Service, BUS_NAME, OBJECT_PATH,
 };
 use openhello_keyd::polkit::{DbusPolkit, PolkitAuthorizer};
-use openhello_keyd::{LockoutPolicy, Protectors, TicketSocket, UnlockSocket};
+use openhello_keyd::{LockoutPolicy, Protectors, TicketSocket, TokenSocket, UnlockSocket};
 
 const STOP_POLL: Duration = Duration::from_millis(200);
 
@@ -28,6 +28,8 @@ fn run(config: DaemonConfig) -> Result<(), String> {
         TicketSocket::bind(protectors.clone(), config.ticket).map_err(|e| e.to_string())?;
     let _unlock_socket =
         UnlockSocket::bind(protectors.clone(), config.unlock).map_err(|e| e.to_string())?;
+    let _token_socket =
+        TokenSocket::bind(protectors.clone(), config.token).map_err(|e| e.to_string())?;
     let authorizer: Arc<dyn Authorizer> = match config.auth {
         AuthMode::Polkit => Arc::new(PolkitAuthorizer::new(Arc::new(DbusPolkit))),
         AuthMode::RootOnly => Arc::new(RootOnlyAuthorizer),

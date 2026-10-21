@@ -3,15 +3,21 @@
 #[path = "../../../../tests/support/swtpm_harness.rs"]
 mod swtpm_harness;
 
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::ops::Deref;
-use std::path::PathBuf;
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use openhello_keyd::KeydConfig;
+use openhello_keyd::{KeydConfig, OP_TOKEN_FIND, OP_TOKEN_HELLO, OP_TOKEN_SIGN, TOKEN_OK};
 use swtpm_harness::SwTpm;
+
+pub const CKO_CERTIFICATE: u64 = 1;
+pub const CKO_PUBLIC_KEY: u64 = 2;
+pub const CKO_PRIVATE_KEY: u64 = 3;
+pub const CKM_ECDSA: u64 = 0x1041;
 
 fn required(name: &str, meaning: &str) -> String {
     match std::env::var(name) {
@@ -213,4 +219,123 @@ impl Drop for Rig {
             let _ = child.wait();
         }
     }
+}
+
+#[derive(Default)]
+pub struct Recorded {
+    pub to_keyd: Vec<u8>,
+    pub from_keyd: Vec<u8>,
+}
+
+pub fn relay(listen: PathBuf, upstream: PathBuf) -> Arc<Mutex<Recorded>> {
+    let recorded = Arc::new(Mutex::new(Recorded::default()));
+    let listener = UnixListener::bind(&listen).unwrap();
+    let seen = recorded.clone();
+    std::thread::spawn(move || {
+        for client in listener.incoming().flatten() {
+            let Ok(server) = UnixStream::connect(&upstream) else {
+                continue;
+            };
+            for (mut from, mut to, forward) in [
+                (
+                    client.try_clone().unwrap(),
+                    server.try_clone().unwrap(),
+                    true,
+                ),
+                (server, client, false),
+            ] {
+                let seen = seen.clone();
+                std::thread::spawn(move || {
+                    let mut buf = [0u8; 512];
+                    while let Ok(n) = from.read(&mut buf) {
+                        if n == 0 || to.write_all(&buf[..n]).is_err() {
+                            break;
+                        }
+                        let mut log = seen.lock().unwrap();
+                        let side = if forward {
+                            &mut log.to_keyd
+                        } else {
+                            &mut log.from_keyd
+                        };
+                        side.extend_from_slice(&buf[..n]);
+                    }
+                });
+            }
+        }
+    });
+    recorded
+}
+
+pub struct TokenClient {
+    stream: UnixStream,
+    pub received: Vec<u8>,
+}
+
+impl TokenClient {
+    pub fn connect_unnamed(path: &Path) -> Self {
+        let stream = UnixStream::connect(path).expect("the token socket must accept");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(20)))
+            .unwrap();
+        Self {
+            stream,
+            received: Vec::new(),
+        }
+    }
+
+    pub fn connect(path: &Path, uid: u32) -> Self {
+        let mut client = Self::connect_unnamed(path);
+        let (status, _) = client
+            .send(OP_TOKEN_HELLO, &uid.to_be_bytes())
+            .expect("hello must be answered");
+        assert_eq!(status, TOKEN_OK, "hello for uid {uid} was refused");
+        client
+    }
+
+    pub fn send(&mut self, op: u8, payload: &[u8]) -> Option<(u8, Vec<u8>)> {
+        let mut frame = vec![op];
+        frame.extend_from_slice(&(payload.len() as u16).to_be_bytes());
+        frame.extend_from_slice(payload);
+        self.stream.write_all(&frame).ok()?;
+        let mut header = [0u8; 3];
+        self.stream.read_exact(&mut header).ok()?;
+        let mut body = vec![0u8; usize::from(u16::from_be_bytes([header[1], header[2]]))];
+        self.stream.read_exact(&mut body).ok()?;
+        self.received.extend_from_slice(&header);
+        self.received.extend_from_slice(&body);
+        Some((header[0], body))
+    }
+
+    pub fn find_class(&mut self, class: u64) -> Vec<u64> {
+        let mut template = vec![1u8];
+        template.extend_from_slice(&0u64.to_be_bytes());
+        template.extend_from_slice(&8u16.to_be_bytes());
+        template.extend_from_slice(&class.to_ne_bytes());
+        let reply = self.ok(OP_TOKEN_FIND, &template);
+        reply
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|c| u64::from_be_bytes(*c))
+            .collect()
+    }
+
+    pub fn sign(&mut self, handle: u64, digest: &[u8]) -> Option<(u8, Vec<u8>)> {
+        let mut payload = CKM_ECDSA.to_be_bytes().to_vec();
+        payload.extend_from_slice(&handle.to_be_bytes());
+        payload.extend_from_slice(digest);
+        self.send(OP_TOKEN_SIGN, &payload)
+    }
+
+    pub fn ok(&mut self, op: u8, payload: &[u8]) -> Vec<u8> {
+        let (status, body) = self.send(op, payload).expect("the keyd must answer");
+        assert_eq!(status, TOKEN_OK, "operation {op} returned status {status}");
+        body
+    }
+}
+
+pub fn looks_like_secret(bytes: &[u8]) -> bool {
+    bytes
+        .windows(24)
+        .any(|window| window.iter().all(u8::is_ascii_alphanumeric))
 }

@@ -2,8 +2,8 @@ mod support;
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::{Path, PathBuf};
+use std::os::unix::net::UnixStream;
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -13,9 +13,9 @@ use openhello_keyd::dbus_service::{
 };
 use openhello_keyd::logging::{self, Level as KeydLevel};
 use openhello_keyd::{
-    KeydError, Protectors, TicketSocket, TicketSocketConfig, UnlockSocket, UnlockSocketConfig,
-    OP_TICKET, OP_UNLOCK_PIN, OP_UNLOCK_RECOVERY, OP_UNLOCK_TAKE_GRANT, RECOVERY_SEPARATOR,
-    STATUS_ACCEPTED,
+    KeydError, Protectors, TicketSocket, TicketSocketConfig, TokenSocket, TokenSocketConfig,
+    UnlockSocket, UnlockSocketConfig, OP_TICKET, OP_TOKEN_CLOSE, OP_TOKEN_LOGIN, OP_TOKEN_OPEN,
+    OP_UNLOCK_RECOVERY, STATUS_ACCEPTED, TOKEN_PIN_INCORRECT,
 };
 use openhello_ticket::{Issuer, KEY_LEN};
 use openhellod::backends::*;
@@ -23,7 +23,7 @@ use openhellod::core::{Biometrics, DEFAULT_TARGET_FAR};
 use openhellod::keyd_client::{KeyPurge, KeydBus, KeydClient};
 use openhellod::logging::{Level, LogSink, Logger};
 use openhellod::ticket_client::TicketClient;
-use support::{rig, Rig};
+use support::{looks_like_secret, relay, rig, Recorded, Rig, TokenClient};
 
 const PIN: &str = "Sntl-PIN-9d4F-7731";
 const WRONG_PIN: &str = "Wrng-PIN-2b8E-4416";
@@ -297,51 +297,6 @@ fn unlock_request(path: &Path, op: u8, payload: &[u8]) -> Option<Vec<u8>> {
     (header[0] == STATUS_ACCEPTED).then_some(body)
 }
 
-#[derive(Default)]
-struct Recorded {
-    to_keyd: Vec<u8>,
-    from_keyd: Vec<u8>,
-}
-
-fn relay(listen: PathBuf, upstream: PathBuf) -> Arc<Mutex<Recorded>> {
-    let recorded = Arc::new(Mutex::new(Recorded::default()));
-    let listener = UnixListener::bind(&listen).unwrap();
-    let seen = recorded.clone();
-    std::thread::spawn(move || {
-        for client in listener.incoming().flatten() {
-            let Ok(server) = UnixStream::connect(&upstream) else {
-                continue;
-            };
-            for (mut from, mut to, forward) in [
-                (
-                    client.try_clone().unwrap(),
-                    server.try_clone().unwrap(),
-                    true,
-                ),
-                (server, client, false),
-            ] {
-                let seen = seen.clone();
-                std::thread::spawn(move || {
-                    let mut buf = [0u8; 512];
-                    while let Ok(n) = from.read(&mut buf) {
-                        if n == 0 || to.write_all(&buf[..n]).is_err() {
-                            break;
-                        }
-                        let mut log = seen.lock().unwrap();
-                        let side = if forward {
-                            &mut log.to_keyd
-                        } else {
-                            &mut log.from_keyd
-                        };
-                        side.extend_from_slice(&buf[..n]);
-                    }
-                });
-            }
-        }
-    });
-    recorded
-}
-
 fn tickets_seen(recorded: &Recorded) -> Vec<Vec<u8>> {
     let mut found = Vec::new();
     let mut rest = recorded.to_keyd.as_slice();
@@ -506,6 +461,7 @@ fn a_full_cycle_at_trace_verbosity_never_logs_a_pin_a_secret_a_ticket_or_a_recov
     let keyd_ticket = dir.path().join("keyd-ticket.sock");
     let relay_path = dir.path().join("relay.sock");
     let unlock_path = dir.path().join("unlock.sock");
+    let token_path = dir.path().join("token.sock");
     let _ticket = TicketSocket::bind(
         protectors.clone(),
         TicketSocketConfig {
@@ -519,6 +475,13 @@ fn a_full_cycle_at_trace_verbosity_never_logs_a_pin_a_secret_a_ticket_or_a_recov
         protectors.clone(),
         UnlockSocketConfig {
             path: unlock_path.clone(),
+        },
+    )
+    .unwrap();
+    let _token = TokenSocket::bind(
+        protectors.clone(),
+        TokenSocketConfig {
+            path: token_path.clone(),
         },
     )
     .unwrap();
@@ -537,20 +500,36 @@ fn a_full_cycle_at_trace_verbosity_never_logs_a_pin_a_secret_a_ticket_or_a_recov
     enroll(&mut core, uid);
 
     assert!(core.verify(uid).unwrap());
-    let key = unlock_request(&unlock_path, OP_UNLOCK_TAKE_GRANT, &[]).expect("face grant");
+    let key = protectors
+        .take_grant(uid)
+        .expect("face grant")
+        .expose_for_tests()
+        .as_bytes()
+        .to_vec();
     assert_eq!(key.len(), 40);
-
     assert_eq!(
-        unlock_request(&unlock_path, OP_UNLOCK_PIN, PIN.as_bytes()).unwrap(),
-        key
+        protectors
+            .unlock_with_pin(uid, PIN)
+            .unwrap()
+            .expose_for_tests()
+            .as_bytes(),
+        key.as_slice()
     );
-    assert!(unlock_request(&unlock_path, OP_UNLOCK_PIN, WRONG_PIN.as_bytes()).is_none());
+
+    {
+        let mut token = TokenClient::connect(&token_path, uid);
+        token.ok(OP_TOKEN_OPEN, &[]);
+        let wrong = token.send(OP_TOKEN_LOGIN, WRONG_PIN.as_bytes()).unwrap();
+        assert_eq!(wrong.0, TOKEN_PIN_INCORRECT);
+        token.ok(OP_TOKEN_LOGIN, PIN.as_bytes());
+        token.ok(OP_TOKEN_CLOSE, &[]);
+        assert!(!looks_like_secret(&token.received));
+    }
+
+    assert!(unlock_request(&unlock_path, 2, PIN.as_bytes()).is_none());
     assert!(unlock_request(&unlock_path, OP_UNLOCK_RECOVERY, WRONG_CODE.as_bytes()).is_none());
-    let reply = unlock_request(&unlock_path, OP_UNLOCK_RECOVERY, code.as_bytes()).unwrap();
-    let (recovered, fresh) =
-        reply.split_at(reply.iter().position(|b| *b == RECOVERY_SEPARATOR).unwrap());
-    assert_eq!(recovered, key.as_slice());
-    let fresh = fresh[1..].to_vec();
+    let fresh = unlock_request(&unlock_path, OP_UNLOCK_RECOVERY, code.as_bytes()).unwrap();
+    assert_eq!(fresh.len(), 32, "recovery returns the new code and never K");
 
     core.purge(uid).unwrap();
     assert_eq!(core.last_key_purge(), Some(KeyPurge::Destroyed));
@@ -567,6 +546,8 @@ fn a_full_cycle_at_trace_verbosity_never_logs_a_pin_a_secret_a_ticket_or_a_recov
         "openhello-keyd DEBUG ticket-accepted",
         "openhello-keyd DEBUG unlock-accepted",
         "openhello-keyd WARN unlock-refused",
+        "openhello-keyd DEBUG token-login-accepted",
+        "openhello-keyd WARN token-login-refused",
         "openhellod INFO ticket",
         "openhellod INFO purge",
     ] {

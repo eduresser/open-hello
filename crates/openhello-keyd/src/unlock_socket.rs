@@ -15,11 +15,8 @@ use crate::ticket_socket::{STATUS_ACCEPTED, STATUS_REFUSED};
 use crate::tpm::failure;
 use crate::{KeydError, Protectors};
 
-pub const OP_UNLOCK_TAKE_GRANT: u8 = 1;
-pub const OP_UNLOCK_PIN: u8 = 2;
 pub const OP_UNLOCK_RECOVERY: u8 = 3;
 pub const OP_UNLOCK_FOR_UID: u8 = 4;
-pub const RECOVERY_SEPARATOR: u8 = b'\n';
 const ROOT_UID: u32 = 0;
 const FOR_UID_HEADER: usize = 5;
 const MAX_PAYLOAD: usize = 128;
@@ -162,22 +159,10 @@ fn answer(
     payload: &Zeroizing<Vec<u8>>,
 ) -> Option<Zeroizing<Vec<u8>>> {
     match op {
-        OP_UNLOCK_TAKE_GRANT if payload.is_empty() => {
-            let secret = protectors.take_grant(uid)?;
-            Some(Zeroizing::new(secret.expose().as_bytes().to_vec()))
-        }
-        OP_UNLOCK_PIN => {
-            let pin = std::str::from_utf8(payload).ok()?;
-            let secret = protectors.unlock_with_pin(uid, pin).ok()?;
-            Some(Zeroizing::new(secret.expose().as_bytes().to_vec()))
-        }
         OP_UNLOCK_RECOVERY => {
             let code = std::str::from_utf8(payload).ok()?;
-            let (secret, fresh) = protectors.unlock_with_recovery(uid, code).ok()?;
-            let mut reply = Zeroizing::new(secret.expose().as_bytes().to_vec());
-            reply.push(RECOVERY_SEPARATOR);
-            reply.extend_from_slice(fresh.reveal().as_bytes());
-            Some(reply)
+            let (_secret, fresh) = protectors.unlock_with_recovery(uid, code).ok()?;
+            Some(Zeroizing::new(fresh.reveal().as_bytes().to_vec()))
         }
         _ => None,
     }
@@ -212,7 +197,7 @@ fn read_frame(stream: &mut UnixStream) -> Option<(u8, Zeroizing<Vec<u8>>)> {
     Some((header[0], payload))
 }
 
-fn peer_uid(stream: &UnixStream) -> Option<u32> {
+pub(crate) fn peer_uid(stream: &UnixStream) -> Option<u32> {
     let mut cred = libc::ucred {
         pid: 0,
         uid: 0,
