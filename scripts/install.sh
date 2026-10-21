@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Installs open-hello on a fresh Linux VM: dependencies, build, files, D-Bus/polkit/systemd integration.
+# Also wires `sudo` to face/PIN login (pam_pkcs11 + TPM key); certutil (nss-tools) is required by openhello-keyd to trust the key certificate.
 # usage: sudo scripts/install.sh [--dry-run] [--no-deps] [--calibration-images DIR | --calibration-url URL]
 set -euo pipefail
 
@@ -46,12 +47,12 @@ install_deps() {
       # A broken third-party index (e.g. a mirror mid-sync) must not block packages from the main archives
       run apt-get update || echo "warning: apt-get update reported errors; continuing with the cached indexes" >&2
       run apt-get install -y build-essential pkg-config curl ca-certificates tpm2-tools swtpm \
-        libtss2-tcti-swtpm0 dbus polkitd unzip ;;
+        libtss2-tcti-swtpm0 dbus polkitd unzip libpam-pkcs11 libtpm2-pkcs11-1 tpm2-pkcs11-tools libnss3-tools ;;
     *fedora*|*rhel*|*centos*)
-      run dnf install -y gcc make pkgconf-pkg-config curl unzip tpm2-tools swtpm tpm2-tss dbus-daemon polkit ;;
+      run dnf install -y gcc make pkgconf-pkg-config curl unzip tpm2-tools swtpm tpm2-tss dbus-daemon polkit pam_pkcs11 tpm2-pkcs11 tpm2-pkcs11-tools nss-tools ;;
     *suse*)
       run zypper --non-interactive install gcc make pkg-config curl unzip tpm2.0-tools swtpm \
-        libtss2-tcti-swtpm0 dbus-1-daemon polkit ;;
+        libtss2-tcti-swtpm0 dbus-1-daemon polkit pam_pkcs11 tpm2-pkcs11 mozilla-nss-tools ;;
     *) echo "unsupported distro ($ID); install manually: rust, tpm2-tools, swtpm, libtss2-tcti-swtpm, dbus, polkit" >&2; exit 1 ;;
   esac
 }
@@ -105,7 +106,8 @@ calibrate() {
 ensure_rust
 
 run cargo build --release --manifest-path "$REPO/Cargo.toml" \
-  -p openhellod -p openhello-cli -p sensor-adapter-ir -p engine-adapter-face -p storage-adapter-templates
+  -p openhellod -p openhello-cli -p sensor-adapter-ir -p engine-adapter-face -p storage-adapter-templates \
+  -p openhello-keyd -p openhello-pkcs11 -p openhello-pam
 
 if [ -n "${SUDO_USER:-}" ] && [ "$DRY_RUN" = 0 ]; then chown -R "$SUDO_USER" "$REPO/target"; fi
 T="$REPO/target/release"
@@ -118,6 +120,54 @@ run install -m 0755 "$T/openhellod" "$BIN_DIR/openhellod"
 run install -m 0755 "$T/openhello-cli" /usr/local/bin/openhello-cli
 run install -m 0755 "$T/openhello-calibrate" "$BIN_DIR/openhello-calibrate"
 install_runtime_and_models
+
+first_existing() {
+  local candidate
+  for candidate in "$@"; do
+    if [ -e "$candidate" ]; then echo "$candidate"; return 0; fi
+  done
+  return 1
+}
+
+install_sudo_login() {
+  command -v certutil >/dev/null 2>&1 || [ "$DRY_RUN" = 1 ] || { echo "certutil not found: install nss-tools (libnss3-tools, mozilla-nss-tools)" >&2; exit 1; }
+  local pam_dir pkcs11_dir tpm2_module
+  pam_dir="$(first_existing /usr/lib64/security /usr/lib/security /usr/lib/x86_64-linux-gnu/security)" || pam_dir=/usr/lib64/security
+  pkcs11_dir="$(first_existing /usr/lib64/pam_pkcs11 /usr/lib/pam_pkcs11 /usr/lib/x86_64-linux-gnu/pam_pkcs11)" || pkcs11_dir=/usr/lib64/pam_pkcs11
+  tpm2_module="$(first_existing /usr/lib64/pkcs11/libtpm2_pkcs11.so /usr/lib/x86_64-linux-gnu/pkcs11/libtpm2_pkcs11.so /usr/lib/pkcs11/libtpm2_pkcs11.so)" || tpm2_module=/usr/lib64/pkcs11/libtpm2_pkcs11.so
+
+  run install -m 0755 "$T/openhello-keyd" "$BIN_DIR/openhello-keyd"
+  run install -m 0644 "$T/libopenhello_pkcs11.so" "$LIB_DIR/libopenhello_pkcs11.so"
+  run install -m 0644 "$T/libpam_openhello.so" "$pam_dir/pam_openhello.so"
+  run install -d -m 0755 "$CONF_DIR/cacerts" "$CONF_DIR/crls"
+  run install -m 0644 "$REPO/packaging/io.openhello.Keyd1.conf" /usr/share/dbus-1/system.d/io.openhello.Keyd1.conf
+  run install -m 0644 "$REPO/crates/openhello-keyd/io.openhello.Keyd1.policy" /usr/share/polkit-1/actions/io.openhello.Keyd1.policy
+  run install -m 0644 "$REPO/packaging/openhello-keyd.service" /etc/systemd/system/openhello-keyd.service
+  run install -m 0644 "$REPO/packaging/pam/sudo-openhello" /etc/pam.d/sudo-openhello
+  if [ "$DRY_RUN" = 1 ]; then
+    echo "+ write $CONF_DIR/pam_pkcs11.conf and $CONF_DIR/pkcs11.conf (root-owned, 0644)"
+  else
+    sed "s|/usr/lib64/pam_pkcs11|$pkcs11_dir|" "$REPO/packaging/pam/pam_pkcs11.conf" > "$CONF_DIR/pam_pkcs11.conf"
+    sed "s|/usr/lib64/pkcs11/libtpm2_pkcs11.so|$tpm2_module|" "$REPO/packaging/pam/pkcs11.conf" > "$CONF_DIR/pkcs11.conf"
+    chown root:root "$CONF_DIR/pam_pkcs11.conf" "$CONF_DIR/pkcs11.conf"
+    chmod 0644 "$CONF_DIR/pam_pkcs11.conf" "$CONF_DIR/pkcs11.conf"
+  fi
+  enable_sudo_stack
+}
+
+# A backup is kept; undo with `mv /etc/pam.d/sudo.openhello.bak /etc/pam.d/sudo`.
+enable_sudo_stack() {
+  local sudo_file=/etc/pam.d/sudo include='auth include sudo-openhello'
+  if [ ! -e "$sudo_file" ] && [ -e /usr/etc/pam.d/sudo ]; then run cp /usr/etc/pam.d/sudo "$sudo_file"; fi
+  if [ ! -e "$sudo_file" ] && [ "$DRY_RUN" = 0 ]; then
+    echo "no /etc/pam.d/sudo: add '$include' above the password module of your sudo PAM service" >&2
+    return
+  fi
+  if [ "$DRY_RUN" = 0 ] && grep -qxF "$include" "$sudo_file"; then return; fi
+  run cp -n "$sudo_file" "$sudo_file.openhello.bak"
+  run sed -i "0,/^\(auth\|@include\)[[:space:]]/s//$include\n&/" "$sudo_file"
+}
+
 run install -m 0644 "$REPO/packaging/io.openhello.Biometrics1.conf" /usr/share/dbus-1/system.d/io.openhello.Biometrics1.conf
 run install -m 0644 "$REPO/crates/openhellod/io.openhello.Biometrics1.policy" /usr/share/polkit-1/actions/io.openhello.Biometrics1.policy
 run install -m 0644 "$REPO/packaging/openhellod.service" /etc/systemd/system/openhellod.service
@@ -142,8 +192,11 @@ if [ "$CALIBRATED" = 1 ] && [ "$DRY_RUN" = 0 ]; then
   printf '{"models_dir": "%s", "calibration_path": "%s"}\n' "$MODELS_DIR" "$CALIBRATION_FILE" > "$CONF_DIR/engine.json"
 fi
 
+install_sudo_login
+
 run systemctl daemon-reload
 run systemctl reload dbus 2>/dev/null || true
+run systemctl enable --now openhello-keyd 2>/dev/null || true
 
 if [ "$CALIBRATED" = 1 ]; then
   run systemctl enable --now openhellod 2>/dev/null || true

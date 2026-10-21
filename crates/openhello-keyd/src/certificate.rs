@@ -6,11 +6,13 @@ use std::path::Path;
 use sha2::{Digest, Sha256};
 
 use crate::tpm::failure;
-use crate::KeydError;
+use crate::{KeydConfig, KeydError};
 
 pub(crate) const DEFAULT_MAPFILE: &str = "/etc/openhello/pkcs11-subject-map";
 const MAPPING_SEPARATOR: &str = " -> ";
 const MAPFILE_MODE: u32 = 0o644;
+const NSS_DIR_MODE: u32 = 0o755;
+const NSS_TRUST_FLAGS: &str = "CT,C,C";
 const SECP256R1_SPKI_PREFIX: [u8; 26] = [
     0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a,
     0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00,
@@ -262,6 +264,115 @@ pub(crate) fn remove_mapping(path: &Path, uid: u32) -> Result<(), KeydError> {
     write_atomically(path, &kept)
 }
 
+fn nss_spec(dir: &Path) -> String {
+    format!("sql:{}", dir.display())
+}
+
+fn certificate_body(pem_text: &str) -> String {
+    pem_text
+        .lines()
+        .filter(|l| !l.starts_with("-----"))
+        .flat_map(str::split_whitespace)
+        .collect()
+}
+
+fn share_nss_database(dir: &Path) -> Result<(), KeydError> {
+    let io = |e: std::io::Error| failure("sharing the NSS database", &e.to_string(), &[]);
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(NSS_DIR_MODE)).map_err(io)?;
+    for entry in std::fs::read_dir(dir).map_err(io)?.flatten() {
+        if entry.file_type().is_ok_and(|t| t.is_file()) {
+            std::fs::set_permissions(entry.path(), std::fs::Permissions::from_mode(MAPFILE_MODE))
+                .map_err(io)?;
+        }
+    }
+    Ok(())
+}
+
+fn certutil_must(config: &KeydConfig, context: &str, args: &[&str]) -> Result<(), KeydError> {
+    let output = config.certutil(args)?;
+    if output.success {
+        return Ok(());
+    }
+    Err(failure(context, output.stderr.trim(), &[]))
+}
+
+// pam_pkcs11 only accepts the self-signed certificate as a trusted CA in a root-owned NSS database it can read.
+pub(crate) fn import_trusted(
+    config: &KeydConfig,
+    uid: u32,
+    certificate_pem: &str,
+) -> Result<(), KeydError> {
+    let Some(dir) = &config.nss_dir else {
+        return Ok(());
+    };
+    let spec = nss_spec(dir);
+    let io = |e: std::io::Error| failure("preparing the NSS database", &e.to_string(), &[]);
+    if !dir.join("cert9.db").exists() {
+        std::fs::create_dir_all(dir).map_err(io)?;
+        certutil_must(
+            config,
+            "creating the NSS database",
+            &["-N", "-d", &spec, "--empty-password"],
+        )?;
+    }
+    let nickname = subject_name(uid);
+    let listed = config.certutil(&["-L", "-d", &spec, "-n", &nickname, "-a"])?;
+    if listed.success {
+        if certificate_body(&listed.stdout) == certificate_body(certificate_pem) {
+            return share_nss_database(dir);
+        }
+        certutil_must(
+            config,
+            "replacing the trusted certificate",
+            &["-D", "-d", &spec, "-n", &nickname],
+        )?;
+    }
+    let staged = dir.join(format!("{nickname}.pem.tmp"));
+    let _ = std::fs::remove_file(&staged);
+    std::fs::write(&staged, certificate_pem).map_err(io)?;
+    let imported = certutil_must(
+        config,
+        "importing the trusted certificate",
+        &[
+            "-A",
+            "-d",
+            &spec,
+            "-n",
+            &nickname,
+            "-t",
+            NSS_TRUST_FLAGS,
+            "-i",
+            &staged.to_string_lossy(),
+        ],
+    );
+    let _ = std::fs::remove_file(&staged);
+    imported?;
+    share_nss_database(dir)
+}
+
+pub(crate) fn remove_trusted(config: &KeydConfig, uid: u32) -> Result<(), KeydError> {
+    let Some(dir) = &config.nss_dir else {
+        return Ok(());
+    };
+    if !dir.join("cert9.db").exists() {
+        return Ok(());
+    }
+    let spec = nss_spec(dir);
+    let nickname = subject_name(uid);
+    if !config
+        .certutil(&["-L", "-d", &spec, "-n", &nickname])?
+        .success
+    {
+        return Ok(());
+    }
+    certutil_must(
+        config,
+        "removing the trusted certificate",
+        &["-D", "-d", &spec, "-n", &nickname],
+    )?;
+    share_nss_database(dir)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,6 +384,14 @@ mod tests {
             "-----BEGIN CERTIFICATE-----\naGVsbG8=\n-----END CERTIFICATE-----\n"
         );
         assert!(pem(&[0xff; 100]).lines().nth(1).unwrap().len() == 64);
+    }
+
+    #[test]
+    fn certificate_bodies_compare_without_wrapping_or_headers() {
+        let wrapped = "-----BEGIN CERTIFICATE-----\nAAAA\nBBBB\n-----END CERTIFICATE-----\n";
+        let flat = "-----BEGIN CERTIFICATE-----\nAAAABBBB\n-----END CERTIFICATE-----\n";
+        assert_eq!(certificate_body(wrapped), certificate_body(flat));
+        assert_ne!(certificate_body(wrapped), certificate_body("AAAAB"));
     }
 
     #[test]

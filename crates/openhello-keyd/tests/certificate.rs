@@ -184,6 +184,75 @@ fn purge_removes_the_certificate_and_only_its_own_mapping_line() {
     assert!(protectors.keyd().certificate(3005).is_ok());
 }
 
+fn certutil(rig: &Rig, database: &Path, args: &[&str]) -> std::process::Output {
+    Command::new(rig.prefix.join("usr/bin/certutil"))
+        .args(["-d", &format!("sql:{}", database.display())])
+        .args(args)
+        .env("LD_LIBRARY_PATH", rig.prefix.join("usr/lib64"))
+        .output()
+        .expect("certutil from the prefix must run (mozilla-nss-tools)")
+}
+
+fn protectors_config(rig: &Rig, database: &Path) -> openhello_keyd::KeydConfig {
+    let mut config = rig.config.clone();
+    config.nss_dir = Some(database.to_path_buf());
+    config
+}
+
+#[test]
+fn provisioning_trusts_the_certificate_in_a_readable_nss_database_and_purge_removes_it() {
+    let rig = rig();
+    let dir = tempfile::tempdir().unwrap();
+    let database = dir.path().join("nssdb");
+    let protectors = Protectors::new(protectors_config(&rig, &database)).unwrap();
+    protectors.provision_protectors(3008).unwrap();
+    protectors.provision_protectors(3009).unwrap();
+
+    let listing =
+        |database: &Path| String::from_utf8(certutil(&rig, database, &["-L"]).stdout).unwrap();
+    let line = |text: &str, uid: u32| {
+        text.lines()
+            .find(|l| l.starts_with(&format!("openhello-uid-{uid}")))
+            .map(str::to_string)
+    };
+    let text = listing(&database);
+    assert!(
+        line(&text, 3008).is_some_and(|l| l.trim_end().ends_with("CT,C,C")),
+        "{text}"
+    );
+    assert!(line(&text, 3009).is_some(), "{text}");
+
+    let trusted = certutil(&rig, &database, &["-L", "-n", "openhello-uid-3008", "-a"]);
+    let issued = pem_of(&protectors.keyd().certificate(3008).unwrap());
+    let body = |pem: &[u8]| {
+        String::from_utf8_lossy(pem)
+            .lines()
+            .filter(|l| !l.starts_with("-----"))
+            .collect::<String>()
+    };
+    assert_eq!(body(&trusted.stdout), body(&issued));
+    assert_eq!(std::fs::metadata(&database).unwrap().mode() & 0o7777, 0o755);
+    for entry in std::fs::read_dir(&database).unwrap().flatten() {
+        assert_eq!(entry.metadata().unwrap().mode() & 0o7777, 0o644);
+    }
+
+    let keyd = Keyd::new(protectors_config(&rig, &database));
+    keyd.provision(3010, &secret()).unwrap();
+    keyd.provision(3010, &secret()).unwrap();
+    let twice = listing(&database);
+    let entries = twice
+        .lines()
+        .filter(|l| l.starts_with("openhello-uid-3010"))
+        .count();
+    assert_eq!(entries, 1, "{twice}");
+
+    protectors.purge(3008).unwrap();
+    let after = listing(&database);
+    assert!(line(&after, 3008).is_none(), "{after}");
+    assert!(line(&after, 3009).is_some(), "{after}");
+    protectors.purge(3008).unwrap();
+}
+
 fn unlock(path: &Path, op: u8, payload: &[u8]) -> Option<Vec<u8>> {
     let mut stream = UnixStream::connect(path).unwrap();
     stream
