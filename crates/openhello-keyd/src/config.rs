@@ -44,6 +44,9 @@ impl DaemonConfig {
         if let Some(mapfile) = get("OPENHELLO_KEYD_MAPFILE") {
             keyd.mapfile = PathBuf::from(mapfile);
         }
+        if let Some(dir) = get("OPENHELLO_KEYD_AUTH_DIR") {
+            keyd.auth_dir = PathBuf::from(dir);
+        }
         keyd.prefix = get("OPENHELLO_TPM2_PKCS11_PREFIX").map(PathBuf::from);
         keyd.module = get("OPENHELLO_TPM2_PKCS11_MODULE").map(PathBuf::from);
         keyd.nss_dir = get("OPENHELLO_KEYD_NSS_DIR").map(PathBuf::from);

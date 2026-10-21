@@ -87,6 +87,7 @@ pub struct KeydConfig {
     pub module: Option<PathBuf>,
     pub env: Vec<(String, String)>,
     pub mapfile: PathBuf,
+    pub auth_dir: PathBuf,
     pub nss_dir: Option<PathBuf>,
     pub certutil: Option<PathBuf>,
     pub user_name: Option<fn(u32) -> Option<String>>,
@@ -101,6 +102,7 @@ impl KeydConfig {
             module: None,
             env: Vec::new(),
             mapfile: PathBuf::from(crate::certificate::DEFAULT_MAPFILE),
+            auth_dir: PathBuf::from(crate::auth_keys::DEFAULT_AUTH_DIR),
             nss_dir: None,
             certutil: None,
             user_name: None,
@@ -122,6 +124,9 @@ impl KeydConfig {
         if let Some(mapfile) = std::env::var_os("OPENHELLO_KEYD_MAPFILE").filter(|v| !v.is_empty())
         {
             config.mapfile = PathBuf::from(mapfile);
+        }
+        if let Some(dir) = std::env::var_os("OPENHELLO_KEYD_AUTH_DIR").filter(|v| !v.is_empty()) {
+            config.auth_dir = PathBuf::from(dir);
         }
         config.prefix = std::env::var_os("OPENHELLO_TPM2_PKCS11_PREFIX")
             .filter(|v| !v.is_empty())

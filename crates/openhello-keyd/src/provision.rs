@@ -83,6 +83,7 @@ impl Keyd {
             self.ensure_certificate(&guard, &label, &key, &dump, secret)?;
             self.trust_certificate(&guard, &label, &key, uid)?;
             upsert_mapping(&self.config.mapfile, uid, &user)?;
+            crate::auth_keys::write_public_key(&self.config.auth_dir, uid, &key.public_key)?;
             return Ok(Provisioned {
                 key,
                 created: false,
@@ -126,6 +127,7 @@ impl Keyd {
             self.ensure_certificate(&guard, &label, &key, &dump, secret)?;
             self.trust_certificate(&guard, &label, &key, uid)?;
             upsert_mapping(&self.config.mapfile, uid, &user)?;
+            crate::auth_keys::write_public_key(&self.config.auth_dir, uid, &key.public_key)?;
             Ok(key)
         })();
         match outcome {
