@@ -75,6 +75,10 @@ the first decision instead of capturing a fixed burst:
 
 ## Testing approach
 
+Live check on the target hardware (VM with the camera passed through, 2026-10-20): two people enrolled under
+different UIDs; each verified and identified as themselves 10/10 and was rejected against the other's template
+10/10 (AC-005 to AC-008). Decisions take ~0.2 s with a warm camera and ~1 s on a cold start.
+
 - **TPM**: tests run against `swtpm` (software TPM), never the host's physical TPM.
 - **Camera**: tests run against recorded IR-frame fixtures captured from the developer's own camera (see
   `tests/fixtures/`), never a live camera and never a third-party dataset (licensing — see architecture
