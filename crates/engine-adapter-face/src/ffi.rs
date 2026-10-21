@@ -26,7 +26,6 @@ pub fn build_engine(config: &EngineConfig) -> Result<Engine, EngineError> {
     use crate::embedding::ort_backend::AuraFaceEmbedder;
     use crate::enrollment_quality::EnrollmentConfig;
     use crate::far_calibration::FarCalibration;
-    use crate::liveness::LivenessConfig;
     use crate::matching::Matcher;
 
     let models = Path::new(&config.models_dir);
@@ -37,7 +36,6 @@ pub fn build_engine(config: &EngineConfig) -> Result<Engine, EngineError> {
         Box::new(AuraFaceEmbedder::load(&models.join("glintr100.onnx"))?),
         Matcher::new(FarCalibration::from_bytes(&calibration_bytes)?),
         EnrollmentConfig::default(),
-        LivenessConfig::default(),
     ))
 }
 
