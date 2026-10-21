@@ -155,8 +155,7 @@
 - Effort: high
 - Notes: first step of owner decision ASM-014. Provision writes the user's P-256 public key (SEC1 or SPKI PEM) to `/etc/openhello/auth/<uid>.pub` (root-owned, 0644, atomic, idempotent; directory configurable by `OPENHELLO_KEYD_AUTH_DIR` for tests); Purge removes it. New keyd operation: given a 32-byte challenge from the caller, keyd takes the grant that the ticket created for that uid, logs in to the token internally, signs a domain-separated hash (`"openhello-pam-v1" || uid || challenge`) with the TPM key and returns the 64-byte signature; no grant, no signature; one use per grant; private key and K never leave keyd. The challenge always comes from the verifier (the PAM module) and keyd signs only for the uid of the grant (the Windows counterpart is the registered key credential, `msDS-KeyCredentialLink` or the Entra registration). Include the PAM service name in the signed bytes.
 
-## T-035 — pam_openhello verifies the signature itself; stacks drop pam_pkcs11 [pending]
-
+## T-035 — pam_openhello verifies the signature itself; stacks drop pam_pkcs11 [done]
 - Refs: AC-027, AC-029, AC-030
 - Files: crates/openhello-pam/Cargo.toml, crates/openhello-pam/src/lib.rs, crates/openhello-pam/src/challenge.rs, packaging/pam/sudo-openhello, packaging/pam/openhello-lockscreen, packaging/pam/openhello-common-auth, crates/openhello-cli/tests/pam_sudo.rs, crates/openhello-cli/Cargo.toml, Cargo.lock
 - Model: claude-sonnet-5
