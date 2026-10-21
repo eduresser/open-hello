@@ -97,29 +97,17 @@ that template data stays confidential and any tampering is detected rather than 
 
 ### US-005 — IR capture with the emitter active
 
-As the system, I want the Sensor Adapter to activate the IR illuminator before capturing frames, so that
-matching and liveness run against a trustworthy IR signal instead of one lit only by ambient light.
+As the system, I want the Sensor Adapter to return only IR-illuminated frames, whatever the camera model, so
+that matching runs against a trustworthy IR signal instead of one lit only by ambient light.
 
-#### AC-011 — Capture activates the IR emitter before returning frames
+#### AC-011 — Capture returns only illuminated frames
 
 - **Given** the IR camera node is available
 - **When** a capture session begins
-- **Then** the emitter activation control is issued before the first frame is returned, and a failure to
-  activate it is surfaced as an explicit error rather than silently returning unlit frames
-
-### US-006 — Basic liveness heuristic against flat-photo spoofing
-
-As the system, I want a lightweight liveness check based on micro-motion and focus variance across a short
-frame burst, so that a printed photo or a phone/monitor replay is rejected — a documented, intentionally
-weaker substitute for Windows' hardware-isolated "Enhanced Sign-in Security".
-
-#### AC-012 — A flat printed/screen photo fails the liveness check
-
-- **Given** liveness checking is enabled
-- **When** a flat photo (printed or shown on a screen) is presented instead of a live face, across a short
-  capture burst
-- **Then** the liveness heuristic detects the lack of natural micro-motion/focus variance and rejects it,
-  independent of the embedding match score
+- **Then** every frame returned is IR-illuminated: a camera that already illuminates (steadily or by
+  alternating lit/unlit frames) is left untouched and its unlit frames are dropped; a camera whose stream is
+  dark gets its emitter control activated (Microsoft face-auth control, or a configured vendor control) and
+  verified; if illumination cannot be established, an explicit error is surfaced rather than unlit frames
 
 ### US-007 — Authorization on sensitive biometric operations
 
@@ -163,19 +151,22 @@ logs, so that debugging or crash output cannot leak my biometric data.
 - The one-shot consent API (`io.openhello.ConsentVerifier1`) (roadmap v3).
 - Fingerprint Sensor/Engine Adapter via `fprintd` (roadmap v3, no hardware available to validate today).
 - TPM key backup/recovery code generation and verification (roadmap v1b, lives in `openhello-keyd`).
-- Greeter (GDM/SDDM) UX and anti-spoof hardening beyond the v1a heuristic (roadmap v2).
+- Anti-spoofing of any kind (printed photos, screens, masks). Accepted risk in v1a, see ASM-005; the planned
+  mitigation is an appearance classifier on the lit/unlit IR pair, trained on captures from the target camera.
+- Greeter (GDM/SDDM) UX (roadmap v2).
 
 ## Assumptions
 
 | ID | Assumption | Status | Resolution |
 |---|---|---|---|
-| ASM-001 | AuraFace (`glintr100`, IResNet100+ArcFace) run zero-shot on grayscale-as-3-channel IR input reaches acceptable accuracy on this camera without fine-tuning, within the ~2-week evaluation budget; SFace is the fallback before a Howdy-style approach. | open | — |
+| ASM-001 | AuraFace (`glintr100`, IResNet100+ArcFace) run zero-shot on grayscale-as-3-channel IR input reaches acceptable accuracy on this camera without fine-tuning, within the ~2-week evaluation budget; SFace is the fallback before a Howdy-style approach. | open | Partial evidence on `2b7e:c757` (2026-10-20, two enrolled people, 60 attempts, frame-by-frame decision at target FAR 1e-5): each person verified 10/10 and identified 10/10 as themselves, and the other person's template was rejected 10/10 in both directions. Two people on one camera do not measure FAR or accuracy; kept open until more people are tested. |
 | ASM-002 | The provisional enrollment protocol values (6 yaw buckets, 60s timeout, 3 attempts) are adjustable defaults, not final UX-tuned numbers. | confirmed | Accepted as provisional in the architecture grilling session; revisit after real usage data from this feature. |
 | ASM-003 | `Identify`/`Verify` match results are keyed by Linux UID, matching the Storage Adapter's per-UID template layout already decided in the architecture docs. | open | — |
-| ASM-004 | The IR emitter's UVC Extension Unit activation payload (GUID `63610682-5070-49ab-b8cc-b3855e8d221d`) for this camera will be discovered via `linux-enable-ir-emitter` before AC-011 is implemented; not yet executed. | open | — |
+| ASM-004 | Illumination of the IR emitter can be established generically, without a per-model payload. | confirmed | This camera (`2b7e:c757`) alternates lit/unlit frames by default (measured mean luma ~7 vs ~60); the Microsoft XU `{0f3f95dc-2632-4c4e-92c9-a04782f43bc8}` (selector 6, face-auth) reports mode 2 as current/default/maximum. The Sensor Adapter reads that control by GUID, writes it only when the stream is dark and `OPENHELLO_IR_EMITTER_ALLOW_WRITE=1`, and falls back to a vendor XU from `OPENHELLO_IR_EMITTER`. Vendor GUID `63610682-…` is not needed. Write path untested on hardware; some cameras are reported to hang on writes. |
+| ASM-005 | A printed photo of an enrolled user can be accepted by `Verify`/`Identify` in v1a. | confirmed | Accepted by the product owner. The micro-motion gate was removed after measurement on `2b7e:c757`: it rejected 39% of 10-frame windows of a still real face and only 15% of a propped small photo, because landmark jitter normalized by eye distance grows for small faces. Screens are already blank in IR. Laser prints are a known weakness of NIR systems (Idiap, 97-100% success). |
 
 ## Open questions
 
 | ID | Question | Status | Answer |
 |---|---|---|---|
-| Q-001 | Which liveness heuristic should AC-012 implement? | answered | Micro-motion + focus-variance across a short frame burst (confirmed by product owner; reflectance-falloff and moiré-detection deferred to v2 hardening). |
+| Q-001 | Which liveness heuristic should AC-012 implement? | dropped | No heuristic in v1a. Micro-motion was measured on the target camera and removed (ASM-005); an IR-appearance classifier needs own spoof captures and a sensor change to deliver the unlit frame. |
