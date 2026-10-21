@@ -85,7 +85,7 @@
 
 ## T-023 — Lock screen verification [in-progress]
 - Refs: AC-028
-- Files: packaging/pam/openhello-lockscreen, packaging/pam/openhello-common-auth, .spec/features/credential-login-v1b/lockscreen.md, scripts/install.sh, scripts/pam-survey.sh, crates/openhello-pam/src/lib.rs, crates/openhello-pkcs11/src/config.rs, crates/openhello-cli/tests/pam_sudo.rs
+- Files: packaging/pam/openhello-lockscreen, packaging/pam/pam-services, .spec/features/credential-login-v1b/lockscreen.md, scripts/install.sh, scripts/pam-survey.sh, crates/openhello-pam/src/lib.rs, crates/openhello-pkcs11/src/config.rs, crates/openhello-cli/tests/pam_sudo.rs
 - Model: claude-sonnet-5
 - Effort: medium
 - Notes: delivered 2026-10-21 (generic lock-screen PAM service, survey script, guide); stays in-progress until the manual check proves AC-028. Depends on T-025. Manual check on the Plasma session (ASM-011), recorded as evidence; an unprivileged PAM test through the `kde` service file covers the same path in CI.
@@ -157,7 +157,7 @@
 
 ## T-035 — pam_openhello verifies the signature itself; stacks drop pam_pkcs11 [done]
 - Refs: AC-027, AC-029, AC-030
-- Files: crates/openhello-pam/Cargo.toml, crates/openhello-pam/src/lib.rs, crates/openhello-pam/src/challenge.rs, packaging/pam/sudo-openhello, packaging/pam/openhello-lockscreen, packaging/pam/openhello-common-auth, crates/openhello-cli/tests/pam_sudo.rs, crates/openhello-cli/Cargo.toml, Cargo.lock
+- Files: crates/openhello-pam/Cargo.toml, crates/openhello-pam/src/lib.rs, crates/openhello-pam/src/challenge.rs, packaging/pam/sudo-openhello, packaging/pam/openhello-lockscreen, packaging/pam/pam-services, crates/openhello-cli/tests/pam_sudo.rs, crates/openhello-cli/Cargo.toml, Cargo.lock
 - Model: claude-sonnet-5
 - Effort: xhigh
 - Notes: depends on T-034. `pam_openhello` generates the challenge (getrandom), asks openhellod `Verify` (4 s ceiling as in T-022), asks keyd to sign, verifies with the root-owned public key (pure Rust P-256, no OpenSSL or NSS), and returns SUCCESS only on a valid signature; every other outcome falls through as today (IGNORE/AUTH_ERR to the password). Same silence for users without a credential and for ssh/allowlist rules. The packaged stacks lose their `pam_pkcs11` lines. The tests no longer need `pam_pkcs11`, so they run the same on every distribution. Keep the `// @spec` proofs of AC-027, AC-029 and AC-030 passing. The verification runs inside the PAM process (accepted trade-off, ASM-014); a missing public key, or one not owned by root, makes the module return `PAM_IGNORE`.
@@ -171,7 +171,7 @@
 
 ## T-037 — Installer uses neutral locations, discovers third-party paths and checks capabilities [done]
 - Refs: AC-016
-- Files: scripts/install.sh, packaging/openhellod.service, packaging/openhello-keyd.service, packaging/pam/openhello-common-auth, crates/openhello-cli/tests/pam_sudo.rs
+- Files: scripts/install.sh, packaging/openhellod.service, packaging/openhello-keyd.service, packaging/pam/pam-services, crates/openhello-cli/tests/pam_sudo.rs
 - Model: claude-sonnet-5
 - Effort: medium
 - Notes: owner rule (2026-10-21): no per-distro or per-desktop code unless unavoidable. Units to `/usr/lib/systemd/system`, D-Bus policy to `/usr/share/dbus-1/system.d`, polkit actions to `/usr/share/polkit-1/actions`, daemon directory written into the units by template, PAM directory from `dirname $(ldconfig -p | awk '/libpam\.so\.0/{print $NF; exit}')/security`; no `/etc/systemd/system` or `/etc/dbus-1` branches. The installer no longer installs packages: every `apt`, `dnf`, `zypper` and `pacman` branch goes, replaced by a capability check (`command -v tpm2_createprimary tpm2_ptool`, `python3 -c "import tpm2_pkcs11"`, a loader-cache probe for the TPM and PKCS#11 libraries, `polkitd` and a system bus) that prints what is missing as capabilities, never package names. The KDE-only `kde-face` code and the common-stack snippet (`openhello-common-auth`) are removed; the dependency lists drop `libpam-pkcs11`, `libnss3-tools` and the NSS paths (ASM-014); the `sed` edit of `/etc/pam.d/sudo` is replaced by T-038.
