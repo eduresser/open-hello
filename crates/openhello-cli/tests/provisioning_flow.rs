@@ -187,3 +187,38 @@ fn enroll_reports_a_provision_failure_when_the_keyd_is_not_on_the_bus() {
     );
     assert_eq!(outcome.exit_code(), 4);
 }
+
+// @covers:AC-016-cli
+#[test]
+fn provision_command_creates_the_key_for_an_enrolled_user_and_refuses_a_second_run() {
+    let rig = rig();
+    let protectors = Arc::new(Protectors::new(rig.config.clone()).unwrap());
+    let bus = PrivateBus::start();
+    serve(&bus, protectors.clone());
+    let mut keys = KeydClient::on_address(&bus.address).unwrap();
+    let uid = unsafe { libc::getuid() };
+    let mut run = || {
+        let mut out = Vec::new();
+        let mut biometrics = CompletedEnrollment;
+        let mut typed = TypedPins(vec![]);
+        let mut services = Services {
+            biometrics: &mut biometrics,
+            keys: &mut keys,
+            pins: &mut typed,
+        };
+        let outcome = execute(&mut services, Command::Provision { uid }, &mut out);
+        (outcome, String::from_utf8(out).unwrap())
+    };
+
+    let (outcome, output) = run();
+    assert_eq!(outcome, Outcome::Success, "{output}");
+    let code = output.lines().last().unwrap();
+    assert_eq!(code.len(), 32);
+    assert!(protectors.unlock_with_recovery(uid, code).is_ok());
+
+    let (again, output) = run();
+    assert!(matches!(again, Outcome::ProvisionFailed(_)), "{again:?}");
+    assert!(!output.contains(code));
+
+    protectors.purge(uid).unwrap();
+}

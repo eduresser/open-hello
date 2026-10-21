@@ -17,7 +17,7 @@ pub use ticket_socket::{
     TicketSocket, TicketSocketConfig, OP_TICKET, OP_TICKET_KEY, STATUS_ACCEPTED, STATUS_REFUSED,
 };
 pub use token_socket::*;
-pub use tpm::KeydConfig;
+pub use tpm::{resolve_module, KeydConfig};
 pub use unlock_socket::{UnlockSocket, UnlockSocketConfig, OP_UNLOCK_FOR_UID, OP_UNLOCK_RECOVERY};
 
 use openhello_ticket::TicketError;
