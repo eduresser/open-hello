@@ -83,7 +83,7 @@
 - Effort: xhigh
 - Notes: depends on T-022; must run before T-023. The lock screen runs as the user and cannot open the root-owned token (the `sudo` path works only because it is root). Decision (owner, 2026-10-21): the wrapper in the user's process becomes a thin proxy; keyd (root) owns the real PKCS#11 session and signs, as in Windows Hello where the key never leaves the service. The Protector secret K stops crossing the socket: the world-accessible unlock socket no longer returns K. AC-019, AC-025 and AC-027 must keep passing through the proxy.
 
-## T-023 — KDE lock screen verification [in-progress]
+## T-023 — Lock screen verification [in-progress]
 - Refs: AC-028
 - Files: packaging/pam/openhello-lockscreen, packaging/pam/openhello-common-auth, .spec/features/credential-login-v1b/lockscreen.md, scripts/install.sh, scripts/pam-survey.sh, crates/openhello-pam/src/lib.rs, crates/openhello-pkcs11/src/config.rs, crates/openhello-cli/tests/pam_sudo.rs
 - Model: claude-sonnet-5
@@ -215,8 +215,7 @@
 - Effort: medium
 - Notes: delivered 2026-10-21 (commit f69049d, tests green); stays in-progress until the lock-screen test on the VM proves AC-028. Found on the KDE neon VM (2026-10-21). In the real KDE lock screen the module reached no `Verify` at all, while the same module, run as the same user against the `kde` service from a test client, authenticated in 1.36 s. Likely cause, unconfirmed: the greeter is started by kwin with the compositor connection passed as a file descriptor (`WAYLAND_SOCKET`) and without `DISPLAY` or `WAYLAND_DISPLAY`, so the "local session" gate says no. Three changes. (1) A `debug` module argument makes every early exit (remote, not local, service not allowed, no credential file, files untrusted, openhellod or keyd unavailable, face refused, bad signature, success) write one syslog line (`LOG_AUTHPRIV`) with a reason code and the service name only, never a challenge, signature, key or user secret; it stays off by default. (2) Locality becomes: remote if `PAM_RHOST` or `SSH_CONNECTION`; local if `PAM_TTY`, `DISPLAY`, `WAYLAND_DISPLAY`, `WAYLAND_SOCKET` or `XDG_SESSION_TYPE` in {wayland, x11, mir}, or if the process's logind session (from `/proc/self/cgroup`, `session-<id>.scope`, then `/run/systemd/sessions/<id>`) reports `REMOTE=0`; no libsystemd dependency, and every probe is skipped quietly when its source does not exist. (3) The module declares `libpam.so.0` as a dependency (`cargo:rustc-cdylib-link-arg=-l:libpam.so.0`, no development package needed) because it failed with `undefined symbol: pam_get_item` when the host loaded libpam privately; a test asserts the built module lists `libpam.so.0` as needed.
 
-## T-043 — Enable the module once in the common auth stack; the installer does it by default [pending]
-
+## T-043 — Enable the module once in the common auth stack; the installer does it by default [done]
 - Refs: AC-027, AC-028
 - Files: crates/openhello-cli/src/pam_enable.rs, crates/openhello-cli/src/main.rs, crates/openhello-cli/tests/pam_enable.rs, scripts/install.sh, packaging/pam/pam-services
 - Model: claude-sonnet-5

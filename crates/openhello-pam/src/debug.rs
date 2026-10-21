@@ -89,10 +89,10 @@ mod tests {
         for reason in Reason::ALL {
             let lines = RefCell::new(Vec::new());
             let sink = |l: &str| lines.borrow_mut().push(l.to_string());
-            report(true, &sink, reason, "kde");
+            report(true, &sink, reason, "sudo");
             assert_eq!(
                 *lines.borrow(),
-                vec![format!("reason={} service=kde", reason.code())]
+                vec![format!("reason={} service=sudo", reason.code())]
             );
         }
     }
@@ -103,7 +103,7 @@ mod tests {
         let lines = RefCell::new(Vec::new());
         let sink = |l: &str| lines.borrow_mut().push(l.to_string());
         for reason in Reason::ALL {
-            report(false, &sink, reason, "kde");
+            report(false, &sink, reason, "sudo");
         }
         assert!(lines.borrow().is_empty());
     }

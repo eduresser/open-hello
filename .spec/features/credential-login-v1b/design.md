@@ -13,7 +13,7 @@ crates/
   openhello-keyd/        # binary: root-only key daemon, D-Bus io.openhello.Keyd1, TPM key + Protectors
   openhello-pkcs11/      # cdylib: PKCS#11 wrapper over tpm2-pkcs11 that overrides only C_Login
 packaging/
-  io.openhello.Keyd1.conf, openhello-keyd.service, pam/ (sudo + kde stack snippets)
+  io.openhello.Keyd1.conf, openhello-keyd.service, pam/ (allowlist of services)
 ```
 
 ## Components
@@ -47,7 +47,7 @@ packaging/
   placeholder to keyd, which finishes the login. Several virtual sessions share one real session in keyd.
   Raw templates or embeddings are never accepted (AC-024). The direct path that loaded `tpm2-pkcs11` in the
   caller and received K over the unlock socket was removed: it cannot work without K crossing the socket.
-- **PAM** — `pam_pkcs11` configured against `openhello-pkcs11` for the `sudo` and KDE lock-screen services,
+- **PAM** — `pam_pkcs11` configured against `openhello-pkcs11` in the common auth stack (allowlisted services such as `sudo` and screen lockers),
   marked `sufficient` and placed before `pam_unix`, so any failure, timeout or missing daemon falls through
   to the Linux password (AC-029/030). A PAM text line shows "Looking for your face..." (Q-003).
 
@@ -85,12 +85,12 @@ packaging/
 ## Order of work and risk
 
 The spike (T-014) proved on `swtpm` that `tpm2-pkcs11` + `pam_pkcs11` + a `C_Login` override work with P-256, so
-the design stands. Still unproven: the physical TPM, the real `sudo` stack and the KDE lock screen (ASM-011).
+the design stands. Still unproven: the physical TPM, the real `sudo` stack and other lockers (ASM-011).
 
 ## Testing approach
 
 - **TPM**: `swtpm`, never the physical TPM (same rule as `face-recognition-proof`).
 - **Faces**: `openhellod` is replaced by a test ticket issuer; live face checks reuse the recorded-frame fixtures.
 - **PAM**: run `pamtester` against a private PAM service file in a temp dir, not the system `sudo` stack.
-- **Lock screen (AC-028)**: manual on the Plasma session, recorded as partial evidence like ASM-001 until a
+- **Lock screen (AC-028)**: manual on a desktop session, recorded as partial evidence like ASM-001 until a
   scripted check exists.
