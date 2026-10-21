@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Installs open-hello on a fresh Linux VM: dependencies, build, files, D-Bus/polkit/systemd integration.
 # Also wires `sudo` to face/PIN login (pam_pkcs11 + TPM key); certutil (nss-tools) is required by openhello-keyd to trust the key certificate.
-# usage: sudo scripts/install.sh [--dry-run] [--no-deps] [--calibration-images DIR | --calibration-url URL]
+# usage: sudo scripts/install.sh [--dry-run] [--no-deps] [--calibration-images DIR | --calibration-url URL]  (calibration options are an optional override of the built-in FAR calibration)
 set -euo pipefail
 
 DRY_RUN=0
@@ -227,10 +227,24 @@ ensure_env() {
 ensure_env OPENHELLO_KEYD_TICKET_SOCKET /run/openhello/keyd-ticket.sock
 ensure_env OPENHELLO_KEYD_PURGE_BUS system
 
-CALIBRATED=0
-if [ -f "$CALIBRATION_FILE" ] || calibrate; then CALIBRATED=1; fi
-if [ "$CALIBRATED" = 1 ] && [ "$DRY_RUN" = 0 ]; then
-  printf '{"models_dir": "%s", "calibration_path": "%s"}\n' "$MODELS_DIR" "$CALIBRATION_FILE" > "$CONF_DIR/engine.json"
+CALIBRATION_OVERRIDE=0
+if [ -f "$CALIBRATION_FILE" ]; then
+  CALIBRATION_OVERRIDE=1
+elif [ -n "$CALIBRATION_IMAGES$CALIBRATION_URL" ]; then
+  if calibrate; then
+    CALIBRATION_OVERRIDE=1
+  else
+    echo "Calibration override failed; continuing with the built-in FAR calibration." >&2
+  fi
+fi
+if [ "$DRY_RUN" = 0 ]; then
+  if [ "$CALIBRATION_OVERRIDE" = 1 ]; then
+    printf '{"models_dir": "%s", "calibration_path": "%s"}\n' "$MODELS_DIR" "$CALIBRATION_FILE" > "$CONF_DIR/engine.json"
+  else
+    printf '{"models_dir": "%s"}\n' "$MODELS_DIR" > "$CONF_DIR/engine.json"
+  fi
+else
+  echo "+ write $CONF_DIR/engine.json (models_dir$([ "$CALIBRATION_OVERRIDE" = 1 ] && echo ", calibration_path=$CALIBRATION_FILE"))"
 fi
 
 install_sudo_login
@@ -239,20 +253,9 @@ run systemctl daemon-reload
 run systemctl reload dbus 2>/dev/null || true
 run systemctl enable openhello-keyd 2>/dev/null || true
 run systemctl restart openhello-keyd 2>/dev/null || true
+run systemctl reset-failed openhellod 2>/dev/null || true
+run systemctl enable openhellod 2>/dev/null || true
+run systemctl restart openhellod 2>/dev/null || true
 
-if [ "$CALIBRATED" = 1 ]; then
-  run systemctl reset-failed openhellod 2>/dev/null || true
-  run systemctl enable openhellod 2>/dev/null || true
-  run systemctl restart openhellod 2>/dev/null || true
-  echo
-  echo "open-hello installed and started. Check OPENHELLO_DEVICE (the IR camera node) in $CONF_DIR/openhello.env"
-else
-  cat <<MSG
-
-open-hello installed (binaries, ONNX Runtime, models). The daemon is NOT started: no FAR calibration yet.
-Calibrate from a folder of face photos (one sub-folder per person) and start it:
-  sudo scripts/install.sh --no-deps --calibration-images /path/to/photos
-  (or --calibration-url URL of a .tar/.tgz/.zip archive with the same layout)
-Also check OPENHELLO_DEVICE (the IR camera node) in $CONF_DIR/openhello.env.
-MSG
-fi
+echo
+echo "open-hello installed and started. Check OPENHELLO_DEVICE (the IR camera node) in $CONF_DIR/openhello.env"

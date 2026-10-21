@@ -31,6 +31,15 @@ uv run python -m openhello_eval report --images-dir data/people --embeddings dat
 
 `MODELS` is the folder holding `yunet.onnx` and `glintr100.onnx`. The Python ONNX Runtime comes from `uv`; `openhello-calibrate` needs `ORT_DYLIB_PATH`.
 
+## Regenerate the default calibration
+
+The engine embeds `crates/engine-adapter-face/config/default_calibration.toml` and uses it when no external calibration is configured. An external file (TOML or OHC2) is an optional override: `scripts/install.sh --calibration-images DIR` or `--calibration-url URL` writes `/var/lib/openhello/calibration.bin` and adds `calibration_path` to `engine.json`.
+
+1. LFW (current default): follow the LFW workflow above; `openhello-calibrate` writes TOML by default (`--out data/calibration.toml`).
+2. Infrared captures (replaces LFW once available, ASM-001): put one sub-folder per person with the captured frames in a folder and run `openhello-calibrate --models-dir MODELS --images-dir CAPTURES --out data/calibration.toml`.
+3. Copy the result to `crates/engine-adapter-face/config/default_calibration.toml`, fill the `[provenance]` block (date, dataset, identities, pairs, model hashes) and run `cargo test -p engine-adapter-face`.
+4. Record the run in `.spec/features/credential-login-v1b/calibration-results.md` (host, duration, dataset, thresholds by FAR).
+
 ## Identity split
 
 - At least `enroll-shots + 2` photos: enrolled. The first `enroll-shots` photos form the template and the rest are probes.

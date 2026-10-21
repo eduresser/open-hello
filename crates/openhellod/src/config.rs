@@ -102,6 +102,20 @@ mod tests {
     }
 
     #[test]
+    fn engine_config_without_calibration_path_is_accepted_and_passed_through_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut command_line = args(&[], dir.path());
+        let engine_json = dir.path().join("engine.json");
+        std::fs::write(&engine_json, r#"{"models_dir": "/usr/share/openhello/models"}"#).unwrap();
+        let position = command_line.iter().position(|a| a == "--engine-config").unwrap();
+        command_line[position + 1] = engine_json.to_str().unwrap().to_string();
+        let config = Config::parse(command_line).unwrap();
+        let forwarded = std::fs::read_to_string(&config.engine_config).unwrap();
+        assert_eq!(forwarded, r#"{"models_dir": "/usr/share/openhello/models"}"#);
+        assert!(!forwarded.contains("calibration_path"));
+    }
+
+    #[test]
     fn rejects_invalid_values_with_context() {
         let dir = tempfile::tempdir().unwrap();
         for (extra, needle) in [
