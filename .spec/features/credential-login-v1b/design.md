@@ -42,6 +42,11 @@ packaging/
   marked `sufficient` and placed before `pam_unix`, so any failure, timeout or missing daemon falls through
   to the Linux password (AC-029/030). A PAM text line shows "Looking for your face..." (Q-003).
 
+## Findings before the PAM task
+
+- Certificate mapping must be root-owned: `pam_pkcs11`'s default mapper reads a file in the user's home, which would let any user authorize their own software key (T-024).
+- Under setuid `sudo` the keyd peer is root; a root peer names the target uid on the unlock socket (T-024). Module and socket paths come from root-owned config, never from the caller's environment (T-022).
+
 ## Flows
 
 - **Unlock**: PAM → `pam_pkcs11` → `C_Login` in `openhello-pkcs11` → `openhellod` `Verify` → ticket →
