@@ -134,8 +134,7 @@
 - Effort: low
 - Notes: found on the VM: `cp -a` over the ONNX Runtime libraries mapped by the running `openhellod` crashed it with SEGV on the next call, and `enable --now` left the old `openhello-keyd` running the previous binary. The installer stops both services before replacing files, copies libraries without writing into mapped files (`cp --remove-destination`), then restarts both. Debian and Ubuntu use `libtpm2-pkcs11-tools`.
 
-## T-032 — Token proxy accepts the search templates of the OpenSSL build of pam_pkcs11 [pending]
-
+## T-032 — Token proxy accepts the search templates of the OpenSSL build of pam_pkcs11 [done]
 - Refs: AC-027
 - Files: crates/openhello-keyd/src/token_socket.rs, crates/openhello-keyd/tests/token_proxy.rs, crates/openhello-cli/tests/pam_sudo.rs
 - Model: claude-sonnet-5
