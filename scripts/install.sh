@@ -246,5 +246,5 @@ run systemctl restart openhellod 2>/dev/null || true
 
 echo
 echo "open-hello installed and started. Check OPENHELLO_DEVICE (the IR camera node) in $CONF_DIR/openhello.env"
-echo "PAM module installed at $PAM_MODULE_DIR/pam_openhello.so; enable it per service with: openhello-cli pam enable sudo"
+echo "PAM module installed at $PAM_MODULE_DIR/pam_openhello.so; enable it per service with: sudo openhello-cli pam enable sudo (list with: openhello-cli pam status)"
 [ ! -d "$CONF_DIR/nssdb" ] || echo "$CONF_DIR/nssdb was created by an older installer and is no longer used; it can be deleted"

@@ -2,6 +2,7 @@ use std::io::Write;
 
 pub mod dbus_client;
 pub mod keyd_client;
+pub mod pam_enable;
 pub mod terminal;
 
 const MAX_CAPTURES: u32 = 400;
