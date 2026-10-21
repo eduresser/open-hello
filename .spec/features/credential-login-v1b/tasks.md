@@ -162,16 +162,14 @@
 - Effort: xhigh
 - Notes: depends on T-034. `pam_openhello` generates the challenge (getrandom), asks openhellod `Verify` (4 s ceiling as in T-022), asks keyd to sign, verifies with the root-owned public key (pure Rust P-256, no OpenSSL or NSS), and returns SUCCESS only on a valid signature; every other outcome falls through as today (IGNORE/AUTH_ERR to the password). Same silence for users without a credential and for ssh/allowlist rules. The packaged stacks lose their `pam_pkcs11` lines. The tests no longer need `pam_pkcs11`, so they run the same on every distribution. Keep the `// @spec` proofs of AC-027, AC-029 and AC-030 passing. The verification runs inside the PAM process (accepted trade-off, ASM-014); a missing public key, or one not owned by root, makes the module return `PAM_IGNORE`.
 
-## T-036 — keyd discovers the tpm2-pkcs11 module through p11-kit, then by name [pending]
-
+## T-036 — keyd discovers the tpm2-pkcs11 module through p11-kit, then by name [done]
 - Refs: AC-016
 - Files: crates/openhello-keyd/src/tpm.rs, crates/openhello-keyd/tests/module_discovery.rs
 - Model: claude-sonnet-5
 - Effort: low
 - Notes: replaces the fixed list of directories from T-030 (portability-paths.md): order is `OPENHELLO_TPM2_PKCS11_MODULE`, the test prefix, `p11-kit list-modules` (entry whose `path:` ends in `libtpm2_pkcs11.so`), then `dlopen("libtpm2_pkcs11.so")` by name through the loader cache. Resolution stays pure and testable with injected lookups.
 
-## T-037 — Installer uses neutral locations, discovers third-party paths and checks capabilities [pending]
-
+## T-037 — Installer uses neutral locations, discovers third-party paths and checks capabilities [done]
 - Refs: AC-016
 - Files: scripts/install.sh, packaging/openhellod.service, packaging/openhello-keyd.service, packaging/pam/openhello-common-auth, crates/openhello-cli/tests/pam_sudo.rs
 - Model: claude-sonnet-5
