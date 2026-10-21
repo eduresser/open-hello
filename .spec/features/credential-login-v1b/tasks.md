@@ -2,7 +2,7 @@
 
 > feature: credential-login-v1b
 
-## T-014 — Spike: tpm2-pkcs11 + pam_pkcs11 + C_Login override on swtpm [in-progress]
+## T-014 — Spike: tpm2-pkcs11 + pam_pkcs11 + C_Login override on swtpm [done]
 - Refs: AC-019, AC-027
 - Files: scripts/spike-pkcs11.sh, .spec/features/credential-login-v1b/spike.md
 - Model: claude-sonnet-5
@@ -68,8 +68,7 @@
 - Effort: high
 - Notes: depends on T-020, T-021; must run before T-022. `pam_pkcs11` needs a certificate on the token, and its default mapper reads `~/.eid/authorized_certificates`, a file the user controls, so any user could authorize their own software key and pass `sudo`. Provision issues a self-signed certificate for the TPM key and records its digest in a root-owned mapping file; Purge removes both. Under setuid `sudo` the peer of the unlock socket is root, so a root peer may name the target uid (Windows Hello: the privileged logon component asks the key service on behalf of the user); a non-root peer still only acts for its own uid. Partial evidence for AC-027 and AC-029 (signature checks against the certificate) is covered by unlabeled tests; those criteria are proven in T-022.
 
-## T-022 — PAM stack, installer and sudo end-to-end [pending]
-
+## T-022 — PAM stack, installer and sudo end-to-end [done]
 - Refs: AC-027, AC-029, AC-030
 - Files: Cargo.toml, packaging/pam/sudo-openhello, packaging/pam/pam_pkcs11.conf, packaging/pam/pkcs11.conf, packaging/openhello-keyd.service, scripts/install.sh, crates/openhello-pam/Cargo.toml, crates/openhello-pam/src/lib.rs, crates/openhello-cli/Cargo.toml, crates/openhello-cli/tests/pam_sudo.rs, crates/openhello-keyd/src/certificate.rs, crates/openhello-keyd/src/config.rs, crates/openhello-keyd/src/provision.rs, crates/openhello-keyd/src/purge.rs, crates/openhello-keyd/src/tpm.rs, crates/openhello-keyd/tests/certificate.rs, crates/openhello-pkcs11/src/lib.rs, crates/openhello-pkcs11/src/config.rs, crates/openhello-pkcs11/tests/privileged_config.rs
 - Model: claude-sonnet-5
