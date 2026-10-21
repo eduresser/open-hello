@@ -90,16 +90,14 @@
 - Effort: medium
 - Notes: delivered 2026-10-21 (generic lock-screen PAM service, survey script, guide); stays in-progress until the manual check proves AC-028. Depends on T-025. Manual check on the Plasma session (ASM-011), recorded as evidence; an unprivileged PAM test through the `kde` service file covers the same path in CI.
 
-## T-026 — Embed the default FAR calibration as a readable config file [pending]
-
+## T-026 — Embed the default FAR calibration as a readable config file [done]
 - Refs: AC-036, AC-037, AC-038
 - Files: crates/engine-adapter-face/config/default_calibration.toml, crates/engine-adapter-face/src/far_calibration.rs, crates/engine-adapter-face/src/calibrate.rs, crates/engine-adapter-face/src/bin/openhello-calibrate.rs, crates/engine-adapter-face/src/ffi.rs, crates/engine-adapter-face/tests/default_calibration.rs, crates/engine-adapter-face/Cargo.toml, Cargo.lock, crates/engine-adapter-face/src/matching.rs, crates/engine-adapter-face/tests/frame_fixtures.rs, .spec/features/credential-login-v1b/calibration-results.md
 - Model: claude-sonnet-5
 - Effort: medium
 - Notes: blocked until a calibration run exists (installer on the VM with LFW through the real models, `/var/lib/openhello/calibration.bin`). Owner decision (2026-10-21): record the results in a versioned, human-readable file instead of a binary blob. The calibration becomes a TOML file: the 64-point body table and tail parameters plus provenance (dataset name and license note, date, sha256 of the detector and embedding models, impostor pair count, tool version) and a list of the thresholds it yields at FAR 1e-3 to 1e-8. `openhello-calibrate` writes this TOML; the default file is embedded with `include_str!`; the optional runtime override (`calibration_path`) uses the same format. The old `OHC2` binary is still read so existing files keep working. `calibration-results.md` records the run: sample counts, thresholds per FAR, and the caveat that LFW is visible light (ASM-013). Keep the golden test; add a test that the embedded file parses and its thresholds are monotonic over FAR 1e-1 to 1e-8.
 
-## T-027 — Installer no longer calibrates; docs [pending]
-
+## T-027 — Installer no longer calibrates; docs [done]
 - Refs: AC-036
 - Files: scripts/install.sh, evaluation/README.md, crates/openhellod/src/config.rs
 - Model: claude-sonnet-5
@@ -150,8 +148,7 @@
 
 
 
-## T-034 — keyd: root-owned public key and a challenge-signing operation [pending]
-
+## T-034 — keyd: root-owned public key and a challenge-signing operation [done]
 - Refs: AC-027
 - Files: crates/openhello-keyd/src/auth_keys.rs, crates/openhello-keyd/src/token_socket.rs, crates/openhello-keyd/src/provision.rs, crates/openhello-keyd/src/purge.rs, crates/openhello-keyd/src/lib.rs, crates/openhello-keyd/src/tpm.rs, crates/openhello-keyd/src/config.rs, crates/openhello-keyd/tests/auth_challenge.rs, crates/openhello-keyd/tests/support/mod.rs, crates/openhello-auth-proto/Cargo.toml, crates/openhello-auth-proto/src/lib.rs, Cargo.toml
 - Model: claude-sonnet-5
