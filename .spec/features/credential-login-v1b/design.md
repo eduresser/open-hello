@@ -50,12 +50,17 @@ packaging/
 - **Purge**: `openhellod` Purge also calls `openhello-keyd` purge: evict the TPM key, delete Protectors, remove
   the token objects (AC-033, extends P-008).
 
+## Spike findings (T-014, `spike.md`)
+
+- `openhello-pkcs11` only needs to export `C_GetFunctionList` and `C_Login`; the Protector secret goes to `tpm2-pkcs11` as 40 hex characters.
+- `pam_pkcs11` prompts for a PIN before `C_Login` and rejects an empty one, so the PAM conversation answers a fixed non-empty placeholder that the wrapper discards (T-019, T-022).
+- The TPM dictionary-attack counter is global: a wrong PIN also counts against every other TPM use. T-017 sets `max-tries` and `recovery-time` explicitly.
+- Tests run `tpm2-abrmd` over `swtpm`; without a resource manager the tools leak transient handles. `pamtester` is not packaged, so tests use a small `pam_wrapper` client.
+
 ## Order of work and risk
 
-Roughly two assumptions decide the whole design (ASM-006, ASM-007) and neither tool is installed yet, so the
-first task is a spike on `swtpm` that proves `tpm2-pkcs11` + `pam_pkcs11` + a `C_Login` override work with
-P-256. If it fails, fall back to RSA-2048, or to the own-PAM-module option the owner declined, and revise this
-design before any other task.
+The spike (T-014) proved on `swtpm` that `tpm2-pkcs11` + `pam_pkcs11` + a `C_Login` override work with P-256, so
+the design stands. Still unproven: the physical TPM, the real `sudo` stack and the KDE lock screen (ASM-011).
 
 ## Testing approach
 

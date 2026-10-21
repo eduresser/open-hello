@@ -2,13 +2,12 @@
 
 > feature: credential-login-v1b
 
-## T-014 — Spike: tpm2-pkcs11 + pam_pkcs11 + C_Login override on swtpm [pending]
-
+## T-014 — Spike: tpm2-pkcs11 + pam_pkcs11 + C_Login override on swtpm [in-progress]
 - Refs: AC-019, AC-027
 - Files: scripts/spike-pkcs11.sh, .spec/features/credential-login-v1b/spike.md
 - Model: claude-sonnet-5
 - Effort: high
-- Notes: first task, blocks the rest. Installs/builds `tpm2-pkcs11`, `pam_pkcs11`, `pamtester` on a test
+- Notes: spike finished 2026-10-21 (ASM-006, ASM-007, ASM-010 proved, see spike.md); stays in-progress until AC-019 and AC-027 have proof in T-019 and T-022. First task, blocked the rest. Installs/builds `tpm2-pkcs11`, `pam_pkcs11`, `pamtester` on a test
   prefix; proves ASM-006 (P-256 verified by `pam_pkcs11`), ASM-007 (a wrapper replacing only `C_Login`) and
   ASM-010 (swtpm ECC + dictionary-attack lockout). Writes the result into `spike.md` and updates the assumptions.
 
