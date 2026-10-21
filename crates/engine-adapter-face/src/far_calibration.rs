@@ -1,3 +1,8 @@
+use std::fmt::Write as _;
+use std::path::Path;
+
+use toml_edit::{DocumentMut, Item};
+
 use crate::EngineError;
 
 pub const DEFAULT_TARGET_FAR: f64 = 1e-5;
@@ -9,7 +14,22 @@ const BODY_TOP_FAR: f64 = 0.5;
 // Impostor cosine tails are heavier than Gaussian; an exponential floor keeps extrapolation from understating FAR.
 const MAX_SHAPE: f64 = 0.5;
 const FORMAT_MAGIC: &[u8; 4] = b"OHC2";
+const TOML_FORMAT: &str = "openhello-far-calibration";
+const TOML_VERSION: i64 = 1;
+const EMBEDDED_TOML: &str = include_str!("../config/default_calibration.toml");
+pub const REPORTED_FARS: [f64; 8] = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8];
 const SERIALIZED_LEN: usize = 4 + 8 + 4 * 8 + 4 + BODY_LEVELS * 16;
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Provenance {
+    pub dataset: String,
+    pub license_note: String,
+    pub date: String,
+    pub detector_sha256: String,
+    pub embedding_sha256: String,
+    pub impostor_pairs: u64,
+    pub tool_version: String,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FarCalibration {
@@ -119,7 +139,12 @@ impl FarCalibration {
             return Err(EngineError::InvalidInput("calibration body table has the wrong size".into()));
         }
         let body: Vec<(f64, f64)> = (0..levels).map(|i| (number(48 + i * 16), number(56 + i * 16))).collect();
-        let valid = [tail_far, tail_score, shape, scale].iter().all(|v| v.is_finite())
+        Self::validated(samples, body, tail_far, tail_score, shape, scale)
+    }
+
+    fn validated(samples: u64, body: Vec<(f64, f64)>, tail_far: f64, tail_score: f64, shape: f64, scale: f64) -> Result<Self, EngineError> {
+        let valid = body.len() == BODY_LEVELS
+            && [tail_far, tail_score, shape, scale].iter().all(|v| v.is_finite())
             && tail_far > 0.0
             && tail_far < BODY_TOP_FAR
             && scale > 0.0
@@ -131,6 +156,81 @@ impl FarCalibration {
             return Err(EngineError::InvalidInput("calibration contains inconsistent values".into()));
         }
         Ok(Self { samples, body, tail_far, tail_score, shape, scale })
+    }
+
+    pub fn to_toml(&self, provenance: &Provenance) -> String {
+        let quote = |text: &str| toml_edit::Value::from(text).to_string();
+        let mut out = String::new();
+        let _ = writeln!(out, "format = {}\nversion = {TOML_VERSION}\nsamples = {}", quote(TOML_FORMAT), self.samples);
+        let _ = writeln!(out, "tail_far = {:?}\ntail_score = {:?}\nshape = {:?}\nscale = {:?}", self.tail_far, self.tail_score, self.shape, self.scale);
+        out.push_str("body = [\n");
+        for (far, score) in &self.body {
+            let _ = writeln!(out, "  [{far:?}, {score:?}],");
+        }
+        out.push_str("]\n\n[provenance]\n");
+        let _ = writeln!(out, "dataset = {}\nlicense_note = {}\ndate = {}", quote(&provenance.dataset), quote(&provenance.license_note), quote(&provenance.date));
+        let _ = writeln!(out, "impostor_pairs = {}\ntool_version = {}", provenance.impostor_pairs, quote(&provenance.tool_version));
+        let _ = writeln!(
+            out,
+            "\n[provenance.models_sha256]\ndetector = {}\nembedding = {}\n\n[thresholds]",
+            quote(&provenance.detector_sha256),
+            quote(&provenance.embedding_sha256)
+        );
+        for far in REPORTED_FARS {
+            let _ = writeln!(out, "\"{far:e}\" = {:.4}", self.score_threshold(far).unwrap_or(f64::NAN));
+        }
+        out
+    }
+
+    pub fn from_toml(text: &str) -> Result<Self, EngineError> {
+        let bad = |what: &str| EngineError::InvalidInput(format!("calibration file is not valid: {what}"));
+        let doc: DocumentMut = text.parse().map_err(|_| bad("not readable as TOML"))?;
+        if doc.get("format").and_then(Item::as_str) != Some(TOML_FORMAT) || doc.get("version").and_then(Item::as_integer) != Some(TOML_VERSION) {
+            return Err(bad("unsupported format marker or version; regenerate it with openhello-calibrate"));
+        }
+        let float = |key: &str| doc.get(key).and_then(Item::as_float).ok_or_else(|| bad(&format!("`{key}` is missing or not a number")));
+        let samples = doc
+            .get("samples")
+            .and_then(Item::as_integer)
+            .and_then(|n| u64::try_from(n).ok())
+            .ok_or_else(|| bad("`samples` is missing or not a positive integer"))?;
+        let rows = doc.get("body").and_then(Item::as_array).ok_or_else(|| bad("`body` table is missing"))?;
+        let body = rows
+            .iter()
+            .map(|row| {
+                let pair = row.as_array().filter(|pair| pair.len() == 2)?;
+                Some((pair.get(0)?.as_float()?, pair.get(1)?.as_float()?))
+            })
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| bad("`body` rows must be [far, score] numbers"))?;
+        if body.len() != BODY_LEVELS {
+            return Err(EngineError::InvalidInput("calibration body table has the wrong size".into()));
+        }
+        Self::validated(samples, body, float("tail_far")?, float("tail_score")?, float("shape")?, float("scale")?)
+    }
+
+    pub fn from_file_contents(bytes: &[u8]) -> Result<Self, EngineError> {
+        if bytes.starts_with(FORMAT_MAGIC) {
+            return Self::from_bytes(bytes);
+        }
+        let text = std::str::from_utf8(bytes)
+            .map_err(|_| EngineError::InvalidInput("calibration file has an unsupported format; regenerate it with openhello-calibrate".into()))?;
+        Self::from_toml(text)
+    }
+
+    pub fn embedded_default() -> Result<Self, EngineError> {
+        Self::from_toml(EMBEDDED_TOML)
+    }
+
+    pub fn load(path: Option<&Path>) -> Result<Self, EngineError> {
+        let Some(path) = path else {
+            return Self::embedded_default();
+        };
+        let bytes = std::fs::read(path).map_err(|e| EngineError::InvalidInput(format!("calibration file {}: {e}", path.display())))?;
+        Self::from_file_contents(&bytes).map_err(|e| match e {
+            EngineError::InvalidInput(reason) => EngineError::InvalidInput(format!("calibration file {}: {reason}", path.display())),
+            other => other,
+        })
     }
 }
 

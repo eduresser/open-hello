@@ -15,7 +15,8 @@ use crate::{EngineError, GrayImage};
 #[derive(Debug, Deserialize)]
 pub struct EngineConfig {
     pub models_dir: String,
-    pub calibration_path: String,
+    #[serde(default)]
+    pub calibration_path: Option<String>,
 }
 
 #[cfg(feature = "ort-backend")]
@@ -29,12 +30,11 @@ pub fn build_engine(config: &EngineConfig) -> Result<Engine, EngineError> {
     use crate::matching::Matcher;
 
     let models = Path::new(&config.models_dir);
-    let calibration_bytes = std::fs::read(&config.calibration_path)
-        .map_err(|e| EngineError::InvalidInput(format!("calibration file {}: {e}", config.calibration_path)))?;
+    let calibration = FarCalibration::load(config.calibration_path.as_deref().map(Path::new))?;
     Ok(Engine::new(
         Box::new(YunetDetector::load(&models.join("yunet.onnx"))?),
         Box::new(AuraFaceEmbedder::load(&models.join("glintr100.onnx"))?),
-        Matcher::new(FarCalibration::from_bytes(&calibration_bytes)?),
+        Matcher::new(calibration),
         EnrollmentConfig::default(),
     ))
 }
