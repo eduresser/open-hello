@@ -55,6 +55,26 @@ the D-Bus caller's identity comes from the greeter/PAM session. In v1a there is 
 UIDs). This is a test-harness simplification, not a security boundary — it does not need to be revisited
 until v1b designs the real caller-identity story for the login path.
 
+## Authentication flow (Verify / Identify)
+
+`openhellod` runs one engine authentication session per request and feeds it one frame at a time, stopping at
+the first decision instead of capturing a fixed burst:
+
+- The engine detects the face in each lit frame, keeps a sliding window of the last 10 sets of landmarks for the
+  liveness gate, and, once the window is live, embeds the frame and matches it against the candidates (one
+  template for Verify, all enrolled templates for Identify).
+- The target FAR (default `1e-5`) is divided by the frame budget (16 scored frames) and, inside the matcher,
+  by the number of enrolled embeddings, so accepting on the first passing frame does not raise the overall
+  false-accept rate. This keeps the "reject the right person rather than accept the wrong one" stance.
+- The session ends as Accepted at the first live, matching frame, as Rejected when the frame budget is spent,
+  and the daemon gives up after 48 captured frames. Frames with no detected face do not consume the budget.
+- The Sensor Adapter returns lit frames only and hands over the lit frames it saw while probing the stream, so
+  the first decision does not wait for a fresh burst. It opens the camera on demand and releases it after 3 s
+  without a capture request.
+- Windows Hello (see `docs/windows-hello-arquitetura.md`) also scores frame by frame and stops at the first
+  frame that passes, and its anti-spoofing works on IR appearance rather than landmark motion; replacing the
+  micro-motion gate with an appearance-based one is the planned next step and needs measured spoof data.
+
 ## Testing approach
 
 - **TPM**: tests run against `swtpm` (software TPM), never the host's physical TPM.

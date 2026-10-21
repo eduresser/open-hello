@@ -1,6 +1,6 @@
 use std::os::raw::{c_char, c_void};
 
-pub const ABI_VERSION: u32 = 1;
+pub const ABI_VERSION: u32 = 2;
 
 pub const SENSOR_ENTRY_SYMBOL: &str = "openhello_sensor_interface";
 pub const ENGINE_ENTRY_SYMBOL: &str = "openhello_engine_interface";
@@ -63,19 +63,20 @@ pub struct EnrollProgress {
     pub required: u32,
 }
 
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Default)]
-pub struct MatchDecision {
-    pub live: bool,
-    pub accepted: bool,
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthState {
+    Continue = 0,
+    Accepted = 1,
+    Rejected = 2,
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, Default)]
-pub struct IdentifyDecision {
-    pub live: bool,
-    pub found: bool,
+#[derive(Debug, Clone, Copy)]
+pub struct AuthProgress {
+    pub state: AuthState,
     pub uid: u32,
+    pub scored_frames: u32,
 }
 
 #[repr(C)]
@@ -119,24 +120,21 @@ pub struct EngineInterface {
         out_len: *mut usize,
     ) -> Status,
     pub enroll_discard: unsafe extern "C" fn(handle: EngineHandle, session: u64) -> Status,
-    pub verify: unsafe extern "C" fn(
+    pub auth_begin: unsafe extern "C" fn(
         handle: EngineHandle,
-        frames: *const FrameView,
-        frame_count: usize,
-        template: *const u8,
-        template_len: usize,
-        target_far: f64,
-        out: *mut MatchDecision,
-    ) -> Status,
-    pub identify: unsafe extern "C" fn(
-        handle: EngineHandle,
-        frames: *const FrameView,
-        frame_count: usize,
         candidates: *const TemplateRef,
         candidate_count: usize,
         target_far: f64,
-        out: *mut IdentifyDecision,
+        max_scored_frames: u32,
+        out_session: *mut u64,
     ) -> Status,
+    pub auth_submit: unsafe extern "C" fn(
+        handle: EngineHandle,
+        session: u64,
+        frame: *const FrameView,
+        out: *mut AuthProgress,
+    ) -> Status,
+    pub auth_end: unsafe extern "C" fn(handle: EngineHandle, session: u64) -> Status,
     pub destroy: unsafe extern "C" fn(handle: EngineHandle),
 }
 

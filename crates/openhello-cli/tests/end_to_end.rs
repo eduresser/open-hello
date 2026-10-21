@@ -52,6 +52,7 @@ impl SensorBackend for Sensor {
 struct Engine {
     captures_needed: u32,
     seen: u32,
+    candidates: Vec<(u32, Vec<u8>)>,
 }
 
 impl EngineBackend for Engine {
@@ -79,12 +80,18 @@ impl EngineBackend for Engine {
         Ok(())
     }
 
-    fn verify(&mut self, _: &[CapturedFrame], template: &[u8], _: f64) -> Result<MatchDecision, DaemonError> {
-        Ok(MatchDecision { live: true, accepted: template == b"tpl" })
+    fn auth_begin(&mut self, candidates: &[(u32, Vec<u8>)], _: f64, _: u32) -> Result<u64, DaemonError> {
+        self.candidates = candidates.to_vec();
+        Ok(1)
     }
 
-    fn identify(&mut self, _: &[CapturedFrame], candidates: &[(u32, Vec<u8>)], _: f64) -> Result<IdentifyDecision, DaemonError> {
-        Ok(IdentifyDecision { live: true, matched_uid: candidates.first().map(|(uid, _)| *uid) })
+    fn auth_submit(&mut self, _: u64, _: &CapturedFrame) -> Result<AuthProgress, DaemonError> {
+        let matched = self.candidates.iter().find(|(_, template)| template.as_slice() == b"tpl").map(|(uid, _)| *uid);
+        Ok(AuthProgress { verdict: matched.map_or(AuthVerdict::Rejected, AuthVerdict::Accepted), scored_frames: 1 })
+    }
+
+    fn auth_end(&mut self, _: u64) -> Result<(), DaemonError> {
+        Ok(())
     }
 }
 
@@ -113,7 +120,7 @@ impl StorageBackend for Storage {
 
 fn serve(bus: &PrivateBus) {
     let address = bus.address.clone();
-    let engine = Engine { captures_needed: 8, seen: 0 };
+    let engine = Engine { captures_needed: 8, seen: 0, candidates: Vec::new() };
     let core = Biometrics::new(Box::new(Sensor), Box::new(engine), Box::new(Storage::default()), DEFAULT_TARGET_FAR);
     let service = Service::new(core, Arc::new(AllowAll));
     let (ready, wait) = std::sync::mpsc::channel();

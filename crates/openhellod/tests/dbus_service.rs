@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use openhellod::backends::*;
-use openhellod::core::{Biometrics, BURST_FRAMES, DEFAULT_TARGET_FAR};
+use openhellod::core::{Biometrics, DEFAULT_TARGET_FAR};
 use openhellod::dbus_service::{Action, AuthFuture, Authorizer, Caller, Service, BUS_NAME, OBJECT_PATH};
 use openhellod::polkit::{PolkitAuthorizer, PolkitClient, PolkitFuture};
 
@@ -51,6 +51,7 @@ impl SensorBackend for Sensor {
 
 struct Engine {
     begins: Arc<AtomicUsize>,
+    candidates: Vec<(u32, Vec<u8>)>,
 }
 
 impl EngineBackend for Engine {
@@ -71,13 +72,18 @@ impl EngineBackend for Engine {
         Ok(())
     }
 
-    fn verify(&mut self, frames: &[CapturedFrame], template: &[u8], _: f64) -> Result<MatchDecision, DaemonError> {
-        assert_eq!(frames.len(), BURST_FRAMES);
-        Ok(MatchDecision { live: true, accepted: template == b"secret-template-bytes" })
+    fn auth_begin(&mut self, candidates: &[(u32, Vec<u8>)], _: f64, _: u32) -> Result<u64, DaemonError> {
+        self.candidates = candidates.to_vec();
+        Ok(1)
     }
 
-    fn identify(&mut self, _: &[CapturedFrame], candidates: &[(u32, Vec<u8>)], _: f64) -> Result<IdentifyDecision, DaemonError> {
-        Ok(IdentifyDecision { live: true, matched_uid: candidates.first().map(|(uid, _)| *uid) })
+    fn auth_submit(&mut self, _: u64, _: &CapturedFrame) -> Result<AuthProgress, DaemonError> {
+        let matched = self.candidates.iter().find(|(_, template)| template == b"secret-template-bytes").map(|(uid, _)| *uid);
+        Ok(AuthProgress { verdict: matched.map_or(AuthVerdict::Rejected, AuthVerdict::Accepted), scored_frames: 1 })
+    }
+
+    fn auth_end(&mut self, _: u64) -> Result<(), DaemonError> {
+        Ok(())
     }
 }
 
@@ -107,7 +113,7 @@ impl StorageBackend for Storage {
 fn serve(bus: &PrivateBus, authorizer: Arc<dyn Authorizer>) -> Arc<AtomicUsize> {
     let address = bus.address.clone();
     let begins = Arc::new(AtomicUsize::new(0));
-    let engine = Engine { begins: begins.clone() };
+    let engine = Engine { begins: begins.clone(), candidates: Vec::new() };
     let core = Biometrics::new(Box::new(Sensor), Box::new(engine), Box::new(Storage::default()), DEFAULT_TARGET_FAR);
     let service = Service::new(core, authorizer);
     let (ready_tx, ready_rx) = std::sync::mpsc::channel();

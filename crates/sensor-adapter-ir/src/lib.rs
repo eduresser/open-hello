@@ -7,6 +7,7 @@ mod v4l2_capture;
 
 use std::ffi::CStr;
 use std::os::raw::c_char;
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -53,23 +54,34 @@ pub trait FrameSource {
 pub struct CaptureSession<S: FrameSource> {
     source: S,
     filter: LitFrameFilter,
+    probed: VecDeque<Frame>,
+}
+
+struct Probe {
+    lit: bool,
+    frames: VecDeque<Frame>,
 }
 
 impl<S: FrameSource> CaptureSession<S> {
     pub fn begin(emitter: &mut dyn Emitter, mut source: S) -> Result<Self, SensorError> {
         source.start()?;
         let mut filter = LitFrameFilter::default();
-        if !probe_illumination(&mut source, &mut filter)? {
+        let mut probe = probe_illumination(&mut source, &mut filter)?;
+        if !probe.lit {
             emitter.activate()?;
             filter = LitFrameFilter::default();
-            if !probe_illumination(&mut source, &mut filter)? {
+            probe = probe_illumination(&mut source, &mut filter)?;
+            if !probe.lit {
                 return Err(SensorError::NoIllumination);
             }
         }
-        Ok(Self { source, filter })
+        Ok(Self { source, filter, probed: probe.frames })
     }
 
     pub fn next_frame(&mut self) -> Result<Frame, SensorError> {
+        if let Some(frame) = self.probed.pop_front() {
+            return Ok(frame);
+        }
         for _ in 0..=MAX_CONSECUTIVE_UNLIT {
             let frame = self.source.next_frame()?;
             if self.filter.admit(mean_luma(&frame.pixels)) {
@@ -80,14 +92,17 @@ impl<S: FrameSource> CaptureSession<S> {
     }
 }
 
-fn probe_illumination<S: FrameSource>(source: &mut S, filter: &mut LitFrameFilter) -> Result<bool, SensorError> {
-    let mut lit = false;
+fn probe_illumination<S: FrameSource>(source: &mut S, filter: &mut LitFrameFilter) -> Result<Probe, SensorError> {
+    let mut probe = Probe { lit: false, frames: VecDeque::new() };
     for _ in 0..PROBE_FRAMES {
-        let mean = mean_luma(&source.next_frame()?.pixels);
-        filter.admit(mean);
-        lit |= mean >= MIN_LIT_MEAN;
+        let frame = source.next_frame()?;
+        let mean = mean_luma(&frame.pixels);
+        probe.lit |= mean >= MIN_LIT_MEAN;
+        if filter.admit(mean) {
+            probe.frames.push_back(frame);
+        }
     }
-    Ok(lit)
+    Ok(probe)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -303,6 +318,16 @@ mod tests {
         assert_eq!(*log.borrow(), vec!["stream"]);
     }
 
+    #[test]
+    fn lit_frames_seen_while_probing_are_delivered_first_instead_of_being_thrown_away() {
+        let log: Log = Rc::default();
+        let mut emitter = FakeEmitter { log: log.clone(), fail: false };
+        let brightness: Vec<u8> = (60..100).collect();
+        let mut session = CaptureSession::begin(&mut emitter, FakeSource::new(&log, &brightness)).unwrap();
+        let first: Vec<u64> = (0..PROBE_FRAMES + 2).map(|_| session.next_frame().unwrap().timestamp_us).collect();
+        assert_eq!(first, (60..60 + PROBE_FRAMES as u64 + 2).collect::<Vec<_>>());
+    }
+
     // @spec:AC-011
     #[test]
     fn dark_stream_activates_the_emitter_after_the_stream_starts_and_then_returns_lit_frames() {
@@ -342,6 +367,9 @@ mod tests {
         let mut brightness = vec![66; PROBE_FRAMES];
         brightness.extend(vec![5; 200]);
         let mut session = CaptureSession::begin(&mut emitter, FakeSource::new(&log, &brightness)).unwrap();
+        for _ in 0..PROBE_FRAMES {
+            assert_eq!(session.next_frame().unwrap().pixels[0], 66);
+        }
         assert!(matches!(session.next_frame().err(), Some(SensorError::NoIllumination)));
     }
 

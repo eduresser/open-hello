@@ -78,15 +78,16 @@ pub struct EnrollProgress {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MatchDecision {
-    pub live: bool,
-    pub accepted: bool,
+pub enum AuthVerdict {
+    Continue,
+    Accepted(u32),
+    Rejected,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct IdentifyDecision {
-    pub live: bool,
-    pub matched_uid: Option<u32>,
+pub struct AuthProgress {
+    pub verdict: AuthVerdict,
+    pub scored_frames: u32,
 }
 
 pub trait SensorBackend: Send {
@@ -98,13 +99,9 @@ pub trait EngineBackend: Send {
     fn enroll_submit(&mut self, session: u64, now_ms: u64, frame: &CapturedFrame) -> Result<EnrollProgress, DaemonError>;
     fn enroll_commit(&mut self, session: u64) -> Result<Vec<u8>, DaemonError>;
     fn enroll_discard(&mut self, session: u64) -> Result<(), DaemonError>;
-    fn verify(&mut self, frames: &[CapturedFrame], template: &[u8], target_far: f64) -> Result<MatchDecision, DaemonError>;
-    fn identify(
-        &mut self,
-        frames: &[CapturedFrame],
-        candidates: &[(u32, Vec<u8>)],
-        target_far: f64,
-    ) -> Result<IdentifyDecision, DaemonError>;
+    fn auth_begin(&mut self, candidates: &[(u32, Vec<u8>)], target_far: f64, max_scored_frames: u32) -> Result<u64, DaemonError>;
+    fn auth_submit(&mut self, session: u64, frame: &CapturedFrame) -> Result<AuthProgress, DaemonError>;
+    fn auth_end(&mut self, session: u64) -> Result<(), DaemonError>;
 }
 
 pub trait StorageBackend: Send {

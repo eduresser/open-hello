@@ -2,12 +2,18 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use crate::backends::{
-    DaemonError, EngineBackend, EnrollProgress, EnrollState, SensorBackend, StorageBackend,
+    AuthVerdict, DaemonError, EngineBackend, EnrollProgress, EnrollState, SensorBackend, StorageBackend,
 };
 use crate::logging::{Level, Logger, Value};
 
-pub const BURST_FRAMES: usize = 10;
+pub const MAX_SCORED_FRAMES: u32 = 16;
+pub const MAX_ATTEMPT_FRAMES: usize = 48;
 pub const DEFAULT_TARGET_FAR: f64 = 1e-5;
+
+struct AuthOutcome {
+    uid: Option<u32>,
+    frames: u32,
+}
 
 struct EnrollSession {
     uid: u32,
@@ -100,14 +106,14 @@ impl Biometrics {
             }
             Err(other) => return Err(other),
         };
-        let frames = self.capture_burst()?;
-        let decision = self.engine.verify(&frames, &template, self.target_far)?;
+        let outcome = self.authenticate(&[(uid, template)])?;
+        let accepted = outcome.uid == Some(uid);
         self.logger.log(
             Level::Info,
             "verify",
-            &[("uid", Value::Uid(uid)), ("live", Value::Flag(decision.live)), ("accepted", Value::Flag(decision.accepted))],
+            &[("uid", Value::Uid(uid)), ("frames", Value::Count(outcome.frames.into())), ("accepted", Value::Flag(accepted))],
         );
-        Ok(decision.live && decision.accepted)
+        Ok(accepted)
     }
 
     pub fn identify(&mut self) -> Result<Option<u32>, DaemonError> {
@@ -124,18 +130,17 @@ impl Biometrics {
         if candidates.is_empty() {
             return Ok(None);
         }
-        let frames = self.capture_burst()?;
-        let decision = self.engine.identify(&frames, &candidates, self.target_far)?;
+        let outcome = self.authenticate(&candidates)?;
         self.logger.log(
             Level::Info,
             "identify",
             &[
                 ("candidates", Value::Count(candidates.len() as u64)),
-                ("live", Value::Flag(decision.live)),
-                ("found", Value::Flag(decision.matched_uid.is_some())),
+                ("frames", Value::Count(outcome.frames.into())),
+                ("found", Value::Flag(outcome.uid.is_some())),
             ],
         );
-        Ok(decision.matched_uid.filter(|_| decision.live))
+        Ok(outcome.uid)
     }
 
     pub fn purge(&mut self, uid: u32) -> Result<(), DaemonError> {
@@ -144,8 +149,28 @@ impl Biometrics {
         Ok(())
     }
 
-    fn capture_burst(&mut self) -> Result<Vec<crate::backends::CapturedFrame>, DaemonError> {
-        (0..BURST_FRAMES).map(|_| self.sensor.capture()).collect()
+    fn authenticate(&mut self, candidates: &[(u32, Vec<u8>)]) -> Result<AuthOutcome, DaemonError> {
+        let session = self.engine.auth_begin(candidates, self.target_far, MAX_SCORED_FRAMES)?;
+        let outcome = self.score_until_decided(session);
+        let ended = self.engine.auth_end(session);
+        let outcome = outcome?;
+        ended?;
+        Ok(outcome)
+    }
+
+    fn score_until_decided(&mut self, session: u64) -> Result<AuthOutcome, DaemonError> {
+        let mut frames = 0;
+        for _ in 0..MAX_ATTEMPT_FRAMES {
+            let frame = self.sensor.capture()?;
+            let progress = self.engine.auth_submit(session, &frame)?;
+            frames = progress.scored_frames;
+            match progress.verdict {
+                AuthVerdict::Accepted(uid) => return Ok(AuthOutcome { uid: Some(uid), frames }),
+                AuthVerdict::Rejected => break,
+                AuthVerdict::Continue => {}
+            }
+        }
+        Ok(AuthOutcome { uid: None, frames })
     }
 
     fn session(&self, handle: &str) -> Result<&EnrollSession, DaemonError> {
@@ -185,13 +210,34 @@ pub(crate) mod fakes {
     pub struct EngineLog {
         pub verified_templates: Vec<Vec<u8>>,
         pub committed: Vec<u64>,
+        pub frames_submitted: u32,
+        pub sessions_ended: u32,
     }
+
+    pub const FRAMES_TO_DECIDE: u32 = 3;
 
     pub struct FakeEngine {
         pub log: Arc<Mutex<EngineLog>>,
         pub live: bool,
         pub accept_template: Vec<u8>,
         pub fail_state: bool,
+        pub frames_to_decide: u32,
+        pub candidates: Vec<(u32, Vec<u8>)>,
+        pub submitted: u32,
+    }
+
+    impl FakeEngine {
+        pub fn new(log: Arc<Mutex<EngineLog>>, live: bool, accept_template: &[u8]) -> Self {
+            Self {
+                log,
+                live,
+                accept_template: accept_template.to_vec(),
+                fail_state: false,
+                frames_to_decide: FRAMES_TO_DECIDE,
+                candidates: Vec::new(),
+                submitted: 0,
+            }
+        }
     }
 
     impl EngineBackend for FakeEngine {
@@ -213,15 +259,29 @@ pub(crate) mod fakes {
             Ok(())
         }
 
-        fn verify(&mut self, frames: &[CapturedFrame], template: &[u8], _: f64) -> Result<MatchDecision, DaemonError> {
-            assert_eq!(frames.len(), BURST_FRAMES);
-            self.log.lock().unwrap().verified_templates.push(template.to_vec());
-            Ok(MatchDecision { live: self.live, accepted: template == self.accept_template.as_slice() })
+        fn auth_begin(&mut self, candidates: &[(u32, Vec<u8>)], _: f64, max_scored_frames: u32) -> Result<u64, DaemonError> {
+            assert_eq!(max_scored_frames, MAX_SCORED_FRAMES);
+            self.log.lock().unwrap().verified_templates.extend(candidates.iter().map(|(_, template)| template.clone()));
+            self.candidates = candidates.to_vec();
+            self.submitted = 0;
+            Ok(5)
         }
 
-        fn identify(&mut self, _: &[CapturedFrame], candidates: &[(u32, Vec<u8>)], _: f64) -> Result<IdentifyDecision, DaemonError> {
-            let matched_uid = candidates.iter().find(|(_, t)| *t == self.accept_template).map(|(uid, _)| *uid);
-            Ok(IdentifyDecision { live: self.live, matched_uid })
+        fn auth_submit(&mut self, _: u64, _: &CapturedFrame) -> Result<AuthProgress, DaemonError> {
+            self.submitted += 1;
+            self.log.lock().unwrap().frames_submitted += 1;
+            let verdict = if self.submitted < self.frames_to_decide {
+                AuthVerdict::Continue
+            } else {
+                let matched = self.candidates.iter().find(|(_, template)| *template == self.accept_template).map(|(uid, _)| *uid);
+                matched.filter(|_| self.live).map_or(AuthVerdict::Rejected, AuthVerdict::Accepted)
+            };
+            Ok(AuthProgress { verdict, scored_frames: self.submitted })
+        }
+
+        fn auth_end(&mut self, _: u64) -> Result<(), DaemonError> {
+            self.log.lock().unwrap().sessions_ended += 1;
+            Ok(())
         }
     }
 
@@ -256,15 +316,18 @@ pub(crate) mod fakes {
 
     pub fn core_with(storage: MemoryStorage, live: bool, template: &[u8]) -> (Biometrics, Arc<Mutex<EngineLog>>) {
         let log = Arc::new(Mutex::new(EngineLog::default()));
-        let engine = FakeEngine { log: log.clone(), live, accept_template: template.to_vec(), fail_state: false };
+        let engine = FakeEngine::new(log.clone(), live, template);
         (Biometrics::new(Box::new(FakeSensor), Box::new(engine), Box::new(storage), DEFAULT_TARGET_FAR), log)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use super::fakes::*;
     use super::*;
+    use crate::backends::CapturedFrame;
 
     #[test]
     fn enrollment_commit_persists_the_engine_template_for_the_session_uid() {
@@ -286,7 +349,8 @@ mod tests {
         core.enroll_discard(&handle).unwrap();
         assert!(matches!(core.enroll_capture(&handle), Err(DaemonError::InvalidRequest(_))));
 
-        let engine = FakeEngine { log: Default::default(), live: true, accept_template: vec![], fail_state: true };
+        let mut engine = FakeEngine::new(Default::default(), true, b"");
+        engine.fail_state = true;
         let mut failing = Biometrics::new(Box::new(FakeSensor), Box::new(engine), Box::new(MemoryStorage::default()), DEFAULT_TARGET_FAR);
         let handle = failing.enroll_begin(1000).unwrap();
         assert_eq!(failing.enroll_capture(&handle).unwrap().state, EnrollState::Failed);
@@ -305,6 +369,51 @@ mod tests {
 
         let (mut spoofed, _) = core_with(storage, false, b"mine");
         assert!(!spoofed.verify(1000).unwrap());
+    }
+
+    // @spec:AC-005
+    #[test]
+    fn verify_stops_at_the_frame_that_decides_instead_of_capturing_a_fixed_burst() {
+        let storage = MemoryStorage::default();
+        storage.files.lock().unwrap().insert(1000, b"mine".to_vec());
+        let (mut core, log) = core_with(storage, true, b"mine");
+        assert!(core.verify(1000).unwrap());
+        let log = log.lock().unwrap();
+        assert_eq!(log.frames_submitted, FRAMES_TO_DECIDE);
+        assert_eq!(log.sessions_ended, 1);
+    }
+
+    #[test]
+    fn authentication_gives_up_after_the_attempt_limit_and_still_ends_the_session() {
+        let storage = MemoryStorage::default();
+        storage.files.lock().unwrap().insert(1000, b"mine".to_vec());
+        let log = Arc::new(Mutex::new(EngineLog::default()));
+        let mut engine = FakeEngine::new(log.clone(), true, b"mine");
+        engine.frames_to_decide = u32::MAX;
+        let mut core = Biometrics::new(Box::new(FakeSensor), Box::new(engine), Box::new(storage), DEFAULT_TARGET_FAR);
+        assert!(!core.verify(1000).unwrap());
+        let log = log.lock().unwrap();
+        assert_eq!(log.frames_submitted as usize, MAX_ATTEMPT_FRAMES);
+        assert_eq!(log.sessions_ended, 1);
+    }
+
+    #[test]
+    fn sensor_failure_during_authentication_is_an_error_and_the_session_is_still_ended() {
+        struct BrokenSensor;
+
+        impl SensorBackend for BrokenSensor {
+            fn capture(&mut self) -> Result<CapturedFrame, DaemonError> {
+                Err(DaemonError::Backend("camera unplugged".into()))
+            }
+        }
+
+        let storage = MemoryStorage::default();
+        storage.files.lock().unwrap().insert(1000, b"mine".to_vec());
+        let log = Arc::new(Mutex::new(EngineLog::default()));
+        let engine = FakeEngine::new(log.clone(), true, b"mine");
+        let mut core = Biometrics::new(Box::new(BrokenSensor), Box::new(engine), Box::new(storage), DEFAULT_TARGET_FAR);
+        assert!(matches!(core.verify(1000), Err(DaemonError::Backend(_))));
+        assert_eq!(log.lock().unwrap().sessions_ended, 1);
     }
 
     #[test]

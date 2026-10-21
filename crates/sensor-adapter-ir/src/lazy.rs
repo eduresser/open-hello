@@ -147,8 +147,8 @@ mod tests {
     #[test]
     fn capture_error_releases_the_camera_so_the_next_call_starts_fresh() {
         let mut fixture = fixture(Some(PROBE_FRAMES_FOR_TEST + 1));
-        fixture.lazy.next_frame(fixture.start).unwrap();
-        assert!(fixture.lazy.next_frame(fixture.start).is_err());
+        let failed = (0..PROBE_FRAMES_FOR_TEST + 5).map(|_| fixture.lazy.next_frame(fixture.start)).any(|frame| frame.is_err());
+        assert!(failed);
         assert!(!fixture.lazy.is_open());
         assert_eq!(fixture.released.load(Ordering::SeqCst), 1);
     }
