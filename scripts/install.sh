@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
-# Installs open-hello on a fresh Linux VM: dependencies, build, files, D-Bus/polkit/systemd integration.
-# Also wires `sudo` to face/PIN login (pam_pkcs11 + TPM key); certutil (nss-tools) is required by openhello-keyd to trust the key certificate.
-# usage: sudo scripts/install.sh [--dry-run] [--no-deps] [--calibration-images DIR | --calibration-url URL]  (calibration options are an optional override of the built-in FAR calibration)
+# PAM directory = dirname of libpam.so.0 from the loader cache + /security: covers openSUSE (/usr/lib64), Debian/Ubuntu (multiarch) and Arch (/usr/lib).
+# Installs open-hello without touching the system's package manager: it checks capabilities, builds, and installs to neutral locations.
+# usage: sudo scripts/install.sh [--dry-run] [--skip-checks] [--calibration-images DIR | --calibration-url URL]
+# Then enable the PAM module per service with `openhello-cli pam enable <service>`.
 set -euo pipefail
 
 DRY_RUN=0
-INSTALL_DEPS=1
+SKIP_CHECKS=0
 CALIBRATION_IMAGES=""
 CALIBRATION_URL=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY_RUN=1 ;;
-    --no-deps) INSTALL_DEPS=0 ;;
+    --skip-checks) SKIP_CHECKS=1 ;;
+    --no-deps) echo "warning: --no-deps is deprecated and ignored; the installer no longer installs packages" >&2 ;;
     --calibration-images) CALIBRATION_IMAGES="${2:?--calibration-images needs a directory}"; shift ;;
     --calibration-url) CALIBRATION_URL="${2:?--calibration-url needs a URL}"; shift ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
@@ -25,7 +27,10 @@ BIN_DIR=/usr/libexec/openhello
 CONF_DIR=/etc/openhello
 MODELS_DIR=/usr/share/openhello/models
 STATE_DIR=/var/lib/openhello
-PAM_SERVICE_DIR=/etc/pam.d
+UNIT_DIR=/usr/lib/systemd/system
+DBUS_POLICY_DIR=/usr/share/dbus-1/system.d
+POLKIT_ACTIONS_DIR=/usr/share/polkit-1/actions
+LDCONFIG="$(command -v ldconfig || echo /sbin/ldconfig)"
 CALIBRATION_FILE="$STATE_DIR/calibration.bin"
 
 ORT_VERSION=1.31.0
@@ -41,22 +46,31 @@ run() {
 
 [ "$DRY_RUN" = 1 ] || [ "$(id -u)" = 0 ] || { echo "run as root (sudo)" >&2; exit 1; }
 
-install_deps() {
-  if command -v apt-get >/dev/null 2>&1; then
-    # A broken third-party index (e.g. a mirror mid-sync) must not block packages from the main archives
-    run apt-get update || echo "warning: apt-get update reported errors; continuing with the cached indexes" >&2
-    run apt-get install -y build-essential pkg-config curl ca-certificates tpm2-tools swtpm \
-      libtss2-tcti-swtpm0 dbus polkitd unzip libpam-pkcs11 libtpm2-pkcs11-1 libtpm2-pkcs11-tools libnss3-tools
-  elif command -v dnf >/dev/null 2>&1; then
-    run dnf install -y gcc make pkgconf-pkg-config curl unzip tpm2-tools swtpm tpm2-tss dbus-daemon polkit pam_pkcs11 tpm2-pkcs11 tpm2-pkcs11-tools nss-tools
-  elif command -v zypper >/dev/null 2>&1; then
-    run zypper --non-interactive install gcc make pkg-config curl unzip tpm2.0-tools swtpm \
-      libtss2-tcti-swtpm0 dbus-1-daemon polkit pam_pkcs11 tpm2-pkcs11 mozilla-nss-tools
-  elif command -v pacman >/dev/null 2>&1; then
-    run pacman -S --needed --noconfirm base-devel pkgconf curl unzip tpm2-tools swtpm tpm2-tss dbus polkit nss tpm2-pkcs11
-    echo "note: pam_pkcs11 is not in the Arch repositories; install it from the AUR before enabling the PAM stacks" >&2
-  else
-    echo "no supported package manager (apt, dnf, zypper, pacman); install manually: rust, tpm2-tools, swtpm, libtss2-tcti-swtpm, dbus, polkit, pam_pkcs11, tpm2-pkcs11, nss tools" >&2
+missing=()
+need() { missing+=("$1"); }
+
+check_capabilities() {
+  local ld_cache
+  ld_cache="$($LDCONFIG -p 2>/dev/null || true)"
+  command -v cc >/dev/null 2>&1 || need "C compiler and linker"
+  command -v curl >/dev/null 2>&1 || need "HTTPS downloader (curl)"
+  command -v tpm2_createprimary >/dev/null 2>&1 || need "TPM 2.0 command-line tools (tpm2_createprimary)"
+  command -v tpm2_ptool >/dev/null 2>&1 || need "PKCS#11 TPM store tool (tpm2_ptool)"
+  python3 -c 'import tpm2_pkcs11' >/dev/null 2>&1 || need "Python module tpm2_pkcs11 for the interpreter at $(command -v python3 || echo python3)"
+  grep -q 'libtss2-esys\.so' <<<"$ld_cache" || need "TPM software stack libraries (libtss2-esys)"
+  grep -q 'libtss2-tcti-device\.so' <<<"$ld_cache" || need "TPM device transport library (libtss2-tcti-device)"
+  if ! { command -v p11-kit >/dev/null 2>&1 && p11-kit list-modules 2>/dev/null | grep -q 'libtpm2_pkcs11\.so'; } && ! grep -q 'libtpm2_pkcs11\.so' <<<"$ld_cache"; then
+    need "PKCS#11 module for the TPM (libtpm2_pkcs11.so)"
+  fi
+  command -v polkitd >/dev/null 2>&1 || [ -x /usr/lib/polkit-1/polkitd ] || [ -x /usr/libexec/polkitd ] || need "polkit authorization daemon (polkitd)"
+  command -v pkttyagent >/dev/null 2>&1 || need "polkit text agent (pkttyagent)"
+  command -v dbus-daemon >/dev/null 2>&1 || need "D-Bus message daemon (dbus-daemon)"
+  [ -S /run/dbus/system_bus_socket ] || need "running D-Bus system bus (/run/dbus/system_bus_socket)"
+  command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ] || need "systemd as the running init system"
+  if [ "${#missing[@]}" -gt 0 ]; then
+    echo "missing capabilities:" >&2
+    printf '  - %s\n' "${missing[@]}" >&2
+    echo "provide them with your system's tools and run again, or pass --skip-checks" >&2
     exit 1
   fi
 }
@@ -114,7 +128,7 @@ calibrate() {
   return "$status"
 }
 
-[ "$INSTALL_DEPS" = 1 ] && install_deps
+[ "$SKIP_CHECKS" = 1 ] || check_capabilities
 ensure_rust
 
 run cargo build --release --manifest-path "$REPO/Cargo.toml" \
@@ -134,77 +148,39 @@ run install -m 0755 "$T/openhello-cli" /usr/local/bin/openhello-cli
 run install -m 0755 "$T/openhello-calibrate" "$BIN_DIR/openhello-calibrate"
 install_runtime_and_models
 
-first_existing() {
-  local candidate
-  for candidate in "$@"; do
-    if [ -e "$candidate" ]; then echo "$candidate"; return 0; fi
-  done
-  return 1
+pam_module_dir() {
+  local libpam
+  libpam="$($LDCONFIG -p 2>/dev/null | awk '/libpam\.so\.0/{print $NF; exit}')"
+  [ -n "$libpam" ] || { echo "libpam.so.0 not found in the loader cache ($LDCONFIG -p): the PAM library is not installed" >&2; exit 1; }
+  echo "$(dirname "$(readlink -f "$libpam")")/security"
 }
 
-install_sudo_login() {
-  command -v certutil >/dev/null 2>&1 || [ "$DRY_RUN" = 1 ] || { echo "certutil not found: install nss-tools (libnss3-tools, mozilla-nss-tools)" >&2; exit 1; }
-  local pam_dir pkcs11_dir tpm2_module
-  pam_dir="$(first_existing /usr/lib64/security /usr/lib/security /usr/lib/x86_64-linux-gnu/security)" || pam_dir=/usr/lib64/security
-  pkcs11_dir="$(first_existing /usr/lib64/pam_pkcs11 /usr/lib/pam_pkcs11 /usr/lib/x86_64-linux-gnu/pam_pkcs11)" || pkcs11_dir=/usr/lib64/pam_pkcs11
-  tpm2_module="$(first_existing /usr/lib64/pkcs11/libtpm2_pkcs11.so /usr/lib/x86_64-linux-gnu/pkcs11/libtpm2_pkcs11.so /usr/lib/pkcs11/libtpm2_pkcs11.so)" || tpm2_module=/usr/lib64/pkcs11/libtpm2_pkcs11.so
+install_unit() {
+  if [ "$DRY_RUN" = 1 ]; then echo "+ install unit $1 to $UNIT_DIR with @LIBEXECDIR@=$BIN_DIR"; return; fi
+  sed "s|@LIBEXECDIR@|$BIN_DIR|g" "$REPO/packaging/$1" > "$UNIT_DIR/$1"
+  chmod 0644 "$UNIT_DIR/$1"
+}
 
+install_key_daemon() {
   run install -m 0755 "$T/openhello-keyd" "$BIN_DIR/openhello-keyd"
   run install -m 0644 "$T/libopenhello_pkcs11.so" "$LIB_DIR/libopenhello_pkcs11.so"
-  run install -m 0644 "$T/libpam_openhello.so" "$pam_dir/pam_openhello.so"
   run install -d -m 0755 "$CONF_DIR/cacerts" "$CONF_DIR/crls"
-  run install -m 0644 "$REPO/packaging/io.openhello.Keyd1.conf" /usr/share/dbus-1/system.d/io.openhello.Keyd1.conf
-  run install -m 0644 "$REPO/crates/openhello-keyd/io.openhello.Keyd1.policy" /usr/share/polkit-1/actions/io.openhello.Keyd1.policy
-  run install -m 0644 "$REPO/packaging/openhello-keyd.service" /etc/systemd/system/openhello-keyd.service
-  run install -m 0644 "$REPO/packaging/pam/sudo-openhello" $PAM_SERVICE_DIR/sudo-openhello
-  run install -m 0644 "$REPO/packaging/pam/openhello-lockscreen" "$PAM_SERVICE_DIR/openhello-lockscreen"
-  run install -D -m 0644 "$REPO/packaging/pam/openhello-common-auth" /usr/share/openhello/pam/openhello-common-auth
-  if [ "$DRY_RUN" = 1 ]; then
-    echo "+ write $CONF_DIR/pam_pkcs11.conf and $CONF_DIR/pkcs11.conf (root-owned, 0644)"
-  else
-    sed "s|/usr/lib64/pam_pkcs11|$pkcs11_dir|" "$REPO/packaging/pam/pam_pkcs11.conf" > "$CONF_DIR/pam_pkcs11.conf"
-    sed "s|/usr/lib64/pkcs11/libtpm2_pkcs11.so|$tpm2_module|" "$REPO/packaging/pam/pkcs11.conf" > "$CONF_DIR/pkcs11.conf"
-    chown root:root "$CONF_DIR/pam_pkcs11.conf" "$CONF_DIR/pkcs11.conf"
-    chmod 0644 "$CONF_DIR/pam_pkcs11.conf" "$CONF_DIR/pkcs11.conf"
-  fi
-  enable_sudo_stack
-  enable_lock_screen_face
+  run install -m 0644 "$REPO/packaging/io.openhello.Keyd1.conf" "$DBUS_POLICY_DIR/io.openhello.Keyd1.conf"
+  run install -m 0644 "$REPO/crates/openhello-keyd/io.openhello.Keyd1.policy" "$POLKIT_ACTIONS_DIR/io.openhello.Keyd1.policy"
+  install_unit openhello-keyd.service
 }
 
-# Only the stack is installed for every locker; wiring it into a locker is per environment (see .spec/features/credential-login-v1b/lockscreen.md).
-# KDE is the one adapter automated here: kscreenlocker_greet starts its "Face" authenticator only when kde-face exists, and the `kde` password service is never touched. Undo with `rm $PAM_SERVICE_DIR/kde-face`.
-enable_lock_screen_face() {
-  local face_file="$PAM_SERVICE_DIR/kde-face" include='auth include openhello-lockscreen'
-  [ "$DRY_RUN" = 1 ] || first_existing /usr/libexec/kscreenlocker_greet /usr/lib/kscreenlocker_greet /usr/lib64/libexec/kscreenlocker_greet /usr/lib/*/libexec/kscreenlocker_greet >/dev/null || return 0
-  if [ "$DRY_RUN" = 0 ] && [ -e "$face_file" ] && ! grep -qxF "$include" "$face_file"; then
-    echo "$face_file already exists and is not ours; add '$include' to it manually" >&2
-    return
-  fi
-  if [ "$DRY_RUN" = 1 ]; then
-    echo "+ write $face_file ($include, account include common-account) when kscreenlocker is present"
-  else
-    printf '#%%PAM-1.0\n%s\naccount include common-account\n' "$include" > "$face_file"
-    chmod 0644 "$face_file"
-  fi
+install_pam_module() {
+  local pam_dir
+  pam_dir="$(pam_module_dir)"
+  run install -d -m 0755 "$pam_dir"
+  run install -m 0755 "$T/libpam_openhello.so" "$pam_dir/pam_openhello.so"
+  PAM_MODULE_DIR="$pam_dir"
 }
 
-# A backup is kept; undo with `mv $PAM_SERVICE_DIR/sudo.openhello.bak $PAM_SERVICE_DIR/sudo`.
-enable_sudo_stack() {
-  local sudo_file="$PAM_SERVICE_DIR/sudo" vendor_dir include='auth include sudo-openhello'
-  vendor_dir="$(first_existing /usr/lib/pam.d /usr/etc/pam.d)" || vendor_dir=/usr/lib/pam.d
-  if [ ! -e "$sudo_file" ] && [ -e "$vendor_dir/sudo" ]; then run cp "$vendor_dir/sudo" "$sudo_file"; fi
-  if [ ! -e "$sudo_file" ] && [ "$DRY_RUN" = 0 ]; then
-    echo "no $sudo_file: add '$include' above the password module of your sudo PAM service" >&2
-    return
-  fi
-  if [ "$DRY_RUN" = 0 ] && grep -qxF "$include" "$sudo_file"; then return; fi
-  run cp -n "$sudo_file" "$sudo_file.openhello.bak"
-  run sed -i "0,/^\(auth\|@include\)[[:space:]]/s//$include\n&/" "$sudo_file"
-}
-
-run install -m 0644 "$REPO/packaging/io.openhello.Biometrics1.conf" /usr/share/dbus-1/system.d/io.openhello.Biometrics1.conf
-run install -m 0644 "$REPO/crates/openhellod/io.openhello.Biometrics1.policy" /usr/share/polkit-1/actions/io.openhello.Biometrics1.policy
-run install -m 0644 "$REPO/packaging/openhellod.service" /etc/systemd/system/openhellod.service
+run install -m 0644 "$REPO/packaging/io.openhello.Biometrics1.conf" "$DBUS_POLICY_DIR/io.openhello.Biometrics1.conf"
+run install -m 0644 "$REPO/crates/openhellod/io.openhello.Biometrics1.policy" "$POLKIT_ACTIONS_DIR/io.openhello.Biometrics1.policy"
+install_unit openhellod.service
 
 if [ ! -e "$CONF_DIR/openhello.env" ]; then
   if [ "$DRY_RUN" = 1 ]; then
@@ -247,7 +223,8 @@ else
   echo "+ write $CONF_DIR/engine.json (models_dir$([ "$CALIBRATION_OVERRIDE" = 1 ] && echo ", calibration_path=$CALIBRATION_FILE"))"
 fi
 
-install_sudo_login
+install_key_daemon
+install_pam_module
 
 run systemctl daemon-reload
 run systemctl reload dbus 2>/dev/null || true
@@ -259,3 +236,4 @@ run systemctl restart openhellod 2>/dev/null || true
 
 echo
 echo "open-hello installed and started. Check OPENHELLO_DEVICE (the IR camera node) in $CONF_DIR/openhello.env"
+echo "PAM module installed at $PAM_MODULE_DIR/pam_openhello.so; enable it per service with: openhello-cli pam enable sudo"

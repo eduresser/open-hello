@@ -22,7 +22,7 @@ const BUS_NAME: &str = "io.openhello.Biometrics1";
 const OBJECT_PATH: &str = "/io/openhello/Biometrics1";
 const STACK: &str = include_str!("../../../packaging/pam/sudo-openhello");
 const LOCKSCREEN_SERVICE: &str = "openhello-lockscreen";
-const COMMON_STACK: &str = include_str!("../../../packaging/pam/openhello-common-auth");
+const COMMON_STACK: &str = "auth sufficient pam_openhello.so allowlist=/etc/openhello/allowed-services\n";
 const LOCKSCREEN_STACK: &str = include_str!("../../../packaging/pam/openhello-lockscreen");
 const WITHIN_BUDGET: Duration = Duration::from_secs(5);
 const STRICT_CONTROL: &str = "[success=done ignore=ignore default=die]";
