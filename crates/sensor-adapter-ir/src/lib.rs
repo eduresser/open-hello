@@ -20,7 +20,7 @@ pub use msxu::{MsxuEmitter, MsxuUnit};
 pub use v4l2_capture::V4l2Camera;
 
 use lazy::{LazyCapture, IDLE_RELEASE};
-use illumination::{mean_luma, MAX_CONSECUTIVE_UNLIT, MIN_LIT_MEAN, PROBE_FRAMES};
+use illumination::{FrameStats, MAX_CONSECUTIVE_UNLIT, PROBE_FRAMES};
 
 const EMITTER_ENV: &str = "OPENHELLO_IR_EMITTER";
 const ALLOW_WRITE_ENV: &str = "OPENHELLO_IR_EMITTER_ALLOW_WRITE";
@@ -84,7 +84,7 @@ impl<S: FrameSource> CaptureSession<S> {
         }
         for _ in 0..=MAX_CONSECUTIVE_UNLIT {
             let frame = self.source.next_frame()?;
-            if self.filter.admit(mean_luma(&frame.pixels)) {
+            if self.filter.admit(FrameStats::of(&frame.pixels)) {
                 return Ok(frame);
             }
         }
@@ -96,9 +96,9 @@ fn probe_illumination<S: FrameSource>(source: &mut S, filter: &mut LitFrameFilte
     let mut probe = Probe { lit: false, frames: VecDeque::new() };
     for _ in 0..PROBE_FRAMES {
         let frame = source.next_frame()?;
-        let mean = mean_luma(&frame.pixels);
-        probe.lit |= mean >= MIN_LIT_MEAN;
-        if filter.admit(mean) {
+        let stats = FrameStats::of(&frame.pixels);
+        probe.lit |= stats.is_illuminated();
+        if filter.admit(stats) {
             probe.frames.push_back(frame);
         }
     }
@@ -297,7 +297,7 @@ mod tests {
             } else {
                 self.brightness.pop_front().unwrap_or(5)
             };
-            Ok(Frame { width: 4, height: 4, pixels: vec![level; 16], timestamp_us: u64::from(level) })
+            Ok(Frame { width: 4, height: 4, pixels: (0..16).map(|i| if i % 2 == 0 { level } else { level.saturating_add(20) }).collect(), timestamp_us: u64::from(level) })
         }
     }
 
@@ -357,6 +357,28 @@ mod tests {
         let result = CaptureSession::begin(&mut emitter, FakeSource::new(&log, &[5; 100]));
         assert!(matches!(result.err(), Some(SensorError::NoIllumination)));
         assert_eq!(*log.borrow(), vec!["stream", "emitter"]);
+    }
+
+    struct FlatGraySource;
+
+    impl FrameSource for FlatGraySource {
+        fn start(&mut self) -> Result<(), SensorError> {
+            Ok(())
+        }
+
+        fn next_frame(&mut self) -> Result<Frame, SensorError> {
+            Ok(Frame { width: 8, height: 8, pixels: vec![25; 64], timestamp_us: 0 })
+        }
+    }
+
+    // @spec:AC-011
+    #[test]
+    fn bright_enough_but_flat_stream_is_treated_as_unlit() {
+        let log: Log = Rc::default();
+        let mut emitter = FakeEmitter { log: log.clone(), fail: false };
+        let result = CaptureSession::begin(&mut emitter, FlatGraySource);
+        assert!(matches!(result.err(), Some(SensorError::NoIllumination)));
+        assert_eq!(*log.borrow(), vec!["emitter"]);
     }
 
     // @spec:AC-011
