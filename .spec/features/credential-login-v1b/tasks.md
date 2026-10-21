@@ -33,8 +33,7 @@
 - Notes: depends on T-015, T-016. PIN uses the TPM dictionary-attack lockout; the ticket socket checks
   `SO_PEERCRED`. Biometrics only authorize the key, never replace it (P-003).
 
-## T-018 — openhellod: issue a ticket after a successful Verify [pending]
-
+## T-018 — openhellod: issue a ticket after a successful Verify [done]
 - Refs: AC-023, AC-019
 - Files: crates/openhellod/src/ticket_client.rs, crates/openhellod/src/core.rs, crates/openhellod/Cargo.toml
 - Model: claude-sonnet-5
@@ -44,10 +43,10 @@
 ## T-019 — openhello-pkcs11: wrapper module overriding C_Login [pending]
 
 - Refs: AC-019, AC-024, AC-025
-- Files: crates/openhello-pkcs11/Cargo.toml, crates/openhello-pkcs11/src/lib.rs, crates/openhello-pkcs11/tests/login.rs
+- Files: Cargo.toml, crates/openhello-pkcs11/Cargo.toml, crates/openhello-pkcs11/src/lib.rs, crates/openhello-pkcs11/tests/login.rs, crates/openhello-keyd/src/unlock_socket.rs, crates/openhello-keyd/src/lib.rs
 - Model: claude-sonnet-5
 - Effort: xhigh
-- Notes: depends on T-014, T-017. Forwards all other calls to `tpm2-pkcs11`; refuses templates and embeddings.
+- Notes: depends on T-014, T-017, T-018. Forwards all other calls to `tpm2-pkcs11`; refuses templates and embeddings. `C_Login` with the fixed placeholder runs the face flow (openhellod `Verify` -> ticket -> keyd grant); any other PIN runs the PIN Protector. The wrapper never holds the Protector longer than the `C_Login` call. keyd gains an unlock socket where the peer uid must equal the target uid (the user's own process), separate from the root-only ticket socket.
 
 ## T-020 — openhello-keyd: D-Bus service, polkit and systemd sandbox [pending]
 
