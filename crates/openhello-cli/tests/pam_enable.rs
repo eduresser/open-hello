@@ -102,6 +102,26 @@ fn enable_defaults_to_sudo_and_appends_module_arguments() {
 
 // @covers:AC-027-pam-enable
 #[test]
+fn enable_accepts_a_bare_flag_such_as_debug() {
+    let tree = Tree::new();
+    tree.put("sudo", SUSE_SUDO);
+    tree.pam(&["enable", "sudo", "--arg", "debug"]).0.unwrap();
+    assert!(tree
+        .read("sudo")
+        .starts_with("#%PAM-1.0\nauth sufficient pam_openhello.so debug\n"));
+    for rejected in ["bad arg", "=x", "a;b", ""] {
+        let other = Tree::new();
+        other.put("sudo", SUSE_SUDO);
+        assert!(
+            other.pam(&["enable", "sudo", "--arg", rejected]).0.is_err(),
+            "{rejected:?}"
+        );
+        assert_eq!(other.read("sudo"), SUSE_SUDO, "{rejected:?}");
+    }
+}
+
+// @covers:AC-027-pam-enable
+#[test]
 fn enable_copies_the_vendor_file_first() {
     let tree = Tree::new();
     fs::write(tree.vendor("sudo"), DEBIAN_SUDO).unwrap();
