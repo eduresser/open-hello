@@ -1,3 +1,4 @@
+use crate::logging::{log, Level, Value};
 use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::AsRawFd;
@@ -100,15 +101,26 @@ fn serve(protectors: &Protectors, config: &TicketSocketConfig, mut stream: UnixS
                 reply
             }
             (OP_TICKET, TICKET_LEN) => match protectors.unlock_for_socket(&payload) {
-                Ok(()) => vec![STATUS_ACCEPTED],
+                Ok(()) => {
+                    log(Level::Debug, "ticket-accepted", &[]);
+                    vec![STATUS_ACCEPTED]
+                }
                 Err(error) => {
-                    eprintln!("openhello-keyd: ticket refused: {error}");
+                    log(
+                        Level::Warn,
+                        "ticket-refused",
+                        &[("reason", Value::Reason(error.to_string()))],
+                    );
                     let _ = stream.write_all(&[STATUS_REFUSED]);
                     return;
                 }
             },
             _ => {
-                eprintln!("openhello-keyd: request refused: not a ticket frame");
+                log(
+                    Level::Warn,
+                    "request-refused",
+                    &[("reason", Value::Label("not a ticket frame"))],
+                );
                 let _ = stream.write_all(&[STATUS_REFUSED]);
                 return;
             }
@@ -124,7 +136,11 @@ fn read_frame(stream: &mut UnixStream) -> Option<(u8, Vec<u8>)> {
     stream.read_exact(&mut header).ok()?;
     let len = usize::from(u16::from_be_bytes([header[1], header[2]]));
     if len > MAX_PAYLOAD {
-        eprintln!("openhello-keyd: request refused: payload of {len} bytes is not a ticket");
+        log(
+            Level::Warn,
+            "request-refused",
+            &[("payload_bytes", Value::Count(len as u64))],
+        );
         let _ = stream.write_all(&[STATUS_REFUSED]);
         return None;
     }
@@ -138,14 +154,22 @@ fn peer_allowed(stream: &UnixStream, config: &TicketSocketConfig) -> bool {
         return false;
     };
     if uid != config.allowed_uid {
-        eprintln!("openhello-keyd: ticket socket peer refused: uid {uid} is not allowed");
+        log(
+            Level::Warn,
+            "peer-refused",
+            &[("peer_uid", Value::Uid(uid))],
+        );
         return false;
     }
     if let Some(expected) = &config.expected_exe {
         match std::fs::read_link(format!("/proc/{pid}/exe")) {
             Ok(actual) if &actual == expected => {}
             _ => {
-                eprintln!("openhello-keyd: ticket socket peer refused: pid {pid} is not the expected executable");
+                log(
+                    Level::Warn,
+                    "peer-refused",
+                    &[("reason", Value::Label("unexpected executable"))],
+                );
                 return false;
             }
         }

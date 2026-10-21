@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use crate::logging::Level;
 use crate::{KeydConfig, TicketSocketConfig, UnlockSocketConfig};
 
 pub const DEFAULT_TICKET_SOCKET: &str = "/run/openhello/keyd-ticket.sock";
@@ -24,6 +25,7 @@ pub struct DaemonConfig {
     pub unlock: UnlockSocketConfig,
     pub bus: BusKind,
     pub auth: AuthMode,
+    pub log_level: Level,
 }
 
 impl DaemonConfig {
@@ -74,6 +76,14 @@ impl DaemonConfig {
                 ))
             }
         };
+        let log_level = match get("OPENHELLO_KEYD_LOG_LEVEL") {
+            None => Level::Info,
+            Some(text) => Level::parse(&text).ok_or_else(|| {
+                format!(
+                    "OPENHELLO_KEYD_LOG_LEVEL must be error|warn|info|debug|trace, got `{text}`"
+                )
+            })?,
+        };
         if ticket.path == unlock.path {
             return Err("the ticket and unlock sockets must use different paths".into());
         }
@@ -83,6 +93,7 @@ impl DaemonConfig {
             unlock,
             bus,
             auth,
+            log_level,
         })
     }
 }
@@ -120,6 +131,7 @@ mod tests {
             ("OPENHELLO_KEYD_BUS", "mars"),
             ("OPENHELLO_KEYD_AUTH", "none"),
             ("OPENHELLO_KEYD_TICKET_UID", "root"),
+            ("OPENHELLO_KEYD_LOG_LEVEL", "loud"),
         ] {
             let error = DaemonConfig::from_lookup(lookup(&[
                 ("OPENHELLO_KEYD_STORE_DIR", "/s"),

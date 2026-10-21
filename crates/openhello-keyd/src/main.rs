@@ -19,6 +19,7 @@ extern "C" fn request_stop(_: libc::c_int) {
 }
 
 fn run(config: DaemonConfig) -> Result<(), String> {
+    openhello_keyd::logging::set_level(config.log_level);
     let protectors = Arc::new(Protectors::new(config.keyd).map_err(|e| e.to_string())?);
     protectors
         .apply_lockout_policy(&LockoutPolicy::RECOMMENDED)

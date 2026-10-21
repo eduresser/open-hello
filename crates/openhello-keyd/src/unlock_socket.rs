@@ -1,3 +1,4 @@
+use crate::logging::{log, Level, Value};
 use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::AsRawFd;
@@ -102,10 +103,11 @@ fn serve(protectors: &Protectors, mut stream: UnixStream) {
     };
     while let Some((op, payload)) = read_frame(&mut stream) {
         let Some(reply) = answer(protectors, uid, op, &payload) else {
-            eprintln!("openhello-keyd: unlock request refused for uid {uid}");
+            log(Level::Warn, "unlock-refused", &[("uid", Value::Uid(uid))]);
             refuse(&mut stream);
             return;
         };
+        log(Level::Debug, "unlock-accepted", &[("uid", Value::Uid(uid))]);
         if write_reply(&mut stream, STATUS_ACCEPTED, &reply).is_err() {
             return;
         }
@@ -157,7 +159,11 @@ fn read_frame(stream: &mut UnixStream) -> Option<(u8, Zeroizing<Vec<u8>>)> {
     stream.read_exact(&mut header).ok()?;
     let len = usize::from(u16::from_be_bytes([header[1], header[2]]));
     if len > MAX_PAYLOAD {
-        eprintln!("openhello-keyd: unlock request refused: payload of {len} bytes");
+        log(
+            Level::Warn,
+            "unlock-refused",
+            &[("payload_bytes", Value::Count(len as u64))],
+        );
         return None;
     }
     let mut payload = Zeroizing::new(vec![0u8; len]);

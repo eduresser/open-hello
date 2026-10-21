@@ -366,7 +366,17 @@ pub(crate) fn failure(context: &str, detail: &str, secrets: &[&str]) -> KeydErro
     for secret in secrets.iter().filter(|s| !s.is_empty()) {
         detail = detail.replace(secret, "[redacted]");
     }
-    eprintln!("openhello-keyd: {context} failed: {detail}");
+    crate::logging::log(
+        crate::logging::Level::Error,
+        "tpm-failure",
+        &[
+            (
+                "context",
+                crate::logging::Value::Reason(context.to_string()),
+            ),
+            ("detail", crate::logging::Value::Reason(detail)),
+        ],
+    );
     KeydError::Tpm
 }
 
