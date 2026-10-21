@@ -18,8 +18,7 @@
 - Effort: medium
 - Notes: pure library, no I/O. Independent of the spike.
 
-## T-016 — openhello-keyd: workspace crate and TPM key provisioning [pending]
-
+## T-016 — openhello-keyd: workspace crate and TPM key provisioning [done]
 - Refs: AC-016, AC-017, AC-018
 - Files: Cargo.toml, crates/openhello-keyd/Cargo.toml, crates/openhello-keyd/src/lib.rs, crates/openhello-keyd/src/tpm.rs, crates/openhello-keyd/src/provision.rs
 - Model: claude-sonnet-5
