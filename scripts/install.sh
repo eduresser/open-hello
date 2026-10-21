@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
 # PAM directory = dirname of libpam.so.0 from the loader cache + /security: covers openSUSE (/usr/lib64), Debian/Ubuntu (multiarch) and Arch (/usr/lib).
 # Installs open-hello without touching the system's package manager: it checks capabilities, builds, and installs to neutral locations.
-# usage: sudo scripts/install.sh [--dry-run] [--skip-checks] [--calibration-images DIR | --calibration-url URL]
-# Then enable the PAM module per service with `openhello-cli pam enable <service>`.
+# usage: sudo scripts/install.sh [--dry-run] [--skip-checks] [--no-pam] [--calibration-images DIR | --calibration-url URL]
+# The PAM module is enabled once in the common auth stack unless --no-pam is given; undo with `sudo openhello-cli pam disable`.
 set -euo pipefail
 
 DRY_RUN=0
 SKIP_CHECKS=0
+ENABLE_PAM=1
 CALIBRATION_IMAGES=""
 CALIBRATION_URL=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY_RUN=1 ;;
     --skip-checks) SKIP_CHECKS=1 ;;
+    --no-pam) ENABLE_PAM=0 ;;
     --no-deps) echo "warning: --no-deps is deprecated and ignored; the installer no longer installs packages" >&2 ;;
     --calibration-images) CALIBRATION_IMAGES="${2:?--calibration-images needs a directory}"; shift ;;
     --calibration-url) CALIBRATION_URL="${2:?--calibration-url needs a URL}"; shift ;;
@@ -186,6 +188,13 @@ install_pam_module() {
   run install -d -m 0755 "$pam_dir"
   run install -m 0755 "$T/libpam_openhello.so" "$pam_dir/pam_openhello.so"
   PAM_MODULE_DIR="$pam_dir"
+  PAM_ENABLED=0
+  [ "$ENABLE_PAM" = 1 ] || return 0
+  if run /usr/local/bin/openhello-cli pam enable; then
+    PAM_ENABLED=1
+  else
+    echo "warning: could not enable the PAM module in the common auth stack; password authentication is untouched. Fix the cause above, or enable per service with: sudo openhello-cli pam enable <service>..." >&2
+  fi
 }
 
 run install -m 0644 "$REPO/packaging/io.openhello.Biometrics1.conf" "$DBUS_POLICY_DIR/io.openhello.Biometrics1.conf"
@@ -247,5 +256,10 @@ run systemctl restart openhellod 2>/dev/null || true
 
 echo
 echo "open-hello installed and started. Check OPENHELLO_DEVICE (the IR camera node) in $CONF_DIR/openhello.env"
-echo "PAM module installed at $PAM_MODULE_DIR/pam_openhello.so; enable it per service with: sudo openhello-cli pam enable sudo (list with: openhello-cli pam status)"
+echo "PAM module installed at $PAM_MODULE_DIR/pam_openhello.so"
+if [ "$PAM_ENABLED" = 1 ] || { [ "$DRY_RUN" = 1 ] && [ "$ENABLE_PAM" = 1 ]; }; then
+  echo "PAM module enabled once in the common auth stack (sudo, polkit, lock screen and greeters listed in $CONF_DIR/pam-services). It only acts for users who enrolled a face; passwords keep working. Undo with: sudo openhello-cli pam disable (check with: openhello-cli pam status)"
+else
+  echo "PAM module not enabled. Enable it with: sudo openhello-cli pam enable (whole integration) or per service: sudo openhello-cli pam enable <service>..."
+fi
 [ ! -d "$CONF_DIR/nssdb" ] || echo "$CONF_DIR/nssdb was created by an older installer and is no longer used; it can be deleted"

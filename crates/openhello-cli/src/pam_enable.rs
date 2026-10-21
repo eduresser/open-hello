@@ -3,10 +3,13 @@ use std::io::Write;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
-pub const PAM_USAGE: &str = "usage: openhello-cli pam <enable [service...] | disable <service>... | status | migrate> [--root DIR] [--arg flag|key=value]...";
+pub const PAM_USAGE: &str = "usage: openhello-cli pam <enable [service...] | disable [service...] | status | migrate> [--root DIR] [--arg flag|key=value]...";
 
 const MODULE: &str = "pam_openhello.so";
-const DEFAULT_SERVICES: &[&str] = &["sudo"];
+const ALLOWLIST_PATH: &str = "/etc/openhello/pam-services";
+const ALLOWLIST_DATA: &str = include_str!("../../../packaging/pam/pam-services");
+const FALLBACK: &str =
+    "per-service fallback: sudo openhello-cli pam enable <service>... (one service per file in /etc/pam.d)";
 const COMMON_STACKS: &[&str] = &[
     "common-auth",
     "system-auth",
@@ -98,12 +101,6 @@ fn parse(args: &[String]) -> Result<Request, PamFailure> {
     if matches!(action, Action::Status | Action::Migrate) && !services.is_empty() {
         return Err(usage("this command takes no service names"));
     }
-    if action == Action::Disable && services.is_empty() {
-        return Err(usage("disable needs at least one service name"));
-    }
-    if action == Action::Enable && services.is_empty() {
-        services = DEFAULT_SERVICES.iter().map(|s| s.to_string()).collect();
-    }
     Ok(Request {
         action,
         root,
@@ -164,6 +161,13 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), PamFailure> {
             if request.action == Action::Enable {
                 migrate(&dirs, &mut say).map_err(failed)?;
             }
+            if request.services.is_empty() {
+                let result = match request.action {
+                    Action::Enable => enable_common(&dirs, &request.module_args, &mut say),
+                    _ => disable_everywhere(&dirs, &mut say),
+                };
+                return result.map_err(failed);
+            }
             let mut problems = Vec::new();
             for service in &request.services {
                 let outcome = validate_service(service).and_then(|_| match request.action {
@@ -203,10 +207,14 @@ fn is_old_include(line: &str) -> bool {
 }
 
 fn insert_line(content: &str, line: &str) -> String {
+    insert_before(content, line, &["auth", "-auth", "@include"])
+}
+
+fn insert_before(content: &str, line: &str, anchors: &[&str]) -> String {
     let lines: Vec<&str> = content.split_inclusive('\n').collect();
     let at = lines
         .iter()
-        .position(|l| matches!(first_token(l), Some("auth" | "-auth" | "@include")))
+        .position(|l| first_token(l).is_some_and(|t| anchors.contains(&t)))
         .unwrap_or(lines.len());
     let mut result = String::with_capacity(content.len() + line.len() + 2);
     for (index, existing) in lines.iter().enumerate() {
@@ -369,7 +377,189 @@ fn disable_one(dirs: &Dirs, service: &str) -> Result<String, String> {
     Ok(format!("{service}: disabled, removed {removed} line(s)"))
 }
 
+fn allowlist_services(text: &str) -> Vec<&str> {
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .collect()
+}
+
+fn include_target(line: &str) -> Option<&str> {
+    let tokens: Vec<&str> = line.split_whitespace().collect();
+    match tokens.as_slice() {
+        ["@include", name] | ["auth" | "-auth", "include" | "substack", name] => Some(name),
+        _ => None,
+    }
+}
+
+fn has_auth_line(text: &str) -> bool {
+    text.lines()
+        .any(|l| matches!(first_token(l), Some("auth" | "-auth")))
+}
+
+fn read_service(dirs: &Dirs, name: &str) -> Option<String> {
+    fs::read_to_string(dirs.etc.join(name))
+        .or_else(|_| fs::read_to_string(dirs.vendor.join(name)))
+        .ok()
+}
+
+fn discover_common_stack(dirs: &Dirs) -> Result<String, String> {
+    let sudo = read_service(dirs, "sudo").ok_or_else(|| {
+        "no PAM service file for `sudo`, so the common auth stack cannot be discovered".to_string()
+    })?;
+    sudo.lines()
+        .filter_map(include_target)
+        .filter(|name| !name.contains('/'))
+        .find(|name| read_service(dirs, name).is_some_and(|t| has_auth_line(&t)))
+        .map(str::to_string)
+        .ok_or_else(|| "sudo includes no common auth stack (no `@include X` or `auth include X` pointing to a file with `auth` lines)".to_string())
+}
+
+fn enable_common(
+    dirs: &Dirs,
+    module_args: &[String],
+    say: &mut dyn FnMut(String),
+) -> Result<(), String> {
+    let with_fallback = |e: String| format!("{e}\n{FALLBACK}");
+    let name = discover_common_stack(dirs).map_err(with_fallback)?;
+    let path = materialize(dirs, &name).map_err(with_fallback)?;
+    let content = read_text(&path)?;
+    if content.lines().any(is_our_line) {
+        say(format!("{name}: already enabled in {}", path.display()));
+    } else {
+        let mut args = vec![format!("allowlist={ALLOWLIST_PATH}")];
+        args.extend(module_args.iter().cloned());
+        let line = our_line(&args);
+        rewrite(
+            &path,
+            &name,
+            &insert_before(&content, &line, &["auth", "-auth"]),
+        )?;
+        say(format!("{name}: enabled in {}", path.display()));
+    }
+    write_allowlist(dirs, say)?;
+    for service in allowlist_services(ALLOWLIST_DATA) {
+        if service == name {
+            continue;
+        }
+        remove_service_lines(dirs, service, say)?;
+    }
+    Ok(())
+}
+
+fn write_allowlist(dirs: &Dirs, say: &mut dyn FnMut(String)) -> Result<(), String> {
+    let path = allowlist_file(dirs);
+    if fs::symlink_metadata(&path).is_ok() {
+        say(format!(
+            "{}: kept as is (never overwritten)",
+            path.display()
+        ));
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+    }
+    write_atomic(&path, ALLOWLIST_DATA.as_bytes(), 0o644, None)?;
+    say(format!("{}: written", path.display()));
+    Ok(())
+}
+
+fn allowlist_file(dirs: &Dirs) -> PathBuf {
+    let root = dirs
+        .etc
+        .parent()
+        .and_then(Path::parent)
+        .unwrap_or(Path::new("/"));
+    root.join(ALLOWLIST_PATH.trim_start_matches('/'))
+}
+
+fn is_regular(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|m| m.is_file())
+}
+
+fn remove_service_lines(
+    dirs: &Dirs,
+    service: &str,
+    say: &mut dyn FnMut(String),
+) -> Result<(), String> {
+    let path = dirs.etc.join(service);
+    if !is_regular(&path) {
+        return Ok(());
+    }
+    let Ok(content) = fs::read_to_string(&path) else {
+        return Ok(());
+    };
+    let (kept, removed) = remove_lines(&content, is_our_line);
+    if removed > 0 {
+        rewrite(&path, service, &kept)?;
+        say(format!(
+            "{service}: removed {removed} per-service line(s), the common stack covers it"
+        ));
+    }
+    Ok(())
+}
+
+fn editable_names(dirs: &Dirs) -> Result<Vec<String>, String> {
+    let mut names = list_names(&dirs.etc)?;
+    names.retain(|n| !n.ends_with(BACKUP_SUFFIX) && !n.starts_with('.'));
+    names.sort();
+    Ok(names)
+}
+
+fn disable_everywhere(dirs: &Dirs, say: &mut dyn FnMut(String)) -> Result<(), String> {
+    let mut touched = 0;
+    for name in editable_names(dirs)? {
+        let path = dirs.etc.join(&name);
+        let Some(content) = is_regular(&path)
+            .then(|| fs::read_to_string(&path).ok())
+            .flatten()
+        else {
+            continue;
+        };
+        let (kept, removed) = remove_lines(&content, is_our_line);
+        if removed > 0 {
+            rewrite(&path, &name, &kept)?;
+            say(format!("{name}: disabled, removed {removed} line(s)"));
+            touched += 1;
+        }
+    }
+    if touched == 0 {
+        say("not enabled anywhere".to_string());
+    }
+    say(format!(
+        "{ALLOWLIST_PATH} was left in place; delete it by hand if you no longer need it"
+    ));
+    Ok(())
+}
+
+fn report_common_stack(dirs: &Dirs, say: &mut dyn FnMut(String)) {
+    match discover_common_stack(dirs) {
+        Ok(name) => {
+            let path = dirs.etc.join(&name);
+            let state = match fs::symlink_metadata(&path) {
+                Ok(m) if m.file_type().is_symlink() => "symlink (not editable)",
+                Ok(_) if read_service(dirs, &name).is_some_and(|t| t.lines().any(is_our_line)) => {
+                    "line present"
+                }
+                _ => "line absent",
+            };
+            say(format!("common stack: {name}, {state}"));
+        }
+        Err(reason) => say(format!("common stack: not found ({reason})")),
+    }
+    match fs::read_to_string(allowlist_file(dirs)) {
+        Ok(text) => say(format!(
+            "allowlist {ALLOWLIST_PATH}: {}",
+            allowlist_services(&text).join(", ")
+        )),
+        Err(_) => say(format!("allowlist {ALLOWLIST_PATH}: missing")),
+    }
+}
+
 fn status(dirs: &Dirs, say: &mut dyn FnMut(String)) -> Result<(), String> {
+    report_common_stack(dirs, say);
+    let common = discover_common_stack(dirs).ok();
     let mut names = list_names(&dirs.etc)?;
     names.sort();
     for name in names {
@@ -383,7 +573,12 @@ fn status(dirs: &Dirs, say: &mut dyn FnMut(String)) -> Result<(), String> {
             },
             _ => continue,
         };
-        say(format!("{name}: {state}"));
+        let note = if state == "enabled" && common.as_deref() != Some(name.as_str()) {
+            " (per-service line)"
+        } else {
+            ""
+        };
+        say(format!("{name}: {state}{note}"));
     }
     Ok(())
 }
