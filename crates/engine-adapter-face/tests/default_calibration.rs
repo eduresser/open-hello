@@ -10,7 +10,7 @@ fn error_text(result: Result<FarCalibration, EngineError>) -> String {
 
 fn shifted_calibration() -> FarCalibration {
     let scores: Vec<f32> = (0..5_000u32)
-        .map(|i| 0.7 + 0.1 * ((i.wrapping_mul(2654435761) % 10_000) as f32 / 10_000.0))
+        .map(|i| 0.85 + 0.1 * ((i.wrapping_mul(2654435761) % 10_000) as f32 / 10_000.0))
         .collect();
     FarCalibration::from_impostor_scores(&scores).unwrap()
 }
@@ -32,9 +32,17 @@ fn decision_at_cosine(calibration: FarCalibration, cosine: f32) -> bool {
 #[test]
 fn engine_calibration_loads_without_a_file_and_uses_the_embedded_threshold_at_1e_5() {
     let calibration = FarCalibration::load(None).unwrap();
-    assert!((calibration.score_threshold(1e-5).unwrap() - 0.4632).abs() < 5e-4);
-    assert!(decision_at_cosine(calibration.clone(), 0.48));
-    assert!(!decision_at_cosine(calibration, 0.44));
+    assert!((calibration.score_threshold(1e-5).unwrap() - 0.7244).abs() < 5e-4);
+    assert!(decision_at_cosine(calibration.clone(), 0.74));
+    assert!(!decision_at_cosine(calibration, 0.70));
+}
+
+// @spec:AC-036
+#[test]
+fn the_daemon_default_threshold_sits_between_the_measured_infrared_impostor_and_genuine_scores() {
+    let calibration = FarCalibration::load(None).unwrap();
+    let threshold = calibration.score_threshold(2e-4 / 16.0 / 6.0).unwrap();
+    assert!((0.75..0.80).contains(&threshold), "{threshold}");
 }
 
 // @spec:AC-037
@@ -55,7 +63,7 @@ fn a_valid_file_overrides_the_embedded_table() {
     ] {
         let loaded = FarCalibration::load(Some(&write(&dir, name, &contents))).unwrap();
         assert_eq!(loaded, custom);
-        assert!(loaded.score_threshold(1e-5).unwrap() > embedded_threshold + 0.2);
+        assert!(loaded.score_threshold(1e-5).unwrap() > embedded_threshold + 0.1);
         assert!(!decision_at_cosine(loaded, 0.48));
     }
 }
@@ -66,7 +74,7 @@ fn truncated_wrong_marker_and_inconsistent_files_fail_explicitly_without_the_emb
     let dir = tempfile::tempdir().unwrap();
     let valid = shifted_calibration().to_toml(&Provenance::default());
     let binary = shifted_calibration().to_bytes();
-    let embedded_tail_score = "0.2051624208688736";
+    let embedded_tail_score = "0.4720372259616852";
     let cases: Vec<(&str, Vec<u8>)> = vec![
         (
             "truncated.toml",
@@ -154,6 +162,6 @@ fn embedded_table_parses_and_its_thresholds_are_monotonic_and_match_the_informat
     }
     assert_eq!(
         document["provenance"]["impostor_pairs"].as_integer(),
-        Some(179_700)
+        Some(19_110)
     );
 }

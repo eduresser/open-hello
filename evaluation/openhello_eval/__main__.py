@@ -3,7 +3,7 @@ import json
 import sys
 
 from .calibration import Calibration
-from .dataset import link_strangers, list_identities, prepare_lfw_parquet, split_identities
+from .dataset import link_strangers, list_identities, prepare_cbsr_nir, prepare_lfw_parquet, split_identities
 from .metrics import DEFAULT_TARGET_FARS, format_report
 from .pipeline import Pipeline
 from .workflow import Run, save_embeddings
@@ -22,6 +22,10 @@ def build_parser():
     prepare = commands.add_parser("prepare", help="unpack the LFW parquet into one folder per person")
     prepare.add_argument("--parquet", required=True)
     prepare.add_argument("--out", required=True)
+
+    cbsr = commands.add_parser("prepare-cbsr", help="group the CBSR NIR bmp files into one PNG folder per person")
+    cbsr.add_argument("--source", required=True)
+    cbsr.add_argument("--out", required=True)
 
     embed = commands.add_parser("embed", help="run YuNet + AuraFace over every photo")
     embed.add_argument("--models-dir", required=True)
@@ -48,6 +52,9 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
     if args.command == "prepare":
         counts = prepare_lfw_parquet(args.parquet, args.out)
+        print(f"{len(counts)} people, {sum(counts.values())} photos -> {args.out}")
+    elif args.command == "prepare-cbsr":
+        counts = prepare_cbsr_nir(args.source, args.out)
         print(f"{len(counts)} people, {sum(counts.values())} photos -> {args.out}")
     elif args.command == "embed":
         people = list_identities(args.images_dir)

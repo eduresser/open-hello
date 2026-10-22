@@ -11,7 +11,7 @@ use crate::ticket_client::{TicketClient, TicketDelivery};
 pub const MAX_SCORED_FRAMES: u32 = 16;
 pub const MAX_ATTEMPT_FRAMES: usize = 48;
 pub const MAX_ATTEMPTS: u32 = 3;
-pub const DEFAULT_TARGET_FAR: f64 = 1e-5;
+pub const DEFAULT_TARGET_FAR: f64 = 2e-4;
 pub const ATTEMPT_BUDGET: Duration = openhello_auth_proto::FACE_ATTEMPT_BUDGET;
 
 pub type Cancel<'a> = &'a dyn Fn() -> bool;
