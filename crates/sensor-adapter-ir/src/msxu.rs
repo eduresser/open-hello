@@ -6,7 +6,7 @@ use crate::SensorError;
 // MS_CAMERA_CONTROL_XU {0f3f95dc-2632-4c4e-92c9-a04782f43bc8}, in descriptor byte order
 const MSXU_GUID: [u8; 16] = [0xdc, 0x95, 0x3f, 0x0f, 0x32, 0x26, 0x4e, 0x4c, 0x92, 0xc9, 0xa0, 0x47, 0x82, 0xf4, 0x3b, 0xc8];
 const FACE_AUTH_SELECTOR: u8 = 6;
-const ALTERNATING_ILLUMINATION: u8 = 0x01;
+const ALTERNATING_ILLUMINATION: u8 = 0x02;
 const CAPABILITIES_BYTE: usize = 1;
 const MODE_BYTE: usize = 2;
 const MIN_PAYLOAD_LEN: usize = 3;
@@ -83,12 +83,11 @@ pub fn locate_face_auth_unit(device_path: &str) -> Option<MsxuUnit> {
 pub struct MsxuEmitter<T: XuTransport> {
     transport: T,
     unit: u8,
-    allow_write: bool,
 }
 
 impl<T: XuTransport> MsxuEmitter<T> {
-    pub fn new(transport: T, unit: u8, allow_write: bool) -> Self {
-        Self { transport, unit, allow_write }
+    pub fn new(transport: T, unit: u8) -> Self {
+        Self { transport, unit }
     }
 
     fn read(&mut self, request: u8, length: usize) -> Result<Vec<u8>, SensorError> {
@@ -106,30 +105,42 @@ impl<T: XuTransport> MsxuEmitter<T> {
             Err(SensorError::EmitterActivation(format!("face-auth control reports unexpected length {length}")))
         }
     }
+
+    fn write_alternating(&mut self, mut payload: Vec<u8>) -> Result<(), SensorError> {
+        payload[MODE_BYTE] = ALTERNATING_ILLUMINATION;
+        self.transport
+            .query(self.unit, FACE_AUTH_SELECTOR, UVC_SET_CUR, &mut payload)
+            .map_err(|error| SensorError::EmitterWriteRefused(error.to_string()))
+    }
 }
 
 impl<T: XuTransport> Emitter for MsxuEmitter<T> {
-    fn activate(&mut self) -> Result<(), SensorError> {
+    fn controllable(&self) -> bool {
+        true
+    }
+
+    fn ensure(&mut self) -> Result<(), SensorError> {
         let length = self.payload_len()?;
-        let mut current = self.read(UVC_GET_CUR, length)?;
+        let current = self.read(UVC_GET_CUR, length)?;
+        if current[MODE_BYTE] == ALTERNATING_ILLUMINATION {
+            return Ok(());
+        }
         let maximum = self.read(UVC_GET_MAX, length)?;
         if current[CAPABILITIES_BYTE] & ALTERNATING_ILLUMINATION == 0 || maximum[MODE_BYTE] < ALTERNATING_ILLUMINATION {
             return Err(SensorError::EmitterActivation(
                 "camera does not support alternating frame illumination".into(),
             ));
         }
-        if !self.allow_write {
-            return Err(SensorError::EmitterActivation(
-                "the stream is dark and the camera can switch illumination modes; set OPENHELLO_IR_EMITTER_ALLOW_WRITE=1 to let open-hello write the face-auth control".into(),
-            ));
-        }
-        current[MODE_BYTE] = ALTERNATING_ILLUMINATION;
-        self.transport.query(self.unit, FACE_AUTH_SELECTOR, UVC_SET_CUR, &mut current)?;
+        self.write_alternating(current)?;
         let confirmed = self.read(UVC_GET_CUR, length)?;
         if confirmed[MODE_BYTE] != ALTERNATING_ILLUMINATION {
-            return Err(SensorError::EmitterActivation("camera did not accept the illumination mode".into()));
+            return Err(SensorError::EmitterNotConfirmed(confirmed[MODE_BYTE]));
         }
         Ok(())
+    }
+
+    fn activate(&mut self) -> Result<(), SensorError> {
+        self.ensure()
     }
 }
 
@@ -194,11 +205,12 @@ mod tests {
         maximum: Vec<u8>,
         writes: Vec<Vec<u8>>,
         ignore_writes: bool,
+        refuse_writes: bool,
     }
 
     impl FakeCamera {
         fn new(control: &[u8], maximum: &[u8]) -> Self {
-            Self { control: control.to_vec(), maximum: maximum.to_vec(), writes: Vec::new(), ignore_writes: false }
+            Self { control: control.to_vec(), maximum: maximum.to_vec(), writes: Vec::new(), ignore_writes: false, refuse_writes: false }
         }
     }
 
@@ -210,6 +222,9 @@ mod tests {
                 UVC_GET_CUR => data.copy_from_slice(&self.control),
                 UVC_GET_MAX => data.copy_from_slice(&self.maximum),
                 UVC_SET_CUR => {
+                    if self.refuse_writes {
+                        return Err(SensorError::EmitterActivation("Input/output error".into()));
+                    }
                     self.writes.push(data.to_vec());
                     if !self.ignore_writes {
                         self.control = data.to_vec();
@@ -223,47 +238,60 @@ mod tests {
 
     const DEFAULT_CONTROL: [u8; 9] = [1, 3, 2, 0, 0, 0, 0, 0, 0];
 
-    // @spec:AC-011
+    const AMBIENT_CONTROL: [u8; 9] = [1, 3, 1, 0, 0, 0, 0, 0, 0];
+    const ALTERNATING_CONTROL: [u8; 9] = [1, 3, 2, 0, 0, 0, 0, 0, 0];
+
+    // @covers:AC-039-write
     #[test]
-    fn activation_writes_alternating_mode_and_verifies_it() {
-        let mut camera = FakeCamera::new(&[1, 3, 0, 0, 0, 0, 0, 0, 0], &DEFAULT_CONTROL);
-        MsxuEmitter::new(&mut camera, 7, true).activate().unwrap();
-        assert_eq!(camera.writes, vec![vec![1, 3, 1, 0, 0, 0, 0, 0, 0]]);
+    fn ensure_writes_alternating_mode_when_the_camera_comes_up_in_mode_1_and_confirms_it() {
+        let mut camera = FakeCamera::new(&AMBIENT_CONTROL, &DEFAULT_CONTROL);
+        MsxuEmitter::new(&mut camera, 7).ensure().unwrap();
+        assert_eq!(camera.writes, vec![ALTERNATING_CONTROL.to_vec()]);
+        assert_eq!(camera.control, ALTERNATING_CONTROL.to_vec());
     }
 
-    // @spec:AC-011
+    // @covers:AC-039-no-rewrite
     #[test]
-    fn activation_without_write_permission_changes_nothing_and_explains_why() {
-        let mut camera = FakeCamera::new(&DEFAULT_CONTROL, &DEFAULT_CONTROL);
-        let error = MsxuEmitter::new(&mut camera, 7, false).activate().unwrap_err();
-        assert!(error.to_string().contains("OPENHELLO_IR_EMITTER_ALLOW_WRITE"));
+    fn ensure_does_not_write_when_the_mode_is_already_alternating() {
+        let mut camera = FakeCamera::new(&ALTERNATING_CONTROL, &DEFAULT_CONTROL);
+        MsxuEmitter::new(&mut camera, 7).ensure().unwrap();
         assert!(camera.writes.is_empty());
     }
 
-    // @spec:AC-011
+    // @covers:AC-039-unsupported
     #[test]
     fn unsupported_capability_or_range_is_rejected_before_any_write() {
-        let mut no_capability = FakeCamera::new(&[1, 0, 2, 0, 0, 0, 0, 0, 0], &DEFAULT_CONTROL);
-        assert!(MsxuEmitter::new(&mut no_capability, 7, true).activate().is_err());
+        let mut no_capability = FakeCamera::new(&[1, 1, 1, 0, 0, 0, 0, 0, 0], &DEFAULT_CONTROL);
+        assert!(matches!(MsxuEmitter::new(&mut no_capability, 7).ensure(), Err(SensorError::EmitterActivation(_))));
         assert!(no_capability.writes.is_empty());
 
-        let mut low_maximum = FakeCamera::new(&DEFAULT_CONTROL, &[1, 3, 0, 0, 0, 0, 0, 0, 0]);
-        assert!(MsxuEmitter::new(&mut low_maximum, 7, true).activate().is_err());
+        let mut low_maximum = FakeCamera::new(&AMBIENT_CONTROL, &[1, 3, 1, 0, 0, 0, 0, 0, 0]);
+        assert!(matches!(MsxuEmitter::new(&mut low_maximum, 7).ensure(), Err(SensorError::EmitterActivation(_))));
         assert!(low_maximum.writes.is_empty());
     }
 
-    // @spec:AC-011
+    // @covers:AC-039-not-confirmed
     #[test]
-    fn activation_fails_when_the_camera_does_not_keep_the_mode() {
-        let mut camera = FakeCamera::new(&DEFAULT_CONTROL, &DEFAULT_CONTROL);
+    fn ensure_fails_when_the_camera_does_not_keep_the_mode() {
+        let mut camera = FakeCamera::new(&AMBIENT_CONTROL, &DEFAULT_CONTROL);
         camera.ignore_writes = true;
-        let error = MsxuEmitter::new(&mut camera, 7, true).activate().unwrap_err();
-        assert!(error.to_string().contains("did not accept"));
+        let error = MsxuEmitter::new(&mut camera, 7).ensure().unwrap_err();
+        assert!(matches!(error, SensorError::EmitterNotConfirmed(1)));
+    }
+
+    // @covers:AC-039-refused
+    #[test]
+    fn ensure_fails_with_a_distinct_error_when_the_write_is_refused() {
+        let mut camera = FakeCamera::new(&AMBIENT_CONTROL, &DEFAULT_CONTROL);
+        camera.refuse_writes = true;
+        let error = MsxuEmitter::new(&mut camera, 7).ensure().unwrap_err();
+        assert!(matches!(error, SensorError::EmitterWriteRefused(_)));
+        assert!(camera.writes.is_empty());
     }
 
     #[test]
     fn unexpected_payload_length_is_rejected() {
         let mut camera = FakeCamera::new(&[1, 3], &[1, 3]);
-        assert!(MsxuEmitter::new(&mut camera, 7, true).activate().is_err());
+        assert!(MsxuEmitter::new(&mut camera, 7).ensure().is_err());
     }
 }

@@ -190,6 +190,12 @@ As a person installing open-hello, I want the false-accept calibration to ship i
 - **When** the face engine is loaded
 - **Then** loading fails with an explicit calibration error and the embedded table is not used
 
+#### AC-039 — The IR emitter is switched on before every capture and capture fails closed without illumination
+
+- **Given** a camera that exposes the Microsoft face-auth control, or one with no controllable emitter
+- **When** the sensor adapter begins a capture
+- **Then** for the Microsoft control it reads the control before every capture, writes the alternating-illumination mode and confirms it by read-back when the current mode is not alternating (no environment switch), and admits frames only from a stream that alternates lit/unlit; for a camera with no controllable emitter the existing brightness rule applies unchanged; a refused write, an unconfirmed write or a stream that never alternates fails the capture with a distinct error and no frame is returned
+
 ## Out of scope
 
 - Graphical login through a display-manager greeter and its UX (roadmap v2).

@@ -39,7 +39,7 @@ impl EmitterControl {
 }
 
 fn decode_hex(text: &str) -> Option<Vec<u8>> {
-    if text.len() % 2 != 0 {
+    if !text.len().is_multiple_of(2) {
         return None;
     }
     (0..text.len())
@@ -49,6 +49,14 @@ fn decode_hex(text: &str) -> Option<Vec<u8>> {
 }
 
 pub trait Emitter {
+    fn controllable(&self) -> bool {
+        false
+    }
+
+    fn ensure(&mut self) -> Result<(), SensorError> {
+        Ok(())
+    }
+
     fn activate(&mut self) -> Result<(), SensorError>;
 }
 
