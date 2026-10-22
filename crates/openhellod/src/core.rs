@@ -1,9 +1,12 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::backends::{
     AuthVerdict, DaemonError, EngineBackend, EnrollProgress, EnrollState, SensorBackend, StorageBackend,
 };
+use crate::fingerprint::{verify_default_attempts, FingerprintDecision, FingerprintMatcher, Unavailability};
 use crate::keyd_client::{KeyPurge, KeydClient};
 use crate::logging::{Level, Logger, Value};
 use crate::ticket_client::{TicketClient, TicketDelivery};
@@ -17,7 +20,7 @@ pub const DECISION_BUDGET: Duration = openhello_auth_proto::FACE_DECISION_BUDGET
 
 pub type Cancel<'a> = &'a dyn Fn() -> bool;
 
-pub trait Clock: Send {
+pub trait Clock: Send + Sync {
     fn elapsed(&self) -> Duration;
 }
 
@@ -74,8 +77,11 @@ pub struct Biometrics {
     last_delivery: Option<TicketDelivery>,
     keyd: Option<KeydClient>,
     last_key_purge: Option<KeyPurge>,
-    clock: Box<dyn Clock>,
+    clock: Arc<dyn Clock>,
+    fingerprint: Option<Box<dyn FingerprintMatcher>>,
 }
+
+const WAIT_POLL: Duration = Duration::from_millis(10);
 
 impl Biometrics {
     pub fn new(
@@ -84,7 +90,7 @@ impl Biometrics {
         storage: Box<dyn StorageBackend>,
         target_far: f64,
     ) -> Self {
-        Self { sensor, engine, storage, sessions: HashMap::new(), next_session: 1, started: Instant::now(), target_far, logger: Logger::stderr(Level::Info), tickets: None, last_delivery: None, keyd: None, last_key_purge: None, clock: Box::new(SystemClock(Instant::now())) }
+        Self { sensor, engine, storage, sessions: HashMap::new(), next_session: 1, started: Instant::now(), target_far, logger: Logger::stderr(Level::Info), tickets: None, last_delivery: None, keyd: None, last_key_purge: None, clock: Arc::new(SystemClock(Instant::now())), fingerprint: None }
     }
 
     pub fn with_logger(mut self, logger: Logger) -> Self {
@@ -93,7 +99,12 @@ impl Biometrics {
     }
 
     pub fn with_clock(mut self, clock: Box<dyn Clock>) -> Self {
-        self.clock = clock;
+        self.clock = Arc::from(clock);
+        self
+    }
+
+    pub fn with_fingerprint(mut self, matcher: Option<Box<dyn FingerprintMatcher>>) -> Self {
+        self.fingerprint = matcher;
         self
     }
 
@@ -174,13 +185,17 @@ impl Biometrics {
 
     pub fn verify_cancellable(&mut self, uid: u32, cancel: Cancel) -> Result<bool, DaemonError> {
         let template = match self.storage.get(uid) {
-            Ok(template) => template,
+            Ok(template) => Some(template),
             Err(error @ (DaemonError::NotFound | DaemonError::Tampered)) => {
                 self.logger.log(Level::Warn, "verify-template-unavailable", &[("uid", Value::Uid(uid)), ("reason", Value::reason(&error))]);
-                return Ok(false);
+                None
             }
             Err(other) => return Err(other),
         };
+        if let Some(matcher) = self.fingerprint.take() {
+            return self.verify_face_and_finger(uid, template, matcher, cancel);
+        }
+        let Some(template) = template else { return Ok(false) };
         let outcome = self.authenticate(&[(uid, template)], cancel)?;
         let accepted = outcome.uid == Some(uid);
         self.logger.log(
@@ -197,6 +212,106 @@ impl Biometrics {
             self.deliver_ticket(uid);
         }
         Ok(accepted)
+    }
+
+    fn verify_face_and_finger(
+        &mut self,
+        uid: u32,
+        template: Option<Vec<u8>>,
+        matcher: Box<dyn FingerprintMatcher>,
+        cancel: Cancel,
+    ) -> Result<bool, DaemonError> {
+        let stop = AtomicBool::new(false);
+        let finger_matched = AtomicBool::new(false);
+        let finger_deadline = self.clock.elapsed() + ATTEMPT_BUDGET;
+        let clock = self.clock.clone();
+        let finger_cancel = || stop.load(Ordering::SeqCst) || clock.elapsed() >= finger_deadline;
+        let face_cancel = || {
+            if cancel() {
+                stop.store(true, Ordering::SeqCst);
+                return true;
+            }
+            finger_matched.load(Ordering::SeqCst)
+        };
+        let (finger_cancel, finger_matched_ref, stop_ref) = (&finger_cancel, &finger_matched, &stop);
+
+        let (face, finger) = std::thread::scope(|scope| {
+            let worker = scope.spawn(move || {
+                let mut matcher = matcher;
+                let decision = verify_default_attempts(matcher.as_mut(), uid, finger_cancel);
+                if decision == FingerprintDecision::Matched {
+                    finger_matched_ref.store(true, Ordering::SeqCst);
+                }
+                (matcher, decision)
+            });
+            let face = template.map(|template| self.authenticate(&[(uid, template)], &face_cancel));
+            let face_settled = match &face {
+                Some(Ok(outcome)) => outcome.uid == Some(uid),
+                Some(Err(_)) => true,
+                None => false,
+            };
+            if face_settled {
+                stop_ref.store(true, Ordering::SeqCst);
+            }
+            while !worker.is_finished() {
+                if cancel() {
+                    stop_ref.store(true, Ordering::SeqCst);
+                }
+                std::thread::sleep(WAIT_POLL);
+            }
+            (face, worker.join())
+        });
+
+        let decision = match finger {
+            Ok((matcher, decision)) => {
+                self.fingerprint = Some(matcher);
+                decision
+            }
+            Err(_) => {
+                self.logger.log(Level::Error, "fingerprint-worker-failed", &[("uid", Value::Uid(uid))]);
+                FingerprintDecision::Unavailable(Unavailability::Unknown)
+            }
+        };
+        let finger_label = match decision {
+            FingerprintDecision::Matched => "match",
+            FingerprintDecision::Refused => "refused",
+            FingerprintDecision::Unavailable(kind) => kind.as_str(),
+            FingerprintDecision::Cancelled => "cancelled",
+        };
+        if cancel() {
+            return Err(self.cancelled(face.and_then(Result::ok).map_or(0, |outcome| outcome.frames)));
+        }
+        let (face_accepted, attempts, frames, face_error) = match face {
+            Some(Ok(outcome)) => (outcome.uid == Some(uid), outcome.attempts, outcome.frames, None),
+            Some(Err(error)) => (false, 0, 0, Some(error)),
+            None => (false, 0, 0, None),
+        };
+        let modality = match (face_accepted, decision) {
+            (true, _) => "face",
+            (false, FingerprintDecision::Matched) => "finger",
+            _ => "none",
+        };
+        let accepted = modality != "none";
+        self.logger.log(
+            Level::Info,
+            "verify",
+            &[
+                ("uid", Value::Uid(uid)),
+                ("attempts", Value::Count(attempts.into())),
+                ("frames", Value::Count(frames.into())),
+                ("finger", Value::Label(finger_label)),
+                ("modality", Value::Label(modality)),
+                ("accepted", Value::Flag(accepted)),
+            ],
+        );
+        if accepted {
+            self.deliver_ticket(uid);
+            return Ok(true);
+        }
+        match face_error {
+            Some(error) => Err(error),
+            None => Ok(false),
+        }
     }
 
     pub fn identify(&mut self) -> Result<Option<u32>, DaemonError> {
@@ -470,12 +585,13 @@ pub(crate) mod fakes {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
     use super::fakes::*;
     use super::*;
     use crate::backends::{AuthProgress, CapturedFrame};
+    use crate::fingerprint::{FingerprintResult, Unavailability};
     use crate::ticket_client::test_keyd::TestKeyd;
 
     #[test]
@@ -687,11 +803,20 @@ mod tests {
         frame_cost: Duration,
         fail_from_frame: Option<usize>,
         frames: usize,
+        gate: Option<Arc<AtomicBool>>,
+        real_delay: Duration,
     }
 
     impl SensorBackend for TimedSensor {
         fn capture(&mut self) -> Result<CapturedFrame, DaemonError> {
             self.frames += 1;
+            if let Some(gate) = &self.gate {
+                let started = Instant::now();
+                while !gate.load(Ordering::SeqCst) && started.elapsed() < Duration::from_secs(5) {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            }
+            std::thread::sleep(self.real_delay);
             if self.fail_from_frame.is_some_and(|from| self.frames >= from) {
                 return Err(DaemonError::Backend("camera unplugged".into()));
             }
@@ -711,11 +836,23 @@ mod tests {
     }
 
     fn rig(script: &[Script], frame_cost: Duration, fail_from_frame: Option<usize>) -> Rig {
+        rig_with(script, frame_cost, fail_from_frame, true, None, Duration::ZERO)
+    }
+
+    fn rig_with(
+        script: &[Script],
+        frame_cost: Duration,
+        fail_from_frame: Option<usize>,
+        has_template: bool,
+        gate: Option<Arc<AtomicBool>>,
+        real_delay: Duration,
+    ) -> Rig {
         let clock = ManualClock::default();
         let counters = Arc::new(Counters::default());
         let engine = ScriptedEngine { script: script.to_vec(), counters: counters.clone(), uid: 1000 };
-        let sensor = TimedSensor { counters: counters.clone(), clock: clock.clone(), frame_cost, fail_from_frame, frames: 0 };
-        let core = Biometrics::new(Box::new(sensor), Box::new(engine), Box::new(storage_with(&[(1000, b"mine")])), DEFAULT_TARGET_FAR)
+        let sensor = TimedSensor { counters: counters.clone(), clock: clock.clone(), frame_cost, fail_from_frame, frames: 0, gate, real_delay };
+        let storage = if has_template { storage_with(&[(1000, b"mine")]) } else { MemoryStorage::default() };
+        let core = Biometrics::new(Box::new(sensor), Box::new(engine), Box::new(storage), DEFAULT_TARGET_FAR)
             .with_clock(Box::new(clock.clone()));
         Rig { core, counters, clock }
     }
@@ -970,5 +1107,290 @@ mod tests {
         assert!(core.verify(1000).unwrap());
         assert_eq!(core.last_ticket_delivery(), Some(TicketDelivery::Delivered));
         assert_eq!(*second.accepted_uids.lock().unwrap(), vec![1000]);
+    }
+
+    #[derive(Clone, Copy)]
+    enum Step {
+        Result(FingerprintResult),
+        Hang,
+        HangThenMatch,
+    }
+
+    #[derive(Default)]
+    struct FingerLog {
+        calls: AtomicUsize,
+        cancelled: AtomicUsize,
+    }
+
+    struct ScriptedFinger {
+        steps: Vec<Step>,
+        log: Arc<FingerLog>,
+        clock: Option<ManualClock>,
+        done: Option<Arc<AtomicBool>>,
+    }
+
+    impl ScriptedFinger {
+        fn new(steps: &[Step]) -> (Self, Arc<FingerLog>) {
+            let log = Arc::new(FingerLog::default());
+            (Self { steps: steps.to_vec(), log: log.clone(), clock: None, done: None }, log)
+        }
+
+        fn ticking(mut self, clock: &ManualClock) -> Self {
+            self.clock = Some(clock.clone());
+            self
+        }
+
+        fn signalling(mut self, done: &Arc<AtomicBool>) -> Self {
+            self.done = Some(done.clone());
+            self
+        }
+
+        fn wait_for_cancel(&self, cancel: Cancel) {
+            while !cancel() {
+                if let Some(clock) = &self.clock {
+                    clock.0.fetch_add(100, Ordering::SeqCst);
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            self.log.cancelled.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    impl FingerprintMatcher for ScriptedFinger {
+        fn verify(&mut self, _: u32, cancel: Cancel) -> FingerprintResult {
+            let call = self.log.calls.fetch_add(1, Ordering::SeqCst);
+            let step = self.steps.get(call).copied().unwrap_or(Step::Result(FingerprintResult::Unavailable(Unavailability::Unknown)));
+            let result = match step {
+                Step::Result(result) => result,
+                Step::Hang => {
+                    self.wait_for_cancel(cancel);
+                    FingerprintResult::Cancelled
+                }
+                Step::HangThenMatch => {
+                    self.wait_for_cancel(cancel);
+                    FingerprintResult::Match
+                }
+            };
+            if call + 1 >= self.steps.len() {
+                if let Some(done) = &self.done {
+                    done.store(true, Ordering::SeqCst);
+                }
+            }
+            result
+        }
+    }
+
+    const MATCH: Step = Step::Result(FingerprintResult::Match);
+    const NO_MATCH: Step = Step::Result(FingerprintResult::NoMatch);
+
+    fn with_finger(mut rig: Rig, finger: ScriptedFinger) -> Rig {
+        rig.core = rig.core.with_fingerprint(Some(Box::new(finger)));
+        rig
+    }
+
+    fn with_keyd(mut rig: Rig, socket: &std::path::Path) -> Rig {
+        rig.core = rig.core.with_ticket_client(Some(TicketClient::new(socket)));
+        rig
+    }
+
+    fn slow_face(script: &[Script]) -> Rig {
+        rig_with(script, FRAME, None, true, None, Duration::from_millis(1))
+    }
+
+    // @spec:AC-052
+    #[test]
+    fn a_finger_that_matches_while_the_face_waits_is_accepted_once_and_stops_the_camera() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("keyd.sock");
+        let keyd = TestKeyd::start(&socket, 3);
+        let (finger, log) = ScriptedFinger::new(&[MATCH]);
+        let mut rig = with_keyd(with_finger(slow_face(&[Script::NoFace; 3]), finger), &socket);
+        assert!(rig.core.verify(1000).unwrap());
+        assert_eq!(rig.core.last_ticket_delivery(), Some(TicketDelivery::Delivered));
+        assert_eq!(*keyd.accepted_uids.lock().unwrap(), vec![1000]);
+        assert!(rig.counters.frames.load(Ordering::SeqCst) < MAX_ATTEMPT_FRAMES);
+        assert_eq!((rig.begun(), rig.ended(), rig.released()), (1, 1, 1));
+        assert_eq!(log.calls.load(Ordering::SeqCst), 1);
+    }
+
+    // @spec:AC-052
+    #[test]
+    fn a_face_that_matches_while_the_finger_waits_is_accepted_once_and_releases_the_reader() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("keyd.sock");
+        let keyd = TestKeyd::start(&socket, 3);
+        let (finger, log) = ScriptedFinger::new(&[Step::Hang]);
+        let mut rig = with_keyd(with_finger(rig(&[Script::Accept], FRAME, None), finger), &socket);
+        assert!(rig.core.verify(1000).unwrap());
+        assert_eq!(*keyd.accepted_uids.lock().unwrap(), vec![1000]);
+        assert_eq!(*keyd.connections.lock().unwrap(), 1);
+        assert_eq!(log.cancelled.load(Ordering::SeqCst), 1);
+        assert_eq!((rig.begun(), rig.ended(), rig.released()), (1, 1, 1));
+    }
+
+    // @spec:AC-052
+    #[test]
+    fn both_modalities_matching_at_once_still_deliver_a_single_ticket() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("keyd.sock");
+        let keyd = TestKeyd::start(&socket, 3);
+        let (finger, _) = ScriptedFinger::new(&[MATCH]);
+        let mut rig = with_keyd(with_finger(rig(&[Script::Accept], FRAME, None), finger), &socket);
+        assert!(rig.core.verify(1000).unwrap());
+        assert_eq!(*keyd.accepted_uids.lock().unwrap(), vec![1000]);
+        assert_eq!(*keyd.connections.lock().unwrap(), 1);
+    }
+
+    // @spec:AC-052
+    #[test]
+    fn a_user_with_only_a_finger_authenticates_by_finger() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("keyd.sock");
+        let keyd = TestKeyd::start(&socket, 3);
+        let (finger, _) = ScriptedFinger::new(&[MATCH]);
+        let rig = rig_with(&[Script::Accept], FRAME, None, false, None, Duration::ZERO);
+        let mut rig = with_keyd(with_finger(rig, finger), &socket);
+        assert!(rig.core.verify(1000).unwrap());
+        assert_eq!((rig.begun(), rig.released()), (0, 0));
+        assert_eq!(*keyd.accepted_uids.lock().unwrap(), vec![1000]);
+    }
+
+    // @spec:AC-052
+    #[test]
+    fn a_user_with_only_a_face_authenticates_by_face_when_the_reader_is_unavailable() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("keyd.sock");
+        let keyd = TestKeyd::start(&socket, 3);
+        for kind in [Unavailability::NoDevice, Unavailability::NoEnrolledFinger, Unavailability::ServiceAbsent, Unavailability::Disconnected] {
+            let (finger, log) = ScriptedFinger::new(&[Step::Result(FingerprintResult::Unavailable(kind))]);
+            let mut rig = with_keyd(with_finger(rig(&[Script::Reject, Script::Accept], FRAME, None), finger), &socket);
+            assert!(rig.core.verify(1000).unwrap());
+            assert_eq!((rig.begun(), rig.ended()), (2, 2));
+            assert_eq!(log.calls.load(Ordering::SeqCst), 1);
+        }
+        assert_eq!(keyd.accepted_uids.lock().unwrap().len(), 4);
+    }
+
+    // @spec:AC-052
+    #[test]
+    fn with_nothing_to_check_the_request_is_refused_without_a_ticket() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("keyd.sock");
+        let keyd = TestKeyd::start(&socket, 3);
+        let (finger, _) = ScriptedFinger::new(&[Step::Result(FingerprintResult::Unavailable(Unavailability::NoDevice))]);
+        let rig = rig_with(&[Script::Accept], FRAME, None, false, None, Duration::ZERO);
+        let mut rig = with_keyd(with_finger(rig, finger), &socket);
+        assert!(!rig.core.verify(1000).unwrap());
+        assert_eq!(*keyd.connections.lock().unwrap(), 0);
+        assert_eq!(rig.core.last_ticket_delivery(), None);
+    }
+
+    // @spec:AC-053
+    #[test]
+    fn the_finger_stops_after_three_no_match_results_and_the_face_keeps_going() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("keyd.sock");
+        let keyd = TestKeyd::start(&socket, 3);
+        let done = Arc::new(AtomicBool::new(false));
+        let (finger, log) = ScriptedFinger::new(&[NO_MATCH, NO_MATCH, NO_MATCH]);
+        let finger = finger.signalling(&done);
+        let rig = rig_with(&[Script::Accept], FRAME, None, true, Some(done), Duration::ZERO);
+        let mut rig = with_keyd(with_finger(rig, finger), &socket);
+        assert!(rig.core.verify(1000).unwrap());
+        assert_eq!(log.calls.load(Ordering::SeqCst), MAX_ATTEMPTS as usize);
+        assert_eq!(*keyd.accepted_uids.lock().unwrap(), vec![1000]);
+    }
+
+    // @spec:AC-053
+    #[test]
+    fn when_both_modalities_are_rejected_the_request_is_refused_at_once_and_no_ticket_is_delivered() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("keyd.sock");
+        let keyd = TestKeyd::start(&socket, 3);
+        let (finger, log) = ScriptedFinger::new(&[NO_MATCH, NO_MATCH, NO_MATCH, MATCH]);
+        let mut rig = with_keyd(with_finger(rig(&[Script::Reject; 3], FRAME, None), finger), &socket);
+        assert!(!rig.core.verify(1000).unwrap());
+        assert_eq!(log.calls.load(Ordering::SeqCst), MAX_ATTEMPTS as usize);
+        assert_eq!((rig.begun(), rig.ended(), rig.released()), (3, 3, 1));
+        assert!(rig.clock.elapsed() < ATTEMPT_BUDGET);
+        assert_eq!(rig.core.last_ticket_delivery(), None);
+        assert_eq!(*keyd.connections.lock().unwrap(), 0);
+    }
+
+    // @spec:AC-053
+    #[test]
+    fn the_shared_budget_cancels_a_finger_that_is_still_waiting_and_refuses_the_request() {
+        let mut with_face = rig(&[Script::NoFace; 3], Duration::from_secs(1), None);
+        let (finger, log) = ScriptedFinger::new(&[Step::Hang]);
+        with_face = with_finger(with_face, finger);
+        assert!(!with_face.core.verify(1000).unwrap());
+        assert_eq!(log.cancelled.load(Ordering::SeqCst), 1);
+        assert!(with_face.clock.elapsed() >= ATTEMPT_BUDGET);
+        assert_eq!(with_face.released(), 1);
+
+        let only_finger = rig_with(&[Script::Accept], FRAME, None, false, None, Duration::ZERO);
+        let (finger, log) = ScriptedFinger::new(&[Step::Hang]);
+        let finger = finger.ticking(&only_finger.clock);
+        let mut only_finger = with_finger(only_finger, finger);
+        assert!(!only_finger.core.verify(1000).unwrap());
+        assert_eq!(log.cancelled.load(Ordering::SeqCst), 1);
+        assert!(only_finger.clock.elapsed() >= ATTEMPT_BUDGET);
+    }
+
+    // @spec:AC-053
+    #[test]
+    fn a_camera_error_ends_the_request_with_the_error_and_releases_the_reader() {
+        let (finger, log) = ScriptedFinger::new(&[Step::Hang]);
+        let mut rig = with_finger(rig(&[Script::Accept], FRAME, Some(1)), finger);
+        assert!(matches!(rig.core.verify(1000), Err(DaemonError::Backend(_))));
+        assert_eq!(log.cancelled.load(Ordering::SeqCst), 1);
+        assert_eq!((rig.ended(), rig.released()), (1, 1));
+    }
+
+    // @spec:AC-054
+    #[test]
+    fn a_caller_that_leaves_cancels_the_camera_and_the_reader_and_a_late_match_delivers_no_ticket() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("keyd.sock");
+        let keyd = TestKeyd::start(&socket, 3);
+        let (finger, log) = ScriptedFinger::new(&[Step::HangThenMatch]);
+        let mut rig = with_keyd(with_finger(rig(&[Script::NoFace], FRAME, None), finger), &socket);
+        let counters = rig.counters.clone();
+        let result = rig.core.verify_cancellable(1000, &|| counters.frames.load(Ordering::SeqCst) >= 3);
+        assert!(matches!(result, Err(DaemonError::Cancelled)));
+        assert_eq!(log.cancelled.load(Ordering::SeqCst), 1);
+        assert_eq!((rig.begun(), rig.ended(), rig.released()), (1, 1, 1));
+        assert_eq!(rig.core.last_ticket_delivery(), None);
+        assert_eq!(*keyd.connections.lock().unwrap(), 0);
+    }
+
+    // @spec:AC-054
+    #[test]
+    fn a_caller_that_leaves_while_only_the_finger_is_waiting_releases_the_reader_without_a_ticket() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("keyd.sock");
+        let keyd = TestKeyd::start(&socket, 3);
+        let (finger, log) = ScriptedFinger::new(&[Step::HangThenMatch]);
+        let rig = rig_with(&[Script::Accept], FRAME, None, false, None, Duration::ZERO);
+        let mut rig = with_keyd(with_finger(rig, finger), &socket);
+        let started = Instant::now();
+        let result = rig.core.verify_cancellable(1000, &|| true);
+        assert!(matches!(result, Err(DaemonError::Cancelled)));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(log.cancelled.load(Ordering::SeqCst), 1);
+        assert_eq!(*keyd.connections.lock().unwrap(), 0);
+    }
+
+    #[test]
+    fn without_a_matcher_a_missing_face_template_is_refused_as_before_and_the_matcher_survives_requests() {
+        let mut face_only = rig_with(&[Script::Accept], FRAME, None, false, None, Duration::ZERO);
+        assert!(!face_only.core.verify(1000).unwrap());
+        assert_eq!(face_only.begun(), 0);
+
+        let (finger, log) = ScriptedFinger::new(&[MATCH, MATCH]);
+        let mut rig = with_finger(slow_face(&[Script::NoFace; 3]), finger);
+        assert!(rig.core.verify(1000).unwrap());
+        assert!(rig.core.verify(1000).unwrap());
+        assert_eq!(log.calls.load(Ordering::SeqCst), 2);
     }
 }

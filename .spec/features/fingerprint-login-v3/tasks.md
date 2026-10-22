@@ -7,8 +7,7 @@
 - Files: crates/openhellod/src/fingerprint.rs, crates/openhellod/src/lib.rs, crates/openhellod/Cargo.toml
 - Notes: D-Bus client for `net.reactivated.Fprint` (GetDefaultDevice, Claim, VerifyStart "any", VerifyStatus, VerifyStop, Release). Result type separates match, no-match and infrastructure error (unavailable, no enrolled finger, disconnected). Trait so tests use a fake `fprintd` on a private bus. Follow the minimal-comments skill.
 
-## T-058 — Face and finger in one request, first match wins [pending]
-
+## T-058 — Face and finger in one request, first match wins [done]
 - Refs: US-020, AC-052, AC-053, AC-054
 - Files: crates/openhellod/src/core.rs, crates/openhellod/src/backends.rs, crates/openhellod/src/main.rs
 - Notes: depends on T-057. Shared 10 s budget, three no-match results for the finger, cancellation releases the reader and the camera, an infrastructure error ends only the finger side (Q-005). Must not hold the core lock while waiting for a finger (ASM-021). Follow the minimal-comments skill.
