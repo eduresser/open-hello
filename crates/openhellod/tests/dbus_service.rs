@@ -111,10 +111,15 @@ impl StorageBackend for Storage {
 }
 
 fn serve(bus: &PrivateBus, authorizer: Arc<dyn Authorizer>) -> Arc<AtomicUsize> {
-    let address = bus.address.clone();
     let begins = Arc::new(AtomicUsize::new(0));
     let engine = Engine { begins: begins.clone(), candidates: Vec::new() };
     let core = Biometrics::new(Box::new(Sensor), Box::new(engine), Box::new(Storage::default()), DEFAULT_TARGET_FAR);
+    serve_core(bus, authorizer, core);
+    begins
+}
+
+fn serve_core(bus: &PrivateBus, authorizer: Arc<dyn Authorizer>, core: Biometrics) {
+    let address = bus.address.clone();
     let service = Service::new(core, authorizer);
     let (ready_tx, ready_rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -133,7 +138,6 @@ fn serve(bus: &PrivateBus, authorizer: Arc<dyn Authorizer>) -> Arc<AtomicUsize> 
         })
     });
     ready_rx.recv_timeout(std::time::Duration::from_secs(10)).expect("service did not start");
-    begins
 }
 
 fn client(bus: &PrivateBus) -> zbus::blocking::Connection {
@@ -289,4 +293,103 @@ fn an_unreachable_polkit_authority_fails_closed() {
     let error = proxy(&conn).call::<_, _, String>("EnrollBegin", &(my_uid(),)).unwrap_err();
     assert!(error.to_string().contains("AuthFailed"), "{error}");
     assert_eq!(begins.load(Ordering::SeqCst), 0);
+}
+
+#[derive(Default)]
+struct Probe {
+    captures: AtomicUsize,
+    auth_begins: AtomicUsize,
+    auth_ends: AtomicUsize,
+}
+
+struct ProbeSensor(Arc<Probe>);
+
+impl SensorBackend for ProbeSensor {
+    fn capture(&mut self) -> Result<CapturedFrame, DaemonError> {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        self.0.captures.fetch_add(1, Ordering::SeqCst);
+        Ok(CapturedFrame { width: 1, height: 1, pixels: vec![0] })
+    }
+}
+
+struct ProbeEngine(Arc<Probe>);
+
+impl EngineBackend for ProbeEngine {
+    fn enroll_begin(&mut self, _: u64) -> Result<u64, DaemonError> {
+        Ok(1)
+    }
+
+    fn enroll_submit(&mut self, _: u64, _: u64, _: &CapturedFrame) -> Result<EnrollProgress, DaemonError> {
+        unreachable!()
+    }
+
+    fn enroll_commit(&mut self, _: u64) -> Result<Vec<u8>, DaemonError> {
+        unreachable!()
+    }
+
+    fn enroll_discard(&mut self, _: u64) -> Result<(), DaemonError> {
+        Ok(())
+    }
+
+    fn auth_begin(&mut self, _: &[(u32, Vec<u8>)], _: f64, _: u32) -> Result<u64, DaemonError> {
+        self.0.auth_begins.fetch_add(1, Ordering::SeqCst);
+        Ok(1)
+    }
+
+    fn auth_submit(&mut self, _: u64, _: &CapturedFrame) -> Result<AuthProgress, DaemonError> {
+        Ok(AuthProgress { verdict: AuthVerdict::Continue, scored_frames: 1 })
+    }
+
+    fn auth_end(&mut self, _: u64) -> Result<(), DaemonError> {
+        self.0.auth_ends.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+fn call_verify_from_a_process(bus: &PrivateBus) -> Child {
+    Command::new("dbus-send")
+        .args([&format!("--bus={}", bus.address), "--print-reply", &format!("--dest={BUS_NAME}"), OBJECT_PATH, "io.openhello.Biometrics1.Verify", "uint32:1000"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("dbus-send must be installed")
+}
+
+fn wait_until(what: &str, condition: impl Fn() -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    while !condition() {
+        assert!(std::time::Instant::now() < deadline, "timed out waiting for {what}");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+// @spec:AC-040
+#[test]
+fn a_caller_that_disconnects_stops_the_capture_and_a_queued_call_of_a_dead_caller_never_starts() {
+    let bus = PrivateBus::start();
+    let probe = Arc::new(Probe::default());
+    let mut storage = Storage::default();
+    storage.put(1000, b"template").unwrap();
+    let core = Biometrics::new(Box::new(ProbeSensor(probe.clone())), Box::new(ProbeEngine(probe.clone())), Box::new(storage), DEFAULT_TARGET_FAR);
+    serve_core(&bus, Arc::new(AllowAll), core);
+
+    let mut running = call_verify_from_a_process(&bus);
+    wait_until("the first capture", || probe.captures.load(Ordering::SeqCst) >= 2);
+    let mut queued = call_verify_from_a_process(&bus);
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    queued.kill().unwrap();
+    queued.wait().unwrap();
+    std::thread::sleep(std::time::Duration::from_secs(1));
+
+    running.kill().unwrap();
+    running.wait().unwrap();
+    wait_until("the capture session to end", || probe.auth_ends.load(Ordering::SeqCst) >= 1);
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    let captured = probe.captures.load(Ordering::SeqCst);
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    assert_eq!(probe.captures.load(Ordering::SeqCst), captured, "capture continued after the caller left");
+    assert!(captured < 40, "{captured}");
+    assert_eq!(probe.auth_begins.load(Ordering::SeqCst), 1, "the dead caller's queued call started");
+    assert_eq!(probe.auth_ends.load(Ordering::SeqCst), 1);
 }

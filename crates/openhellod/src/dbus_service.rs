@@ -1,6 +1,9 @@
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+
+use futures_lite::StreamExt;
 
 use zbus::message::Header;
 use zbus::{fdo, interface, Connection};
@@ -65,6 +68,47 @@ pub struct Service {
     logger: Logger,
 }
 
+struct CallerWatch {
+    gone: Arc<AtomicBool>,
+    _task: Option<zbus::Task<()>>,
+}
+
+impl CallerWatch {
+    async fn start(conn: &Connection, header: &Header<'_>) -> Self {
+        let gone = Arc::new(AtomicBool::new(false));
+        let task = match header.sender() {
+            Some(sender) => watch_name(conn, sender.as_str(), gone.clone()).await,
+            None => None,
+        };
+        Self { gone, _task: task }
+    }
+
+    fn flag(&self) -> Arc<AtomicBool> {
+        self.gone.clone()
+    }
+}
+
+async fn watch_name(conn: &Connection, name: &str, gone: Arc<AtomicBool>) -> Option<zbus::Task<()>> {
+    let bus = fdo::DBusProxy::new(conn).await.ok()?;
+    let mut changes = bus.receive_name_owner_changed_with_args(&[(0, name)]).await.ok()?;
+    let unique = zbus::names::BusName::try_from(name.to_string()).ok()?;
+    if !bus.name_has_owner(unique).await.ok()? {
+        gone.store(true, Ordering::SeqCst);
+        return None;
+    }
+    Some(conn.executor().spawn(
+        async move {
+            while let Some(change) = changes.next().await {
+                if change.args().is_ok_and(|args| args.new_owner().is_none()) {
+                    gone.store(true, Ordering::SeqCst);
+                    break;
+                }
+            }
+        },
+        "openhellod-caller-watch",
+    ))
+}
+
 impl Service {
     pub fn new(core: Biometrics, authorizer: Arc<dyn Authorizer>) -> Self {
         let logger = core.logger().clone();
@@ -106,7 +150,9 @@ impl Service {
 }
 
 fn failure(logger: &Logger, error: DaemonError) -> fdo::Error {
-    logger.log(Level::Error, "operation-failed", &[("reason", Value::reason(&error))]);
+    if !matches!(error, DaemonError::Cancelled) {
+        logger.log(Level::Error, "operation-failed", &[("reason", Value::reason(&error))]);
+    }
     match error {
         DaemonError::InvalidRequest(_) => fdo::Error::InvalidArgs(error.user_message().to_string()),
         _ => fdo::Error::Failed(error.user_message().to_string()),
@@ -167,12 +213,25 @@ impl Service {
         self.with_core(move |core| core.enroll_discard(&handle)).await
     }
 
-    async fn verify(&self, uid: u32) -> fdo::Result<bool> {
-        self.with_core(move |core| core.verify(uid)).await
+    async fn verify(
+        &self,
+        uid: u32,
+        #[zbus(connection)] conn: &Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> fdo::Result<bool> {
+        let watch = CallerWatch::start(conn, &header).await;
+        let gone = watch.flag();
+        self.with_core(move |core| core.verify_cancellable(uid, &|| gone.load(Ordering::SeqCst))).await
     }
 
-    async fn identify(&self) -> fdo::Result<(bool, u32)> {
-        let matched = self.with_core(|core| core.identify()).await?;
+    async fn identify(
+        &self,
+        #[zbus(connection)] conn: &Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> fdo::Result<(bool, u32)> {
+        let watch = CallerWatch::start(conn, &header).await;
+        let gone = watch.flag();
+        let matched = self.with_core(move |core| core.identify_cancellable(&|| gone.load(Ordering::SeqCst))).await?;
         Ok((matched.is_some(), matched.unwrap_or(0)))
     }
 

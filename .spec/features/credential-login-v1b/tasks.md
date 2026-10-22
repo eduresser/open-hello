@@ -235,3 +235,10 @@
 - Model: claude-sonnet-5
 - Effort: high
 - Notes: owner rule (2026-10-21): a controllable IR emitter is on whenever the camera is in use. On `2b7e:c757` the face-auth control (unit 7, selector 6) comes up in mode 1 (emitter off) after every power-up; mode 2 (byte 2) is alternating. `MsxuEmitter::ensure` runs before the stream starts: reads length, current and maximum, does nothing when the mode is 2, otherwise requires capability and maximum support, writes mode 2 and confirms by read-back. A controllable emitter admits frames only after the probe sees lit/unlit swings (flat warm-up and ambient frames fail with `NoAlternation`). `OPENHELLO_IR_EMITTER_ALLOW_WRITE` is obsolete and ignored. Error reasons reach the daemon log through the optional `openhello_sensor_last_error` export; ABI numbers are unchanged.
+
+## T-046 — Cancelable capture and one coherent time budget [done]
+- Refs: AC-040, AC-041
+- Files: crates/openhellod/src/core.rs, crates/openhellod/src/dbus_service.rs, crates/openhellod/src/backends.rs, crates/openhellod/Cargo.toml, crates/openhellod/tests/dbus_service.rs, crates/openhello-auth-proto/src/lib.rs, crates/openhello-pam/src/lib.rs, crates/openhello-cli/tests/pam_sudo.rs, Cargo.lock, .spec/features/credential-login-v1b/spec.md, .spec/features/credential-login-v1b/design.md, .spec/features/credential-login-v1b/windows-hello-alignment.md
+- Model: claude-sonnet-5
+- Effort: high
+- Notes: found on the VM (2026-10-21): the module gave up after 4 s while `openhellod` kept capturing 8-12 s, and calls abandoned by it still waited for the core mutex and ran later, so the camera and the emitter blinked after the unlock. `Verify` and `Identify` now watch the caller's unique name on the bus (`NameOwnerChanged` plus `NameHasOwner`), check it before every frame and before a queued call starts, always end the engine session and deliver no ticket to a caller that left. The attempt budget (10 s, `FACE_ATTEMPT_BUDGET`) is one request is bounded by it, shared by daemon and module; the module waits budget + 2 s for the verdict and has a 15 s total that includes the keyd signature (design.md). No interface-specific code and no message.

@@ -40,6 +40,8 @@ const DENIED_SERVICES: [&str; 13] = [
     "other",
 ];
 const WITHIN_BUDGET: Duration = Duration::from_secs(5);
+const SLOW_VERIFY: Duration = Duration::from_secs(6);
+const MODULE_BUDGET: Duration = Duration::from_secs(15);
 const STRICT_CONTROL: &str = "[success=done ignore=ignore default=die]";
 const PAM_AUTH_ERR: i32 = 7;
 const AUTH_OP: u8 = 11;
@@ -115,6 +117,7 @@ enum Verify {
     Matches,
     NoMatch,
     NoTicket,
+    Slow,
     Hangs,
 }
 
@@ -140,6 +143,10 @@ impl FakeBiometrics {
         match mode {
             Verify::NoMatch => false,
             Verify::NoTicket => true,
+            Verify::Slow => {
+                async_io::Timer::after(SLOW_VERIFY).await;
+                deliver_ticket(&socket, uid)
+            }
             Verify::Hangs => {
                 async_io::Timer::after(Duration::from_secs(15)).await;
                 false
@@ -779,7 +786,7 @@ fn a_different_face_or_another_key_in_the_public_key_file_is_not_accepted_and_th
 
 // @spec:AC-030
 #[test]
-fn a_missing_keyd_or_openhellod_or_a_silent_camera_falls_through_within_five_seconds() {
+fn a_missing_keyd_or_openhellod_falls_through_within_five_seconds() {
     let rig = rig();
     with_fixture(&rig, |fixture| {
         let services = services(&rig, fixture);
@@ -815,6 +822,23 @@ fn a_missing_keyd_or_openhellod_or_a_silent_camera_falls_through_within_five_sec
             assert!(outcome.showed_no_message());
             assert!(outcome.elapsed < WITHIN_BUDGET, "{:?}", outcome.elapsed);
         }
+    });
+}
+
+// @spec:AC-041
+#[test]
+fn the_module_waits_for_the_daemon_attempt_budget_and_gives_up_only_within_its_own_budget() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+
+        let slow = scenario(&rig, fixture, &services, Stack::face(Verify::Slow));
+        assert!(
+            slow.granted(),
+            "a verdict inside the attempt budget must be waited for"
+        );
+        assert!(slow.elapsed >= SLOW_VERIFY && slow.elapsed < MODULE_BUDGET);
+        assert!(slow.reached.is_empty() && slow.password_prompts() == 0);
 
         let silent = scenario(&rig, fixture, &services, Stack::face(Verify::Hangs));
         assert!(!silent.granted());
@@ -822,7 +846,12 @@ fn a_missing_keyd_or_openhellod_or_a_silent_camera_falls_through_within_five_sec
         assert_eq!(silent.verify_calls, 1);
         assert!(silent.showed_no_message());
         assert!(
-            silent.elapsed < WITHIN_BUDGET,
+            silent.elapsed >= openhello_auth_proto::FACE_ATTEMPT_BUDGET,
+            "the module gave up before the daemon's budget: {:?}",
+            silent.elapsed
+        );
+        assert!(
+            silent.elapsed < MODULE_BUDGET,
             "the camera wait took {:?}",
             silent.elapsed
         );

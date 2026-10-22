@@ -26,8 +26,11 @@ const PAM_SERVICE: c_int = 1;
 const PAM_TTY: c_int = 3;
 const PAM_RHOST: c_int = 4;
 const PAM_USER: c_int = 2;
-const BUDGET: Duration = Duration::from_secs(5);
-const VERIFY_TIMEOUT: Duration = Duration::from_secs(4);
+const VERIFY_GRACE: Duration = Duration::from_secs(2);
+const VERIFY_TIMEOUT: Duration =
+    openhello_auth_proto::FACE_ATTEMPT_BUDGET.saturating_add(VERIFY_GRACE);
+const SIGN_TIMEOUT: Duration = Duration::from_secs(3);
+const BUDGET: Duration = VERIFY_TIMEOUT.saturating_add(SIGN_TIMEOUT);
 const BUS_NAME: &str = "io.openhello.Biometrics1";
 const OBJECT_PATH: &str = "/io/openhello/Biometrics1";
 const DEFAULT_AUTH_DIR: &str = "/etc/openhello/auth";
@@ -93,8 +96,10 @@ fn refuse(reason: Reason) -> Exit {
     }
 }
 
-unsafe fn authenticate(pamh: *mut c_void, args: &[String]) -> Result<(), Exit> {
-    let started = Instant::now();
+unsafe fn eligible(
+    pamh: *mut c_void,
+    args: &[String],
+) -> Result<(u32, String, p256::ecdsa::VerifyingKey), Exit> {
     local_session_allowed(pamh).map_err(ignore)?;
     let user = item_text(pamh, PAM_USER)
         .filter(|u| !u.is_empty())
@@ -108,12 +113,21 @@ unsafe fn authenticate(pamh: *mut c_void, args: &[String]) -> Result<(), Exit> {
         return Err(ignore(Reason::NoCredentialFile));
     }
     let key = registered_key(args, uid).map_err(ignore)?;
+    Ok((uid, service, key))
+}
+
+fn module_settings(args: &[String]) -> Result<Settings, ()> {
     let config = args
         .iter()
         .find_map(|a| a.strip_prefix("config=").map(PathBuf::from))
         .unwrap_or_else(|| PathBuf::from(config::DEFAULT_CONFIG));
-    let settings = config::current(&config::process_env, &config)
-        .map_err(|_| ignore(Reason::KeydUnavailable))?;
+    config::current(&config::process_env, &config).map_err(|_| ())
+}
+
+unsafe fn authenticate(pamh: *mut c_void, args: &[String]) -> Result<(), Exit> {
+    let started = Instant::now();
+    let (uid, service, key) = eligible(pamh, args)?;
+    let settings = module_settings(args).map_err(|_| ignore(Reason::KeydUnavailable))?;
     let socket = settings
         .token_socket
         .clone()
@@ -124,7 +138,7 @@ unsafe fn authenticate(pamh: *mut c_void, args: &[String]) -> Result<(), Exit> {
     match verify_face(
         uid,
         settings.bus_address.clone(),
-        remaining().min(VERIFY_TIMEOUT),
+        remaining().saturating_sub(SIGN_TIMEOUT).min(VERIFY_TIMEOUT),
     ) {
         Some(true) => {}
         Some(false) => return Err(refuse(Reason::FaceRefused)),
@@ -185,12 +199,19 @@ fn registered_key(args: &[String], uid: u32) -> Result<p256::ecdsa::VerifyingKey
     })
 }
 
-fn verify_face(uid: u32, bus_address: Option<String>, timeout: Duration) -> Option<bool> {
+fn within<T: Send + 'static>(
+    timeout: Duration,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Option<T> {
     let (sender, receiver) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let _ = sender.send(call_verify(uid, bus_address.as_deref()));
+        let _ = sender.send(work());
     });
-    receiver.recv_timeout(timeout).ok().flatten()
+    receiver.recv_timeout(timeout).ok()
+}
+
+fn verify_face(uid: u32, bus_address: Option<String>, timeout: Duration) -> Option<bool> {
+    within(timeout, move || call_verify(uid, bus_address.as_deref())).flatten()
 }
 
 fn call_verify(uid: u32, bus_address: Option<&str>) -> Option<bool> {
@@ -355,7 +376,10 @@ fn name_has_owner(address: Option<&str>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{permitted, Locality, Reason, DENIED_SERVICES};
+    use super::{
+        permitted, Locality, Reason, BUDGET, DENIED_SERVICES, SIGN_TIMEOUT, VERIFY_TIMEOUT,
+    };
+    use openhello_auth_proto::FACE_ATTEMPT_BUDGET;
 
     #[test]
     fn remote_or_headless_sessions_are_ignored_before_the_service_is_considered() {
@@ -378,6 +402,13 @@ mod tests {
         for service in ["sudo", "polkit-1", "openhello-interactive", "loginx", ""] {
             assert_eq!(permitted(Locality::Local, service), Ok(()), "{service}");
         }
+    }
+
+    // @covers:AC-041-pam-budget
+    #[test]
+    fn the_module_waits_for_the_daemon_verdict_and_the_total_budget_covers_the_signature() {
+        assert!(VERIFY_TIMEOUT > FACE_ATTEMPT_BUDGET);
+        assert!(BUDGET >= VERIFY_TIMEOUT + SIGN_TIMEOUT);
     }
 
     #[test]
