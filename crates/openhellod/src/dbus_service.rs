@@ -1,6 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -11,6 +11,7 @@ use zbus::{fdo, interface, Connection};
 
 use crate::backends::DaemonError;
 use crate::core::Biometrics;
+use crate::fingerprint::{EnrollStep, FingerEnrollError, FingerEnrollState, FingerEnroller, FingerEnrollment};
 use crate::logging::{Level, Logger, Value};
 
 pub const BUS_NAME: &str = "io.openhello.Biometrics1";
@@ -22,6 +23,10 @@ pub enum Action {
     EnrollCapture,
     EnrollCommit,
     EnrollDiscard,
+    FingerStatus,
+    FingerEnrollBegin,
+    FingerEnrollNext,
+    FingerEnrollDiscard,
     Purge,
 }
 
@@ -32,6 +37,10 @@ impl Action {
             Action::EnrollCapture => "io.openhello.biometrics.enroll-capture",
             Action::EnrollCommit => "io.openhello.biometrics.enroll-commit",
             Action::EnrollDiscard => "io.openhello.biometrics.enroll-discard",
+            Action::FingerStatus => "io.openhello.biometrics.finger-status",
+            Action::FingerEnrollBegin => "io.openhello.biometrics.finger-enroll-begin",
+            Action::FingerEnrollNext => "io.openhello.biometrics.finger-enroll-next",
+            Action::FingerEnrollDiscard => "io.openhello.biometrics.finger-enroll-discard",
             Action::Purge => "io.openhello.biometrics.purge",
         }
     }
@@ -63,11 +72,38 @@ impl Authorizer for RootOnlyAuthorizer {
     }
 }
 
+struct FingerSession {
+    uid: u32,
+    cancelled: AtomicBool,
+    enrollment: Mutex<Box<dyn FingerEnrollment>>,
+}
+
+impl FingerSession {
+    fn next_step(&self) -> EnrollStep {
+        match self.enrollment.lock() {
+            Ok(mut enrollment) => enrollment.next_step(&|| self.cancelled.load(Ordering::SeqCst)),
+            Err(_) => EnrollStep { status: "unknown-error", state: FingerEnrollState::Failed, passed: 0, total: 0 },
+        }
+    }
+
+    fn stop(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+        if let Ok(mut enrollment) = self.enrollment.lock() {
+            enrollment.stop();
+        }
+    }
+}
+
+type FingerSessions = Arc<Mutex<HashMap<String, Arc<FingerSession>>>>;
+
 pub struct Service {
     core: Arc<Mutex<Biometrics>>,
     authorizer: Arc<dyn Authorizer>,
     logger: Logger,
     enrollment_owners: Arc<Mutex<HashMap<String, zbus::Task<()>>>>,
+    finger: Option<Arc<dyn FingerEnroller>>,
+    finger_sessions: FingerSessions,
+    next_finger_session: AtomicU64,
 }
 
 struct CallerWatch {
@@ -114,7 +150,20 @@ async fn watch_name(conn: &Connection, name: &str, gone: Arc<AtomicBool>) -> Opt
 impl Service {
     pub fn new(core: Biometrics, authorizer: Arc<dyn Authorizer>) -> Self {
         let logger = core.logger().clone();
-        Self { core: Arc::new(Mutex::new(core)), authorizer, logger, enrollment_owners: Arc::default() }
+        Self {
+            core: Arc::new(Mutex::new(core)),
+            authorizer,
+            logger,
+            enrollment_owners: Arc::default(),
+            finger: None,
+            finger_sessions: Arc::default(),
+            next_finger_session: AtomicU64::new(1),
+        }
+    }
+
+    pub fn with_finger_enroller(mut self, enroller: Arc<dyn FingerEnroller>) -> Self {
+        self.finger = Some(enroller);
+        self
     }
 
     async fn with_core<T: Send + 'static>(
@@ -146,6 +195,23 @@ impl Service {
     }
 
     async fn discard_when_owner_leaves(&self, conn: &Connection, header: &Header<'_>, handle: &str) {
+        let (core, session) = (self.core.clone(), handle.to_string());
+        let discard = move || {
+            if let Ok(mut core) = core.lock() {
+                let _ = core.enroll_discard(&session);
+            }
+        };
+        self.stop_when_owner_leaves(conn, header, handle, "enrollment-abandoned", discard).await;
+    }
+
+    async fn stop_when_owner_leaves(
+        &self,
+        conn: &Connection,
+        header: &Header<'_>,
+        handle: &str,
+        label: &'static str,
+        on_leave: impl FnOnce() + Send + 'static,
+    ) {
         let Some(sender) = header.sender() else { return };
         let Ok(bus) = fdo::DBusProxy::new(conn).await else { return };
         let Ok(mut changes) = bus.receive_name_owner_changed_with_args(&[(0, sender.as_str())]).await else { return };
@@ -153,7 +219,7 @@ impl Service {
             Ok(name) => bus.name_has_owner(name).await.unwrap_or(true),
             Err(_) => true,
         };
-        let (core, owners, logger, key) = (self.core.clone(), self.enrollment_owners.clone(), self.logger.clone(), handle.to_string());
+        let (owners, logger, key) = (self.enrollment_owners.clone(), self.logger.clone(), handle.to_string());
         let task = conn.executor().spawn(
             async move {
                 let left = !still_there || loop {
@@ -164,13 +230,8 @@ impl Service {
                     }
                 };
                 if left {
-                    let session = key.clone();
-                    let _ = blocking::unblock(move || match core.lock() {
-                        Ok(mut core) => core.enroll_discard(&session).is_ok(),
-                        Err(_) => false,
-                    })
-                    .await;
-                    logger.log(Level::Info, "enrollment-abandoned", &[]);
+                    blocking::unblock(on_leave).await;
+                    logger.log(Level::Info, label, &[]);
                     owners.lock().map(|mut owners| owners.remove(&key)).ok();
                 }
             },
@@ -178,6 +239,19 @@ impl Service {
         );
         if let Ok(mut owners) = self.enrollment_owners.lock() {
             owners.insert(handle.to_string(), task);
+        }
+    }
+
+    fn finger_session(&self, handle: &str) -> fdo::Result<Arc<FingerSession>> {
+        let found = self.finger_sessions.lock().ok().and_then(|sessions| sessions.get(handle).cloned());
+        found.ok_or_else(|| failure(&self.logger, DaemonError::InvalidRequest("unknown finger enrollment session".into())))
+    }
+
+    async fn end_finger_session(&self, handle: &str) {
+        self.release_enrollment_owner(handle);
+        let removed = self.finger_sessions.lock().ok().and_then(|mut sessions| sessions.remove(handle));
+        if let Some(session) = removed {
+            blocking::unblock(move || session.stop()).await;
         }
     }
 
@@ -190,6 +264,14 @@ impl Service {
     async fn session_uid(&self, handle: &str) -> fdo::Result<u32> {
         let handle = handle.to_string();
         self.with_core(move |core| core.session_uid(&handle)).await
+    }
+}
+
+fn finger_failure(logger: &Logger, error: FingerEnrollError) -> fdo::Error {
+    logger.log(Level::Warn, "finger-enroll-refused", &[("reason", Value::Label(error.as_str()))]);
+    match error {
+        FingerEnrollError::UnknownFinger | FingerEnrollError::AlreadyEnrolled => fdo::Error::InvalidArgs(error.user_message().to_string()),
+        FingerEnrollError::NoReader | FingerEnrollError::Unavailable => fdo::Error::Failed(error.user_message().to_string()),
     }
 }
 
@@ -259,6 +341,71 @@ impl Service {
         self.authorize(conn, &header, Action::EnrollDiscard, uid).await?;
         self.release_enrollment_owner(&handle);
         self.with_core(move |core| core.enroll_discard(&handle)).await
+    }
+
+    async fn finger_status(
+        &self,
+        uid: u32,
+        #[zbus(connection)] conn: &Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> fdo::Result<(bool, String)> {
+        self.authorize(conn, &header, Action::FingerStatus, uid).await?;
+        let Some(enroller) = self.finger.clone() else { return Ok((false, String::new())) };
+        let status = blocking::unblock(move || enroller.reader_status(uid)).await;
+        Ok((status.present, status.enrolled.join(",")))
+    }
+
+    async fn finger_enroll_begin(
+        &self,
+        uid: u32,
+        finger: String,
+        #[zbus(connection)] conn: &Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> fdo::Result<String> {
+        self.authorize(conn, &header, Action::FingerEnrollBegin, uid).await?;
+        let enroller = self.finger.clone().ok_or_else(|| finger_failure(&self.logger, FingerEnrollError::NoReader))?;
+        let enrollment = blocking::unblock(move || enroller.begin(uid, &finger))
+            .await
+            .map_err(|error| finger_failure(&self.logger, error))?;
+        let handle = format!("finger-{}", self.next_finger_session.fetch_add(1, Ordering::SeqCst));
+        let session = Arc::new(FingerSession { uid, cancelled: AtomicBool::new(false), enrollment: Mutex::new(enrollment) });
+        if let Ok(mut sessions) = self.finger_sessions.lock() {
+            sessions.insert(handle.clone(), session.clone());
+        }
+        let (sessions, key) = (self.finger_sessions.clone(), handle.clone());
+        let stop = move || {
+            session.stop();
+            sessions.lock().map(|mut sessions| sessions.remove(&key)).ok();
+        };
+        self.stop_when_owner_leaves(conn, &header, &handle, "finger-enrollment-abandoned", stop).await;
+        Ok(handle)
+    }
+
+    async fn finger_enroll_next(
+        &self,
+        handle: String,
+        #[zbus(connection)] conn: &Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> fdo::Result<(String, String, u32, u32)> {
+        let session = self.finger_session(&handle)?;
+        self.authorize(conn, &header, Action::FingerEnrollNext, session.uid).await?;
+        let step = blocking::unblock(move || session.next_step()).await;
+        if step.state != FingerEnrollState::InProgress {
+            self.end_finger_session(&handle).await;
+        }
+        Ok((step.status.into(), step.state.as_str().into(), step.passed, step.total))
+    }
+
+    async fn finger_enroll_discard(
+        &self,
+        handle: String,
+        #[zbus(connection)] conn: &Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> fdo::Result<()> {
+        let session = self.finger_session(&handle)?;
+        self.authorize(conn, &header, Action::FingerEnrollDiscard, session.uid).await?;
+        self.end_finger_session(&handle).await;
+        Ok(())
     }
 
     async fn verify(

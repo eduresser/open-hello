@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use openhellod::config::{AuthMode, BusKind, Config};
 use openhellod::core::Biometrics;
-use openhellod::fingerprint::{FprintdBus, FprintdMatcher};
+use openhellod::fingerprint::{FprintdBus, FprintdEnroller, FprintdMatcher};
 use openhellod::keyd_client::KeydClient;
 use openhellod::logging::Logger;
 use openhellod::dbus_service::{Authorizer, RootOnlyAuthorizer, Service, BUS_NAME, OBJECT_PATH};
@@ -30,7 +30,8 @@ fn run(config: Config) -> Result<(), String> {
         AuthMode::Polkit => Arc::new(PolkitAuthorizer::new(Arc::new(DbusPolkit))),
         AuthMode::RootOnly => Arc::new(RootOnlyAuthorizer),
     };
-    let service = Service::new(core, authorizer);
+    let service = Service::new(core, authorizer)
+        .with_finger_enroller(Arc::new(FprintdEnroller::new(FprintdBus::System, Logger::stderr(config.log_level))));
 
     async_io::block_on(async {
         let builder = match config.bus {

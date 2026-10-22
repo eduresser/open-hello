@@ -12,8 +12,7 @@
 - Files: crates/openhellod/src/core.rs, crates/openhellod/src/backends.rs, crates/openhellod/src/main.rs
 - Notes: depends on T-057. Shared 10 s budget, three no-match results for the finger, cancellation releases the reader and the camera, an infrastructure error ends only the finger side (Q-005). Must not hold the core lock while waiting for a finger (ASM-021). Follow the minimal-comments skill.
 
-## T-059 — Finger enrollment through openhellod and the CLI [pending]
-
+## T-059 — Finger enrollment through openhellod and the CLI [done]
 - Refs: US-021, AC-055, AC-056, AC-057
 - Files: crates/openhellod/src/dbus_service.rs, crates/openhello-cli/src/lib.rs, crates/openhello-cli/src/dbus_client.rs, crates/openhello-cli/src/terminal.rs
 - Notes: depends on T-057. Enroll methods stay under polkit (P-009). Choosing a finger, several fingers (Q-004), "no reader" line. Follow the minimal-comments skill.

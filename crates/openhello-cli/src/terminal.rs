@@ -1,9 +1,11 @@
 use std::io::{BufRead, Write};
 use std::os::fd::AsRawFd;
 
-use crate::PinPrompt;
+use crate::{Answers, PinPrompt};
 
 pub struct TerminalPins;
+
+pub struct TerminalAnswers;
 
 struct EchoOff {
     fd: i32,
@@ -43,5 +45,18 @@ impl PinPrompt for TerminalPins {
         eprintln!();
         read.map_err(|e| format!("cannot read the PIN: {e}"))?;
         Ok(line.trim_end_matches(['\n', '\r']).to_string())
+    }
+}
+
+impl Answers for TerminalAnswers {
+    fn ask(&mut self, question: &str) -> Result<String, String> {
+        print!("{question}");
+        let _ = std::io::stdout().flush();
+        let mut line = String::new();
+        match std::io::stdin().lock().read_line(&mut line) {
+            Ok(0) => Err("no answer was given".into()),
+            Ok(_) => Ok(line.trim_end_matches(['\n', '\r']).to_string()),
+            Err(e) => Err(format!("cannot read the answer: {e}")),
+        }
     }
 }

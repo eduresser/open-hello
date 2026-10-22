@@ -46,6 +46,47 @@
     </defaults>
   </action>
 
+  <action id="io.openhello.biometrics.finger-enroll-begin">
+    <description>Start enrolling a fingerprint</description>
+    <message>Authentication is required to enroll a fingerprint for this account</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_self_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.imply">io.openhello.biometrics.finger-status io.openhello.biometrics.finger-enroll-next io.openhello.biometrics.finger-enroll-discard</annotate>
+  </action>
+
+  <action id="io.openhello.biometrics.finger-status">
+    <description>Check the fingerprint reader</description>
+    <message>Authentication is required to check the fingerprint reader for this account</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_self_keep</allow_active>
+    </defaults>
+  </action>
+
+  <action id="io.openhello.biometrics.finger-enroll-next">
+    <description>Capture a fingerprint during enrollment</description>
+    <message>Authentication is required to capture a fingerprint for this account</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_self_keep</allow_active>
+    </defaults>
+  </action>
+
+  <action id="io.openhello.biometrics.finger-enroll-discard">
+    <description>Cancel a fingerprint enrollment</description>
+    <message>Authentication is required to cancel a fingerprint enrollment for this account</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_self_keep</allow_active>
+    </defaults>
+  </action>
+
   <action id="io.openhello.biometrics.purge">
     <description>Delete enrolled face data</description>
     <message>Authentication is required to permanently delete face data for this account</message>

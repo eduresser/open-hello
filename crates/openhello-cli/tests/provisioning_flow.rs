@@ -6,7 +6,7 @@ use std::process::{Child, Command as Process, Stdio};
 use std::sync::Arc;
 
 use openhello_cli::keyd_client::KeydClient;
-use openhello_cli::{execute, BiometricsClient, Command, Outcome, PinPrompt, Progress, Services};
+use openhello_cli::{execute, Answers, BiometricsClient, Command, FingerProgress, FingerReader, Outcome, PinPrompt, Progress, Services};
 use openhello_keyd::dbus_service::{
     Action, AuthFuture, Authorizer, Caller, Service, BUS_NAME, OBJECT_PATH,
 };
@@ -77,6 +77,22 @@ impl BiometricsClient for CompletedEnrollment {
         Ok(())
     }
 
+    fn finger_status(&mut self, _: u32) -> Result<FingerReader, String> {
+        Ok(FingerReader { present: false, enrolled: Vec::new() })
+    }
+
+    fn finger_enroll_begin(&mut self, _: u32, _: &str) -> Result<String, String> {
+        Err("no reader".into())
+    }
+
+    fn finger_enroll_next(&mut self, _: &str) -> Result<FingerProgress, String> {
+        Err("no reader".into())
+    }
+
+    fn finger_enroll_discard(&mut self, _: &str) -> Result<(), String> {
+        Ok(())
+    }
+
     fn verify(&mut self, _: u32) -> Result<bool, String> {
         Ok(false)
     }
@@ -87,6 +103,14 @@ impl BiometricsClient for CompletedEnrollment {
 
     fn purge(&mut self, _: u32) -> Result<(), String> {
         Ok(())
+    }
+}
+
+struct NoAnswers;
+
+impl Answers for NoAnswers {
+    fn ask(&mut self, _: &str) -> Result<String, String> {
+        Err("no terminal".into())
     }
 }
 
@@ -139,6 +163,7 @@ fn enroll_provisions_the_real_keyd_and_set_pin_unlocks_with_the_new_pin() {
             biometrics: &mut biometrics,
             keys: &mut keys,
             pins: &mut typed,
+            answers: &mut NoAnswers,
         };
         let outcome = execute(&mut services, command, &mut out);
         (outcome, String::from_utf8(out).unwrap())
@@ -175,6 +200,7 @@ fn enroll_reports_a_provision_failure_when_the_keyd_is_not_on_the_bus() {
         biometrics: &mut biometrics,
         keys: &mut keys,
         pins: &mut typed,
+        answers: &mut NoAnswers,
     };
     let outcome = execute(
         &mut services,
@@ -205,6 +231,7 @@ fn provision_command_creates_the_key_for_an_enrolled_user_and_refuses_a_second_r
             biometrics: &mut biometrics,
             keys: &mut keys,
             pins: &mut typed,
+            answers: &mut NoAnswers,
         };
         let outcome = execute(&mut services, Command::Provision { uid }, &mut out);
         (outcome, String::from_utf8(out).unwrap())

@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use async_io::Timer;
 use futures_lite::{future, StreamExt};
+use zbus::proxy::SignalStream;
 use zbus::{Connection, DBusError, Proxy};
 
 use crate::core::{Cancel, MAX_ATTEMPTS};
@@ -231,7 +232,7 @@ async fn run_verify(bus: &FprintdBus, user_name: &str, cancel: Cancel<'_>, retri
     result
 }
 
-async fn default_device<'a>(connection: &'a Connection) -> Result<Proxy<'a>, Unavailability> {
+async fn default_device(connection: &Connection) -> Result<Proxy<'static>, Unavailability> {
     let manager = Proxy::new(connection, FPRINT_BUS_NAME, MANAGER_PATH, MANAGER_INTERFACE)
         .await
         .map_err(|error| classify(Stage::Manager, &error))?;
@@ -281,6 +282,316 @@ async fn wait_for_decision(statuses: &mut zbus::proxy::SignalStream<'_>, cancel:
             Some(FingerprintResult::Match) if cancel() => return FingerprintResult::Cancelled,
             Some(result) => return result,
         }
+    }
+}
+
+pub const FINGERS: [&str; 10] = [
+    "left-thumb",
+    "left-index-finger",
+    "left-middle-finger",
+    "left-ring-finger",
+    "left-little-finger",
+    "right-thumb",
+    "right-index-finger",
+    "right-middle-finger",
+    "right-ring-finger",
+    "right-little-finger",
+];
+pub const DEFAULT_FINGER: &str = "right-index-finger";
+const DEFAULT_ENROLL_STAGES: u32 = 5;
+
+fn known_finger(name: &str) -> Option<&'static str> {
+    FINGERS.iter().copied().find(|finger| *finger == name)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReaderStatus {
+    pub present: bool,
+    pub enrolled: Vec<&'static str>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FingerEnrollState {
+    InProgress,
+    Completed,
+    Failed,
+}
+
+impl FingerEnrollState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FingerEnrollState::InProgress => "in-progress",
+            FingerEnrollState::Completed => "complete",
+            FingerEnrollState::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EnrollStep {
+    pub status: &'static str,
+    pub state: FingerEnrollState,
+    pub passed: u32,
+    pub total: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FingerEnrollError {
+    UnknownFinger,
+    AlreadyEnrolled,
+    NoReader,
+    Unavailable,
+}
+
+impl FingerEnrollError {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FingerEnrollError::UnknownFinger => "unknown-finger",
+            FingerEnrollError::AlreadyEnrolled => "already-enrolled",
+            FingerEnrollError::NoReader => "no-reader",
+            FingerEnrollError::Unavailable => "unavailable",
+        }
+    }
+
+    pub fn user_message(self) -> &'static str {
+        match self {
+            FingerEnrollError::UnknownFinger => "that finger name is not one of the ten fingers",
+            FingerEnrollError::AlreadyEnrolled => "that finger is already enrolled; choose another finger",
+            FingerEnrollError::NoReader => "no fingerprint reader was found",
+            FingerEnrollError::Unavailable => "the fingerprint reader could not complete the operation",
+        }
+    }
+}
+
+pub trait FingerEnroller: Send + Sync {
+    fn reader_status(&self, uid: u32) -> ReaderStatus;
+    fn begin(&self, uid: u32, finger: &str) -> Result<Box<dyn FingerEnrollment>, FingerEnrollError>;
+}
+
+pub trait FingerEnrollment: Send {
+    fn next_step(&mut self, cancel: Cancel) -> EnrollStep;
+    fn stop(&mut self);
+}
+
+pub type SharedUserNameResolver = Box<dyn Fn(u32) -> Option<String> + Send + Sync>;
+
+pub struct FprintdEnroller {
+    bus: FprintdBus,
+    logger: Logger,
+    user_name: SharedUserNameResolver,
+}
+
+impl FprintdEnroller {
+    pub fn new(bus: FprintdBus, logger: Logger) -> Self {
+        Self::with_user_names(bus, logger, Box::new(system_user_name))
+    }
+
+    pub fn with_user_names(bus: FprintdBus, logger: Logger, user_name: SharedUserNameResolver) -> Self {
+        Self { bus, logger, user_name }
+    }
+}
+
+impl FingerEnroller for FprintdEnroller {
+    fn reader_status(&self, uid: u32) -> ReaderStatus {
+        let status = (self.user_name)(uid)
+            .map(|name| async_io::block_on(read_reader_status(&self.bus, &name)))
+            .unwrap_or(ReaderStatus { present: false, enrolled: Vec::new() });
+        self.logger.log(
+            Level::Debug,
+            "fingerprint-reader-status",
+            &[("uid", Value::Uid(uid)), ("present", Value::Flag(status.present)), ("enrolled", Value::Count(status.enrolled.len() as u64))],
+        );
+        status
+    }
+
+    fn begin(&self, uid: u32, finger: &str) -> Result<Box<dyn FingerEnrollment>, FingerEnrollError> {
+        let result = known_finger(finger).ok_or(FingerEnrollError::UnknownFinger).and_then(|finger| {
+            let name = (self.user_name)(uid).ok_or(FingerEnrollError::Unavailable)?;
+            async_io::block_on(start_enrollment(&self.bus, &name, finger))
+        });
+        let outcome = result.as_ref().err().map_or("started", |error| error.as_str());
+        self.logger.log(Level::Info, "fingerprint-enroll-begin", &[("uid", Value::Uid(uid)), ("outcome", Value::Label(outcome))]);
+        let (device, statuses, total) = result?;
+        Ok(Box::new(FprintdEnrollment {
+            device,
+            statuses,
+            logger: self.logger.clone(),
+            uid,
+            passed: 0,
+            total,
+            retries: 0,
+            outcome: "cancelled",
+            stopped: false,
+        }))
+    }
+}
+
+struct FprintdEnrollment {
+    device: Proxy<'static>,
+    statuses: SignalStream<'static>,
+    logger: Logger,
+    uid: u32,
+    passed: u32,
+    total: u32,
+    retries: u64,
+    outcome: &'static str,
+    stopped: bool,
+}
+
+impl FprintdEnrollment {
+    fn step(&self, status: &'static str, state: FingerEnrollState) -> EnrollStep {
+        EnrollStep { status, state, passed: self.passed, total: self.total }
+    }
+
+    async fn wait_for_status(&mut self, cancel: Cancel<'_>) -> EnrollStep {
+        loop {
+            if cancel() {
+                return self.step("cancelled", FingerEnrollState::Failed);
+            }
+            let next = future::or(async { Some(self.statuses.next().await) }, async {
+                Timer::after(CANCEL_POLL).await;
+                None
+            })
+            .await;
+            let message = match next {
+                None => continue,
+                Some(None) => return self.step("disconnected", FingerEnrollState::Failed),
+                Some(Some(message)) => message,
+            };
+            let Ok((status, _done)) = message.body().deserialize::<(String, bool)>() else {
+                return self.step("unknown-error", FingerEnrollState::Failed);
+            };
+            match status.as_str() {
+                "enroll-stage-passed" => {
+                    self.passed = (self.passed + 1).min(self.total);
+                    return self.step("stage-passed", FingerEnrollState::InProgress);
+                }
+                "enroll-retry-scan" => return self.retry("retry-scan"),
+                "enroll-swipe-too-short" => return self.retry("swipe-too-short"),
+                "enroll-finger-not-centered" => return self.retry("finger-not-centered"),
+                "enroll-remove-and-retry" => return self.retry("remove-and-retry"),
+                "enroll-completed" => {
+                    self.passed = self.total;
+                    return self.step("completed", FingerEnrollState::Completed);
+                }
+                "enroll-failed" => return self.step("failed", FingerEnrollState::Failed),
+                "enroll-data-full" => return self.step("data-full", FingerEnrollState::Failed),
+                "enroll-disconnected" => return self.step("disconnected", FingerEnrollState::Failed),
+                _ => return self.step("unknown-error", FingerEnrollState::Failed),
+            }
+        }
+    }
+
+    fn retry(&mut self, status: &'static str) -> EnrollStep {
+        self.retries += 1;
+        self.step(status, FingerEnrollState::InProgress)
+    }
+}
+
+impl FingerEnrollment for FprintdEnrollment {
+    fn next_step(&mut self, cancel: Cancel) -> EnrollStep {
+        if self.stopped {
+            return self.step("cancelled", FingerEnrollState::Failed);
+        }
+        let step = async_io::block_on(self.wait_for_status(cancel));
+        if step.state != FingerEnrollState::InProgress {
+            self.outcome = step.status;
+            self.stop();
+        }
+        step
+    }
+
+    fn stop(&mut self) {
+        if self.stopped {
+            return;
+        }
+        self.stopped = true;
+        async_io::block_on(async {
+            let _ = within(CLEANUP_TIMEOUT, self.device.call::<_, _, ()>("EnrollStop", &())).await;
+            let _ = within(CLEANUP_TIMEOUT, self.device.call::<_, _, ()>("Release", &())).await;
+        });
+        self.logger.log(
+            Level::Info,
+            "fingerprint-enroll",
+            &[
+                ("uid", Value::Uid(self.uid)),
+                ("outcome", Value::Label(self.outcome)),
+                ("stages", Value::Count(self.passed as u64)),
+                ("retries", Value::Count(self.retries)),
+            ],
+        );
+    }
+}
+
+impl Drop for FprintdEnrollment {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+async fn list_enrolled(device: &Proxy<'_>, user_name: &str) -> Result<Vec<&'static str>, Unavailability> {
+    match within(SETUP_TIMEOUT, device.call::<_, _, Vec<String>>("ListEnrolledFingers", &(user_name,))).await {
+        Some(Ok(names)) => Ok(names.iter().filter_map(|name| known_finger(name)).collect()),
+        Some(Err(error)) => match classify(Stage::Device, &error) {
+            Unavailability::NoEnrolledFinger => Ok(Vec::new()),
+            kind => Err(kind),
+        },
+        None => Err(Unavailability::Unknown),
+    }
+}
+
+async fn read_reader_status(bus: &FprintdBus, user_name: &str) -> ReaderStatus {
+    let absent = ReaderStatus { present: false, enrolled: Vec::new() };
+    let Some(Ok(connection)) = within(SETUP_TIMEOUT, connect(bus)).await else { return absent };
+    let Some(Ok(device)) = within(SETUP_TIMEOUT, default_device(&connection)).await else { return absent };
+    let enrolled = list_enrolled(&device, user_name).await.unwrap_or_default();
+    ReaderStatus { present: true, enrolled }
+}
+
+fn no_reader_or_unavailable(kind: Unavailability) -> FingerEnrollError {
+    match kind {
+        Unavailability::ServiceAbsent | Unavailability::NoDevice => FingerEnrollError::NoReader,
+        _ => FingerEnrollError::Unavailable,
+    }
+}
+
+async fn start_enrollment(
+    bus: &FprintdBus,
+    user_name: &str,
+    finger: &'static str,
+) -> Result<(Proxy<'static>, SignalStream<'static>, u32), FingerEnrollError> {
+    let Some(Ok(connection)) = within(SETUP_TIMEOUT, connect(bus)).await else {
+        return Err(FingerEnrollError::NoReader);
+    };
+    let device = match within(SETUP_TIMEOUT, default_device(&connection)).await {
+        Some(Ok(device)) => device,
+        Some(Err(kind)) => return Err(no_reader_or_unavailable(kind)),
+        None => return Err(FingerEnrollError::NoReader),
+    };
+    if list_enrolled(&device, user_name).await.map_err(no_reader_or_unavailable)?.contains(&finger) {
+        return Err(FingerEnrollError::AlreadyEnrolled);
+    }
+    match within(SETUP_TIMEOUT, device.call::<_, _, ()>("Claim", &(user_name,))).await {
+        Some(Ok(())) => {}
+        _ => return Err(FingerEnrollError::Unavailable),
+    }
+    let started = begin_claimed(&device, finger).await;
+    if started.is_err() {
+        let _ = within(CLEANUP_TIMEOUT, device.call::<_, _, ()>("Release", &())).await;
+    }
+    let (statuses, total) = started?;
+    Ok((device, statuses, total))
+}
+
+async fn begin_claimed(device: &Proxy<'static>, finger: &'static str) -> Result<(SignalStream<'static>, u32), FingerEnrollError> {
+    let statuses = device.receive_signal("EnrollStatus").await.map_err(|_| FingerEnrollError::Unavailable)?;
+    let total = match device.get_property::<i32>("num-enroll-stages").await {
+        Ok(stages) if stages > 0 => stages as u32,
+        _ => DEFAULT_ENROLL_STAGES,
+    };
+    match within(SETUP_TIMEOUT, device.call::<_, _, ()>("EnrollStart", &(finger,))).await {
+        Some(Ok(())) => Ok((statuses, total)),
+        _ => Err(FingerEnrollError::Unavailable),
     }
 }
 

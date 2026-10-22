@@ -131,7 +131,17 @@ mod tests {
     #[test]
     fn every_action_has_a_polkit_rule_in_the_shipped_policy_file() {
         let policy = include_str!("../io.openhello.Biometrics1.policy");
-        for action in [Action::EnrollBegin, Action::EnrollCapture, Action::EnrollCommit, Action::EnrollDiscard, Action::Purge] {
+        for action in [
+            Action::EnrollBegin,
+            Action::EnrollCapture,
+            Action::EnrollCommit,
+            Action::EnrollDiscard,
+            Action::FingerStatus,
+            Action::FingerEnrollBegin,
+            Action::FingerEnrollNext,
+            Action::FingerEnrollDiscard,
+            Action::Purge,
+        ] {
             assert!(policy.contains(&format!("<action id=\"{}\">", action.polkit_id())), "{action:?}");
         }
         assert!(!policy.contains("<allow_any>yes</allow_any>"));

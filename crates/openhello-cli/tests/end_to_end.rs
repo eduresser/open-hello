@@ -3,9 +3,10 @@ use std::process::{Child, Command as Process, Stdio};
 use std::sync::Arc;
 
 use openhello_cli::dbus_client::DbusClient;
-use openhello_cli::{execute, Command, KeyClient, Outcome, PinPrompt, Services};
+use openhello_cli::{execute, Answers, Command, KeyClient, Outcome, PinPrompt, Services};
 use openhellod::backends::*;
 use openhellod::core::{Biometrics, DEFAULT_TARGET_FAR};
+use openhellod::fingerprint::{EnrollStep, FingerEnrollError, FingerEnrollState, FingerEnroller, FingerEnrollment, ReaderStatus};
 use openhellod::dbus_service::{Action, AuthFuture, Authorizer, Caller, Service, BUS_NAME, OBJECT_PATH};
 
 struct PrivateBus {
@@ -119,10 +120,17 @@ impl StorageBackend for Storage {
 }
 
 fn serve(bus: &PrivateBus) {
+    serve_with(bus, None)
+}
+
+fn serve_with(bus: &PrivateBus, enroller: Option<Arc<dyn FingerEnroller>>) {
     let address = bus.address.clone();
     let engine = Engine { captures_needed: 8, seen: 0, candidates: Vec::new() };
     let core = Biometrics::new(Box::new(Sensor), Box::new(engine), Box::new(Storage::default()), DEFAULT_TARGET_FAR);
-    let service = Service::new(core, Arc::new(AllowAll));
+    let mut service = Service::new(core, Arc::new(AllowAll));
+    if let Some(enroller) = enroller {
+        service = service.with_finger_enroller(enroller);
+    }
     let (ready, wait) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         async_io::block_on(async move {
@@ -162,9 +170,17 @@ impl PinPrompt for NoPins {
     }
 }
 
+struct NoAnswers;
+
+impl Answers for NoAnswers {
+    fn ask(&mut self, _: &str) -> Result<String, String> {
+        Err("no terminal".into())
+    }
+}
+
 fn run_on(client: &mut DbusClient, command: Command) -> (Outcome, String) {
     let mut out = Vec::new();
-    let mut services = Services { biometrics: client, keys: &mut NoKeys, pins: &mut NoPins };
+    let mut services = Services { biometrics: client, keys: &mut NoKeys, pins: &mut NoPins, answers: &mut NoAnswers };
     let outcome = execute(&mut services, command, &mut out);
     (outcome, String::from_utf8(out).unwrap())
 }
@@ -192,4 +208,95 @@ fn cli_reports_a_missing_daemon_as_a_failure() {
     let mut client = DbusClient::on_address(&bus.address).unwrap();
     let (outcome, _) = run_on(&mut client, Command::Verify { uid: 1000 });
     assert!(matches!(outcome, Outcome::Failed(_)), "{outcome:?}");
+}
+
+#[derive(Default, Clone)]
+struct Reader {
+    enrolled: Arc<std::sync::Mutex<Vec<&'static str>>>,
+    stopped: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+struct ReaderEnrollment {
+    reader: Reader,
+    finger: &'static str,
+    passed: u32,
+}
+
+impl FingerEnroller for Reader {
+    fn reader_status(&self, _: u32) -> ReaderStatus {
+        ReaderStatus { present: true, enrolled: self.enrolled.lock().unwrap().clone() }
+    }
+
+    fn begin(&self, _: u32, finger: &str) -> Result<Box<dyn FingerEnrollment>, FingerEnrollError> {
+        let finger = openhellod::fingerprint::FINGERS.iter().copied().find(|name| *name == finger).ok_or(FingerEnrollError::UnknownFinger)?;
+        if self.enrolled.lock().unwrap().contains(&finger) {
+            return Err(FingerEnrollError::AlreadyEnrolled);
+        }
+        Ok(Box::new(ReaderEnrollment { reader: self.clone(), finger, passed: 0 }))
+    }
+}
+
+impl FingerEnrollment for ReaderEnrollment {
+    fn next_step(&mut self, _: openhellod::core::Cancel) -> EnrollStep {
+        self.passed += 1;
+        if self.passed < 5 {
+            return EnrollStep { status: "stage-passed", state: FingerEnrollState::InProgress, passed: self.passed, total: 5 };
+        }
+        self.reader.enrolled.lock().unwrap().push(self.finger);
+        EnrollStep { status: "completed", state: FingerEnrollState::Completed, passed: 5, total: 5 }
+    }
+
+    fn stop(&mut self) {
+        self.reader.stopped.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+struct Replies(Vec<&'static str>);
+
+impl Answers for Replies {
+    fn ask(&mut self, _: &str) -> Result<String, String> {
+        if self.0.is_empty() {
+            return Err("no more answers".into());
+        }
+        Ok(self.0.remove(0).to_string())
+    }
+}
+
+fn enroll_answering(client: &mut DbusClient, replies: Vec<&'static str>) -> (Outcome, String) {
+    let mut out = Vec::new();
+    let mut services = Services { biometrics: client, keys: &mut NoKeys, pins: &mut NoPins, answers: &mut Replies(replies) };
+    let outcome = execute(&mut services, Command::Enroll { uid: 1000 }, &mut out);
+    (outcome, String::from_utf8(out).unwrap())
+}
+
+// @spec:AC-055
+#[test]
+fn cli_enrolls_the_face_then_two_fingers_through_the_real_dbus_interface_keeping_the_first() {
+    let bus = PrivateBus::start();
+    let reader = Reader::default();
+    serve_with(&bus, Some(Arc::new(reader.clone())));
+    let mut client = DbusClient::on_address(&bus.address).unwrap();
+
+    let (outcome, output) = enroll_answering(&mut client, vec!["", "", "y", "1", "n"]);
+    assert_eq!(outcome, Outcome::Success, "{output}");
+    assert!(output.contains("enrolled uid 1000") && output.contains("stage 5 of 5 done") && output.contains("enrolled the right index finger") && output.contains("enrolled the left thumb"), "{output}");
+    assert_eq!(*reader.enrolled.lock().unwrap(), vec!["right-index-finger", "left-thumb"]);
+    assert_eq!(reader.stopped.load(std::sync::atomic::Ordering::SeqCst), 2);
+
+    let (outcome, output) = enroll_answering(&mut client, vec!["", "2", "n"]);
+    assert_eq!(outcome, Outcome::Success, "{output}");
+    assert_eq!(*reader.enrolled.lock().unwrap(), vec!["right-index-finger", "left-thumb", "left-index-finger"]);
+}
+
+// @spec:AC-057
+#[test]
+fn cli_without_a_reader_enrolls_the_face_and_says_so_in_one_line_through_the_real_dbus_interface() {
+    let bus = PrivateBus::start();
+    serve(&bus);
+    let mut client = DbusClient::on_address(&bus.address).unwrap();
+    let (outcome, output) = enroll_answering(&mut client, vec!["", ""]);
+    assert_eq!(outcome, Outcome::Success, "{output}");
+    assert!(output.contains("enrolled uid 1000"));
+    assert_eq!(output.lines().filter(|line| line.contains("no fingerprint reader was found")).count(), 1, "{output}");
+    assert!(!output.contains("Add a fingerprint"));
 }

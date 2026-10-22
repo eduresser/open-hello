@@ -1,6 +1,6 @@
 use zbus::blocking::{Connection, Proxy};
 
-use crate::{BiometricsClient, Bus, Progress};
+use crate::{BiometricsClient, Bus, FingerProgress, FingerReader, Progress};
 
 const BUS_NAME: &str = "io.openhello.Biometrics1";
 const OBJECT_PATH: &str = "/io/openhello/Biometrics1";
@@ -57,6 +57,25 @@ impl BiometricsClient for DbusClient {
 
     fn enroll_discard(&mut self, handle: &str) -> Result<(), String> {
         self.proxy()?.call::<_, _, ()>("EnrollDiscard", &(handle,)).map_err(|e| describe("EnrollDiscard", e))
+    }
+
+    fn finger_status(&mut self, uid: u32) -> Result<FingerReader, String> {
+        let (present, enrolled): (bool, String) = self.proxy()?.call("FingerStatus", &(uid,)).map_err(|e| describe("FingerStatus", e))?;
+        Ok(FingerReader { present, enrolled: enrolled.split(',').filter(|name| !name.is_empty()).map(str::to_string).collect() })
+    }
+
+    fn finger_enroll_begin(&mut self, uid: u32, finger: &str) -> Result<String, String> {
+        self.proxy()?.call("FingerEnrollBegin", &(uid, finger)).map_err(|e| describe("FingerEnrollBegin", e))
+    }
+
+    fn finger_enroll_next(&mut self, handle: &str) -> Result<FingerProgress, String> {
+        let (status, state, passed, total): (String, String, u32, u32) =
+            self.proxy()?.call("FingerEnrollNext", &(handle,)).map_err(|e| describe("FingerEnrollNext", e))?;
+        Ok(FingerProgress { status, state, passed, total })
+    }
+
+    fn finger_enroll_discard(&mut self, handle: &str) -> Result<(), String> {
+        self.proxy()?.call::<_, _, ()>("FingerEnrollDiscard", &(handle,)).map_err(|e| describe("FingerEnrollDiscard", e))
     }
 
     fn verify(&mut self, uid: u32) -> Result<bool, String> {
