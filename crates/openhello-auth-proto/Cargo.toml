@@ -1,0 +1,8 @@
+[package]
+name = "openhello-auth-proto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+sha2 = "0.10"

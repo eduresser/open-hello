@@ -1,0 +1,33 @@
+[package]
+name = "openhello-keyd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "openhello_keyd"
+path = "src/lib.rs"
+
+[[bin]]
+name = "openhello-keyd"
+path = "src/main.rs"
+
+[dependencies]
+thiserror.workspace = true
+openhello-ticket = { path = "../openhello-ticket" }
+openhello-auth-proto = { path = "../openhello-auth-proto" }
+libc = "0.2"
+libloading = "0.8"
+cryptoki = "0.12"
+cryptoki-sys = "0.5"
+getrandom = "0.2"
+sha2 = "0.10"
+zeroize = "1"
+zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
+blocking = "1"
+async-io = "2"
+
+[dev-dependencies]
+openhellod = { path = "../openhellod" }
+tempfile = "3"
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }

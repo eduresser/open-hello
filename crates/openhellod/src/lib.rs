@@ -2,6 +2,8 @@ pub mod backends;
 pub mod config;
 pub mod core;
 pub mod dbus_service;
+pub mod keyd_client;
 pub mod logging;
 pub mod plugin_loader;
 pub mod polkit;
+pub mod ticket_client;

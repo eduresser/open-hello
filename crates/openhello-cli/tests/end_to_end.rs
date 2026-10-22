@@ -3,7 +3,7 @@ use std::process::{Child, Command as Process, Stdio};
 use std::sync::Arc;
 
 use openhello_cli::dbus_client::DbusClient;
-use openhello_cli::{execute, Command, Outcome};
+use openhello_cli::{execute, Command, KeyClient, Outcome, PinPrompt, Services};
 use openhellod::backends::*;
 use openhellod::core::{Biometrics, DEFAULT_TARGET_FAR};
 use openhellod::dbus_service::{Action, AuthFuture, Authorizer, Caller, Service, BUS_NAME, OBJECT_PATH};
@@ -142,16 +142,39 @@ fn serve(bus: &PrivateBus) {
     wait.recv_timeout(std::time::Duration::from_secs(10)).expect("service did not start");
 }
 
+struct NoKeys;
+
+impl KeyClient for NoKeys {
+    fn provision(&mut self, _: u32) -> Result<String, String> {
+        Ok("unused".into())
+    }
+
+    fn set_pin(&mut self, _: u32, _: &str) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+struct NoPins;
+
+impl PinPrompt for NoPins {
+    fn read_secret(&mut self, _: &str) -> Result<String, String> {
+        Err("no terminal".into())
+    }
+}
+
+fn run_on(client: &mut DbusClient, command: Command) -> (Outcome, String) {
+    let mut out = Vec::new();
+    let mut services = Services { biometrics: client, keys: &mut NoKeys, pins: &mut NoPins };
+    let outcome = execute(&mut services, command, &mut out);
+    (outcome, String::from_utf8(out).unwrap())
+}
+
 #[test]
 fn cli_enrolls_verifies_identifies_and_purges_through_the_real_dbus_interface() {
     let bus = PrivateBus::start();
     serve(&bus);
     let mut client = DbusClient::on_address(&bus.address).unwrap();
-    let mut run = |command| {
-        let mut out = Vec::new();
-        let outcome = execute(&mut client, command, &mut out);
-        (outcome, String::from_utf8(out).unwrap())
-    };
+    let mut run = |command| run_on(&mut client, command);
 
     let (outcome, output) = run(Command::Enroll { uid: 1000 });
     assert_eq!(outcome, Outcome::Success, "{output}");
@@ -167,6 +190,6 @@ fn cli_enrolls_verifies_identifies_and_purges_through_the_real_dbus_interface() 
 fn cli_reports_a_missing_daemon_as_a_failure() {
     let bus = PrivateBus::start();
     let mut client = DbusClient::on_address(&bus.address).unwrap();
-    let outcome = execute(&mut client, Command::Verify { uid: 1000 }, &mut Vec::new());
+    let (outcome, _) = run_on(&mut client, Command::Verify { uid: 1000 });
     assert!(matches!(outcome, Outcome::Failed(_)), "{outcome:?}");
 }

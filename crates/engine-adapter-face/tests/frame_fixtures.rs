@@ -49,7 +49,7 @@ fn malformed_fixtures_report_the_offending_file() {
     std::fs::write(&sixteen_bit, b"P5\n1 1\n65535\n\0\0").unwrap();
     assert!(read_pgm(&sixteen_bit).unwrap_err().contains("8-bit"));
 
-    assert!(load_identity(dir.path()).is_ok() == false);
+    assert!(load_identity(dir.path()).is_err());
     let empty = tempfile::tempdir().unwrap();
     assert!(load_identity(empty.path()).unwrap_err().contains("no .pgm frames"));
     assert!(read_pgm(&dir.path().join("missing.pgm")).is_err());
