@@ -218,6 +218,12 @@ As a laptop owner, I want the camera and the IR emitter to stop as soon as the s
 - **When** the request ends
 - **Then** the daemon closes the camera stream (and with it the IR emitter) at once, without waiting for the idle period, and a later request reopens it
 
+#### AC-045 — A clean install needs no PAM configuration file
+
+- **Given** a system where `/etc/openhello/pkcs11.conf` does not exist (a fresh install, which never creates it)
+- **When** `pam_openhello` runs, including under setuid `sudo`
+- **Then** it uses the default key-daemon socket `/run/openhello/keyd-token.sock`; a configured socket still wins, and a config file that exists but is not owned by root or is writable by others is still refused
+
 ### US-018 — Recognition attempts per authentication request
 
 As a laptop owner, I want each authentication request to give my face a few chances before falling back to the password, so that one bad frame does not cost me a password typing, while a stranger cannot keep trying.
