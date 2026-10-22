@@ -421,6 +421,17 @@ fn connections_are_capped_per_user_and_a_closed_connection_releases_the_token() 
     );
     drop(held);
 
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let mut probe = TokenClient::connect_unnamed(served.socket.path());
+        let answered = probe.send(OP_TOKEN_HELLO, &uid().to_be_bytes()).is_some();
+        drop(probe);
+        if answered {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "closed connections never released their slots");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
     let first = logged_in(served.socket.path());
     drop(first);
     let second = logged_in(served.socket.path());
