@@ -13,6 +13,7 @@ pub const MAX_ATTEMPT_FRAMES: usize = 48;
 pub const MAX_ATTEMPTS: u32 = 3;
 pub const DEFAULT_TARGET_FAR: f64 = 2e-4;
 pub const ATTEMPT_BUDGET: Duration = openhello_auth_proto::FACE_ATTEMPT_BUDGET;
+pub const DECISION_BUDGET: Duration = openhello_auth_proto::FACE_DECISION_BUDGET;
 
 pub type Cancel<'a> = &'a dyn Fn() -> bool;
 
@@ -25,6 +26,21 @@ struct SystemClock(Instant);
 impl Clock for SystemClock {
     fn elapsed(&self) -> Duration {
         self.0.elapsed()
+    }
+}
+
+struct Deadlines {
+    waiting: Duration,
+    deciding: Option<Duration>,
+}
+
+impl Deadlines {
+    fn active(&self) -> Duration {
+        self.deciding.unwrap_or(self.waiting)
+    }
+
+    fn face_seen(&mut self, now: Duration) {
+        self.deciding.get_or_insert(now + DECISION_BUDGET);
     }
 }
 
@@ -253,15 +269,15 @@ impl Biometrics {
     }
 
     fn run_attempts(&mut self, candidates: &[(u32, Vec<u8>)], cancel: Cancel) -> Result<AuthOutcome, DaemonError> {
-        let deadline = self.clock.elapsed() + ATTEMPT_BUDGET;
+        let mut deadlines = Deadlines { waiting: self.clock.elapsed() + ATTEMPT_BUDGET, deciding: None };
         let mut outcome = AuthOutcome { uid: None, frames: 0, attempts: 0 };
-        while outcome.attempts < MAX_ATTEMPTS && (outcome.attempts == 0 || self.clock.elapsed() < deadline) {
+        while outcome.attempts < MAX_ATTEMPTS && (outcome.attempts == 0 || self.clock.elapsed() < deadlines.active()) {
             if cancel() {
                 return Err(self.cancelled(outcome.frames));
             }
             outcome.attempts += 1;
             let session = self.engine.auth_begin(candidates, self.target_far, MAX_SCORED_FRAMES)?;
-            let attempt = self.score_until_decided(session, deadline, cancel, &mut outcome.frames);
+            let attempt = self.score_until_decided(session, &mut deadlines, cancel, &mut outcome.frames);
             let ended = self.engine.auth_end(session);
             let attempt = attempt?;
             ended?;
@@ -281,17 +297,20 @@ impl Biometrics {
         DaemonError::Cancelled
     }
 
-    fn score_until_decided(&mut self, session: u64, deadline: Duration, cancel: Cancel, frames: &mut u32) -> Result<Attempt, DaemonError> {
+    fn score_until_decided(&mut self, session: u64, deadlines: &mut Deadlines, cancel: Cancel, frames: &mut u32) -> Result<Attempt, DaemonError> {
         for _ in 0..MAX_ATTEMPT_FRAMES {
             if cancel() {
                 return Err(self.cancelled(*frames));
             }
-            if self.clock.elapsed() >= deadline {
+            if self.clock.elapsed() >= deadlines.active() {
                 break;
             }
             let frame = self.sensor.capture()?;
             let progress = self.engine.auth_submit(session, &frame)?;
             *frames += 1;
+            if progress.scored_frames > 0 {
+                deadlines.face_seen(self.clock.elapsed());
+            }
             match progress.verdict {
                 AuthVerdict::Accepted(uid) => return Ok(Attempt::Accepted(uid)),
                 AuthVerdict::Rejected => return Ok(Attempt::Rejected),
@@ -643,7 +662,8 @@ mod tests {
                 Script::Reject => AuthVerdict::Rejected,
                 Script::NoFace => AuthVerdict::Continue,
             };
-            Ok(AuthProgress { verdict, scored_frames: 1 })
+            let scored_frames = u32::from(!matches!(verdict, AuthVerdict::Continue));
+            Ok(AuthProgress { verdict, scored_frames })
         }
 
         fn auth_end(&mut self, _: u64) -> Result<(), DaemonError> {
@@ -779,22 +799,32 @@ mod tests {
 
     // @spec:AC-041
     #[test]
-    fn the_three_attempts_share_one_ten_second_clock_and_the_default_is_ten_seconds() {
+    fn ten_seconds_bound_only_the_wait_for_a_face_and_the_default_is_ten_seconds() {
         assert_eq!(ATTEMPT_BUDGET, Duration::from_secs(10));
+        assert_eq!(DECISION_BUDGET, Duration::from_secs(10));
 
         let mut no_face = rig(&[Script::NoFace; 3], Duration::from_secs(1), None);
         assert!(!no_face.core.verify(1000).unwrap());
         assert_eq!(no_face.counters.frames.load(Ordering::SeqCst), 10);
         assert_eq!((no_face.begun(), no_face.ended()), (1, 1));
         assert_eq!(no_face.clock.elapsed(), ATTEMPT_BUDGET);
+    }
 
+    // @spec:AC-041
+    #[test]
+    fn once_a_face_is_scored_the_three_attempts_run_even_past_the_first_ten_seconds() {
         let mut slow = rig(&[Script::Reject; 3], Duration::from_secs(6), None);
         assert!(!slow.core.verify(1000).unwrap());
-        assert_eq!((slow.begun(), slow.ended()), (2, 2));
+        assert_eq!((slow.begun(), slow.ended()), (3, 3));
+        assert!(slow.clock.elapsed() > ATTEMPT_BUDGET);
+    }
 
-        let mut quick = rig(&[Script::Reject; 3], Duration::from_secs(4), None);
-        assert!(!quick.core.verify(1000).unwrap());
-        assert_eq!((quick.begun(), quick.ended()), (3, 3));
+    // @spec:AC-041
+    #[test]
+    fn the_attempts_after_a_face_appears_are_bounded_by_their_own_ten_second_window() {
+        let mut slower = rig(&[Script::Reject; 3], Duration::from_secs(11), None);
+        assert!(!slower.core.verify(1000).unwrap());
+        assert_eq!((slower.begun(), slower.ended()), (2, 2));
     }
 
     // @spec:AC-043

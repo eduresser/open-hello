@@ -3,6 +3,8 @@
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 mod challenge;
@@ -27,10 +29,57 @@ const PAM_TTY: c_int = 3;
 const PAM_RHOST: c_int = 4;
 const PAM_USER: c_int = 2;
 const PAM_AUTHTOK: c_int = 6;
+const INTERRUPT_POLL: Duration = Duration::from_millis(50);
+const HANDLED_SIGNALS: [c_int; 2] = [libc::SIGINT, libc::SIGTERM];
+
+static INTERRUPTION: AtomicI32 = AtomicI32::new(0);
+
+extern "C" fn note_interruption(signal: c_int) {
+    let _ = INTERRUPTION.compare_exchange(0, signal, Ordering::SeqCst, Ordering::SeqCst);
+}
+
+fn interrupted() -> bool {
+    INTERRUPTION.load(Ordering::SeqCst) != 0
+}
+
+struct SignalGuard {
+    previous: Vec<(c_int, libc::sigaction)>,
+}
+
+impl SignalGuard {
+    fn engage() -> Self {
+        INTERRUPTION.store(0, Ordering::SeqCst);
+        let previous = HANDLED_SIGNALS
+            .iter()
+            .map(|&signal| unsafe {
+                let mut action: libc::sigaction = std::mem::zeroed();
+                action.sa_sigaction = note_interruption as extern "C" fn(c_int) as usize;
+                libc::sigemptyset(&mut action.sa_mask);
+                let mut old: libc::sigaction = std::mem::zeroed();
+                libc::sigaction(signal, &action, &mut old);
+                (signal, old)
+            })
+            .collect();
+        Self { previous }
+    }
+}
+
+impl Drop for SignalGuard {
+    fn drop(&mut self) {
+        for (signal, old) in &self.previous {
+            unsafe { libc::sigaction(*signal, old, std::ptr::null_mut()) };
+        }
+        let caught = INTERRUPTION.swap(0, Ordering::SeqCst);
+        if caught != 0 {
+            unsafe { libc::raise(caught) };
+        }
+    }
+}
 const DEFAULT_TOKEN_SOCKET: &str = "/run/openhello/keyd-token.sock";
 const VERIFY_GRACE: Duration = Duration::from_secs(2);
-const VERIFY_TIMEOUT: Duration =
-    openhello_auth_proto::FACE_ATTEMPT_BUDGET.saturating_add(VERIFY_GRACE);
+const VERIFY_TIMEOUT: Duration = openhello_auth_proto::FACE_ATTEMPT_BUDGET
+    .saturating_add(openhello_auth_proto::FACE_DECISION_BUDGET)
+    .saturating_add(VERIFY_GRACE);
 const SIGN_TIMEOUT: Duration = Duration::from_secs(3);
 const BUDGET: Duration = VERIFY_TIMEOUT.saturating_add(SIGN_TIMEOUT);
 const BUS_NAME: &str = "io.openhello.Biometrics1";
@@ -163,6 +212,7 @@ unsafe fn authenticate(pamh: *mut c_void, args: &[String]) -> Result<(), Exit> {
         .clone()
         .ok_or(ignore(Reason::KeydUnavailable))?;
     service_available(&settings, started).map_err(ignore)?;
+    let _signals = SignalGuard::engage();
     let challenge = challenge::random_challenge().ok_or(ignore(Reason::KeydUnavailable))?;
     let remaining = || BUDGET.saturating_sub(started.elapsed());
     match verify_face(
@@ -172,6 +222,7 @@ unsafe fn authenticate(pamh: *mut c_void, args: &[String]) -> Result<(), Exit> {
     ) {
         Some(true) => {}
         Some(false) => return Err(refuse(Reason::FaceRefused)),
+        None if interrupted() => return Err(ignore(Reason::Interrupted)),
         None => return Err(ignore(Reason::OpenhellodUnavailable)),
     }
     match challenge::request_signature(&socket, uid, &service, &challenge, remaining()) {
@@ -237,15 +288,41 @@ fn within<T: Send + 'static>(
     std::thread::spawn(move || {
         let _ = sender.send(work());
     });
-    receiver.recv_timeout(timeout).ok()
+    let deadline = Instant::now() + timeout;
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if interrupted() || left.is_zero() {
+            return None;
+        }
+        match receiver.recv_timeout(left.min(INTERRUPT_POLL)) {
+            Ok(value) => return Some(value),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return None,
+        }
+    }
 }
+
+type SharedConnection = Arc<Mutex<Option<zbus::blocking::Connection>>>;
 
 fn verify_face(uid: u32, bus_address: Option<String>, timeout: Duration) -> Option<bool> {
-    within(timeout, move || call_verify(uid, bus_address.as_deref())).flatten()
+    let link = SharedConnection::default();
+    let worker = link.clone();
+    let verdict = within(timeout, move || {
+        call_verify(uid, bus_address.as_deref(), &worker)
+    })
+    .flatten();
+    if verdict.is_none() {
+        let open = link.lock().ok().and_then(|mut held| held.take());
+        if let Some(connection) = open {
+            let _ = connection.close();
+        }
+    }
+    verdict
 }
 
-fn call_verify(uid: u32, bus_address: Option<&str>) -> Option<bool> {
+fn call_verify(uid: u32, bus_address: Option<&str>, link: &SharedConnection) -> Option<bool> {
     let connection = connect_bus(bus_address)?;
+    *link.lock().ok()? = Some(connection.clone());
     let proxy = zbus::blocking::Proxy::new(&connection, BUS_NAME, OBJECT_PATH, BUS_NAME).ok()?;
     proxy.call("Verify", &(uid,)).ok()
 }
@@ -427,7 +504,7 @@ mod tests {
         permitted, with_default_socket, Locality, Reason, Settings, BUDGET, DEFAULT_TOKEN_SOCKET,
         DENIED_SERVICES, SIGN_TIMEOUT, VERIFY_TIMEOUT,
     };
-    use openhello_auth_proto::FACE_ATTEMPT_BUDGET;
+    use openhello_auth_proto::{FACE_ATTEMPT_BUDGET, FACE_DECISION_BUDGET};
 
     // @spec:AC-045
     #[test]
@@ -482,7 +559,7 @@ mod tests {
     // @covers:AC-041-pam-budget
     #[test]
     fn the_module_waits_for_the_daemon_verdict_and_the_total_budget_covers_the_signature() {
-        assert!(VERIFY_TIMEOUT > FACE_ATTEMPT_BUDGET);
+        assert!(VERIFY_TIMEOUT > FACE_ATTEMPT_BUDGET + FACE_DECISION_BUDGET);
         assert!(BUDGET >= VERIFY_TIMEOUT + SIGN_TIMEOUT);
     }
 
