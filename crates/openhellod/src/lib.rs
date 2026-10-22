@@ -2,6 +2,7 @@ pub mod backends;
 pub mod config;
 pub mod core;
 pub mod dbus_service;
+pub mod fingerprint;
 pub mod keyd_client;
 pub mod logging;
 pub mod plugin_loader;

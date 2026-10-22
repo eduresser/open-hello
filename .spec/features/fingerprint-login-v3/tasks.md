@@ -2,8 +2,7 @@
 
 > feature: fingerprint-login-v3
 
-## T-057 — fprintd client and fingerprint backend in openhellod [pending]
-
+## T-057 — fprintd client and fingerprint backend in openhellod [done]
 - Refs: US-019, AC-048, AC-049, AC-050, AC-051
 - Files: crates/openhellod/src/fingerprint.rs, crates/openhellod/src/lib.rs, crates/openhellod/Cargo.toml
 - Notes: D-Bus client for `net.reactivated.Fprint` (GetDefaultDevice, Claim, VerifyStart "any", VerifyStatus, VerifyStop, Release). Result type separates match, no-match and infrastructure error (unavailable, no enrolled finger, disconnected). Trait so tests use a fake `fprintd` on a private bus. Follow the minimal-comments skill.

@@ -920,6 +920,7 @@ dependencies = [
  "blocking",
  "engine-adapter-face",
  "futures-lite",
+ "libc",
  "libloading 0.8.9",
  "openhello-auth-proto",
  "openhello-keyd",
