@@ -1077,7 +1077,7 @@ fn the_common_stack_placement_acts_on_local_services_and_ignores_the_denylist_re
                 outcome.verify_calls, 0,
                 "{label}: the camera must not be touched"
             );
-            assert!(!outcome.showed_no_message(), "{label}");
+            assert!(outcome.showed_no_message(), "{label}");
             assert!(
                 outcome.elapsed < WITHIN_BUDGET,
                 "{label}: {:?}",
