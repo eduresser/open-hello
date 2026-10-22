@@ -17,7 +17,7 @@
 
 ## Context
 
-Users with a fingerprint reader can authenticate (`sudo`, polkit, lock screen) with a finger, through the same ticket, TPM-key signature and PAM module that the face already uses. The reader is driven by `fprintd` (libfprint) over D-Bus, as `arquitetura-linux.md` prescribes ("Sensor + Engine Adapter — impressão digital"), and the owner decided (2026-10-22): integrate through `fprintd`, run face and finger in parallel with the first match winning, and enroll through `openhello-cli enroll`.
+Users with a fingerprint reader can authenticate (`sudo`, polkit, lock screen) with a finger, through the same ticket, TPM-key signature and PAM module that the face already uses. The reader is driven by `fprintd` (libfprint) over D-Bus, as `arquitetura-linux.md` prescribes ("Sensor + Engine Adapter — impressão digital"), and the owner decided (2026-10-22): integrate through `fprintd`, run face and finger in parallel with the first match winning, and enroll through `openhello-cli`. The first plan used one command for face and finger; on 2026-10-22 the owner saw `enroll` start the camera and count poses before any finger step and asked for one command for each: `enroll face` and `enroll finger` become two subcommands (a bare `enroll` stays an alias of `enroll face`).
 
 ## Stories
 
@@ -71,14 +71,14 @@ As a user, I want the camera and the reader to listen together and the first mat
 - **When** the caller disappears from the bus or is interrupted (Ctrl+C in `sudo`)
 - **Then** the reader is released within a second, and a match that arrives afterwards delivers no ticket (same rule as AC-040)
 
-### US-021 — Enroll a finger with the same command
+### US-021 — Enroll a finger with its own command
 
-As a user, I want `openhello-cli enroll` to register my finger as well as my face, so that I use one command and one authorization.
+As a user, I want a command that registers only my finger and leaves the camera alone, so that I can add a finger without redoing the face.
 
 #### AC-055 — Enrolling a finger goes through openhellod and polkit
 
 - **Given** a user at an active session with a reader and a face enrollment flow already available
-- **When** they run `openhello-cli enroll` and choose to add a finger (any of the ten, one at a time)
+- **When** they run `openhello-cli enroll finger` and choose a finger (any of the ten, one at a time)
 - **Then** the five reader stages are shown as progress, the finger is stored by `fprintd` for that user, other enrolled fingers stay, and the TPM key exists afterwards (P-009 applies: an unauthorized caller is refused)
 
 #### AC-056 — An enrollment whose owner leaves is discarded
@@ -90,8 +90,14 @@ As a user, I want `openhello-cli enroll` to register my finger as well as my fac
 #### AC-057 — The CLI reports when there is no reader
 
 - **Given** a machine with no fingerprint reader
-- **When** the user runs `openhello-cli enroll`
-- **Then** the face enrollment proceeds as today and the finger step is not offered, with one plain line saying no reader was found
+- **When** the user runs `openhello-cli enroll finger`
+- **Then** one plain line says no fingerprint reader was found and nothing is enrolled or changed
+
+#### AC-060 — The face command never touches the reader and the finger command never touches the camera
+
+- **Given** a user with a camera and a reader
+- **When** they run `openhello-cli enroll face`, or `openhello-cli enroll finger`
+- **Then** `enroll face` starts only the face enrollment and offers no finger step, and `enroll finger` starts no camera or face enrollment, and a user with no face enrolled still gets the TPM key provisioned after the first finger
 
 ### US-022 — Purge and logs
 
