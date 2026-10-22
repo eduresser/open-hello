@@ -1,18 +1,43 @@
 use std::collections::HashMap;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::backends::{
     AuthVerdict, DaemonError, EngineBackend, EnrollProgress, EnrollState, SensorBackend, StorageBackend,
 };
+use crate::keyd_client::{KeyPurge, KeydClient};
 use crate::logging::{Level, Logger, Value};
+use crate::ticket_client::{TicketClient, TicketDelivery};
 
 pub const MAX_SCORED_FRAMES: u32 = 16;
 pub const MAX_ATTEMPT_FRAMES: usize = 48;
+pub const MAX_ATTEMPTS: u32 = 3;
 pub const DEFAULT_TARGET_FAR: f64 = 1e-5;
+pub const ATTEMPT_BUDGET: Duration = openhello_auth_proto::FACE_ATTEMPT_BUDGET;
+
+pub type Cancel<'a> = &'a dyn Fn() -> bool;
+
+pub trait Clock: Send {
+    fn elapsed(&self) -> Duration;
+}
+
+struct SystemClock(Instant);
+
+impl Clock for SystemClock {
+    fn elapsed(&self) -> Duration {
+        self.0.elapsed()
+    }
+}
 
 struct AuthOutcome {
     uid: Option<u32>,
     frames: u32,
+    attempts: u32,
+}
+
+enum Attempt {
+    Accepted(u32),
+    Rejected,
+    Undecided,
 }
 
 struct EnrollSession {
@@ -29,6 +54,11 @@ pub struct Biometrics {
     started: Instant,
     target_far: f64,
     logger: Logger,
+    tickets: Option<TicketClient>,
+    last_delivery: Option<TicketDelivery>,
+    keyd: Option<KeydClient>,
+    last_key_purge: Option<KeyPurge>,
+    clock: Box<dyn Clock>,
 }
 
 impl Biometrics {
@@ -38,12 +68,35 @@ impl Biometrics {
         storage: Box<dyn StorageBackend>,
         target_far: f64,
     ) -> Self {
-        Self { sensor, engine, storage, sessions: HashMap::new(), next_session: 1, started: Instant::now(), target_far, logger: Logger::stderr(Level::Info) }
+        Self { sensor, engine, storage, sessions: HashMap::new(), next_session: 1, started: Instant::now(), target_far, logger: Logger::stderr(Level::Info), tickets: None, last_delivery: None, keyd: None, last_key_purge: None, clock: Box::new(SystemClock(Instant::now())) }
     }
 
     pub fn with_logger(mut self, logger: Logger) -> Self {
         self.logger = logger;
         self
+    }
+
+    pub fn with_clock(mut self, clock: Box<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
+    }
+
+    pub fn with_ticket_client(mut self, client: Option<TicketClient>) -> Self {
+        self.tickets = client;
+        self
+    }
+
+    pub fn with_keyd_client(mut self, client: Option<KeydClient>) -> Self {
+        self.keyd = client;
+        self
+    }
+
+    pub fn last_key_purge(&self) -> Option<KeyPurge> {
+        self.last_key_purge
+    }
+
+    pub fn last_ticket_delivery(&self) -> Option<TicketDelivery> {
+        self.last_delivery
     }
 
     pub fn logger(&self) -> &Logger {
@@ -85,11 +138,13 @@ impl Biometrics {
         let EnrollSession { uid, engine_session } = self.take_session(handle)?;
         let template = self.engine.enroll_commit(engine_session)?;
         self.logger.log(Level::Debug, "enroll-commit", &[("uid", Value::Uid(uid)), ("template_bytes", Value::Count(template.len() as u64))]);
+        self.sensor.release();
         self.storage.put(uid, &template)
     }
 
     pub fn enroll_discard(&mut self, handle: &str) -> Result<(), DaemonError> {
         let session = self.take_session(handle)?;
+        self.sensor.release();
         self.engine.enroll_discard(session.engine_session)
     }
 
@@ -98,6 +153,10 @@ impl Biometrics {
     }
 
     pub fn verify(&mut self, uid: u32) -> Result<bool, DaemonError> {
+        self.verify_cancellable(uid, &|| false)
+    }
+
+    pub fn verify_cancellable(&mut self, uid: u32, cancel: Cancel) -> Result<bool, DaemonError> {
         let template = match self.storage.get(uid) {
             Ok(template) => template,
             Err(error @ (DaemonError::NotFound | DaemonError::Tampered)) => {
@@ -106,17 +165,29 @@ impl Biometrics {
             }
             Err(other) => return Err(other),
         };
-        let outcome = self.authenticate(&[(uid, template)])?;
+        let outcome = self.authenticate(&[(uid, template)], cancel)?;
         let accepted = outcome.uid == Some(uid);
         self.logger.log(
             Level::Info,
             "verify",
-            &[("uid", Value::Uid(uid)), ("frames", Value::Count(outcome.frames.into())), ("accepted", Value::Flag(accepted))],
+            &[
+                ("uid", Value::Uid(uid)),
+                ("attempts", Value::Count(outcome.attempts.into())),
+                ("frames", Value::Count(outcome.frames.into())),
+                ("accepted", Value::Flag(accepted)),
+            ],
         );
+        if accepted {
+            self.deliver_ticket(uid);
+        }
         Ok(accepted)
     }
 
     pub fn identify(&mut self) -> Result<Option<u32>, DaemonError> {
+        self.identify_cancellable(&|| false)
+    }
+
+    pub fn identify_cancellable(&mut self, cancel: Cancel) -> Result<Option<u32>, DaemonError> {
         let mut candidates = Vec::new();
         for uid in self.storage.list_uids()? {
             match self.storage.get(uid) {
@@ -130,47 +201,104 @@ impl Biometrics {
         if candidates.is_empty() {
             return Ok(None);
         }
-        let outcome = self.authenticate(&candidates)?;
+        let outcome = self.authenticate(&candidates, cancel)?;
         self.logger.log(
             Level::Info,
             "identify",
             &[
                 ("candidates", Value::Count(candidates.len() as u64)),
+                ("attempts", Value::Count(outcome.attempts.into())),
                 ("frames", Value::Count(outcome.frames.into())),
                 ("found", Value::Flag(outcome.uid.is_some())),
             ],
         );
+        if let Some(uid) = outcome.uid {
+            self.deliver_ticket(uid);
+        }
         Ok(outcome.uid)
     }
 
     pub fn purge(&mut self, uid: u32) -> Result<(), DaemonError> {
-        self.storage.purge(uid)?;
-        self.logger.log(Level::Info, "purge", &[("uid", Value::Uid(uid))]);
-        Ok(())
+        let template = self.storage.purge(uid);
+        let key = self.keyd.as_ref().map(|client| client.purge(uid));
+        self.last_key_purge = key;
+        self.logger.log(
+            Level::Info,
+            "purge",
+            &[
+                ("uid", Value::Uid(uid)),
+                ("template", Value::Label(if template.is_ok() { "destroyed" } else { "failed" })),
+                ("key", Value::Label(key.map_or("not-configured", KeyPurge::as_str))),
+            ],
+        );
+        template?;
+        match key {
+            Some(KeyPurge::Destroyed) | None => Ok(()),
+            Some(_) => Err(DaemonError::Backend("key purge incomplete".into())),
+        }
     }
 
-    fn authenticate(&mut self, candidates: &[(u32, Vec<u8>)]) -> Result<AuthOutcome, DaemonError> {
-        let session = self.engine.auth_begin(candidates, self.target_far, MAX_SCORED_FRAMES)?;
-        let outcome = self.score_until_decided(session);
-        let ended = self.engine.auth_end(session);
-        let outcome = outcome?;
-        ended?;
+    fn deliver_ticket(&mut self, uid: u32) {
+        self.last_delivery = None;
+        let Some(client) = self.tickets.as_mut() else { return };
+        let delivery = client.deliver(uid);
+        self.logger.log(Level::Info, "ticket", &[("uid", Value::Uid(uid)), ("delivery", Value::Label(delivery.as_str()))]);
+        self.last_delivery = Some(delivery);
+    }
+
+    fn authenticate(&mut self, candidates: &[(u32, Vec<u8>)], cancel: Cancel) -> Result<AuthOutcome, DaemonError> {
+        let outcome = self.run_attempts(candidates, cancel);
+        self.sensor.release();
+        outcome
+    }
+
+    fn run_attempts(&mut self, candidates: &[(u32, Vec<u8>)], cancel: Cancel) -> Result<AuthOutcome, DaemonError> {
+        let deadline = self.clock.elapsed() + ATTEMPT_BUDGET;
+        let mut outcome = AuthOutcome { uid: None, frames: 0, attempts: 0 };
+        while outcome.attempts < MAX_ATTEMPTS && (outcome.attempts == 0 || self.clock.elapsed() < deadline) {
+            if cancel() {
+                return Err(self.cancelled(outcome.frames));
+            }
+            outcome.attempts += 1;
+            let session = self.engine.auth_begin(candidates, self.target_far, MAX_SCORED_FRAMES)?;
+            let attempt = self.score_until_decided(session, deadline, cancel, &mut outcome.frames);
+            let ended = self.engine.auth_end(session);
+            let attempt = attempt?;
+            ended?;
+            if let Attempt::Accepted(uid) = attempt {
+                outcome.uid = Some(uid);
+                break;
+            }
+        }
+        if cancel() {
+            return Err(self.cancelled(outcome.frames));
+        }
         Ok(outcome)
     }
 
-    fn score_until_decided(&mut self, session: u64) -> Result<AuthOutcome, DaemonError> {
-        let mut frames = 0;
+    fn cancelled(&self, frames: u32) -> DaemonError {
+        self.logger.log(Level::Info, "attempt-cancelled", &[("frames", Value::Count(frames.into()))]);
+        DaemonError::Cancelled
+    }
+
+    fn score_until_decided(&mut self, session: u64, deadline: Duration, cancel: Cancel, frames: &mut u32) -> Result<Attempt, DaemonError> {
         for _ in 0..MAX_ATTEMPT_FRAMES {
+            if cancel() {
+                return Err(self.cancelled(*frames));
+            }
+            if self.clock.elapsed() >= deadline {
+                break;
+            }
             let frame = self.sensor.capture()?;
             let progress = self.engine.auth_submit(session, &frame)?;
-            frames = progress.scored_frames;
+            *frames += 1;
             match progress.verdict {
-                AuthVerdict::Accepted(uid) => return Ok(AuthOutcome { uid: Some(uid), frames }),
-                AuthVerdict::Rejected => break,
+                AuthVerdict::Accepted(uid) => return Ok(Attempt::Accepted(uid)),
+                AuthVerdict::Rejected => return Ok(Attempt::Rejected),
                 AuthVerdict::Continue => {}
             }
         }
-        Ok(AuthOutcome { uid: None, frames })
+        Ok(Attempt::Undecided)
     }
 
     fn session(&self, handle: &str) -> Result<&EnrollSession, DaemonError> {
@@ -323,11 +451,13 @@ pub(crate) mod fakes {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
     use super::fakes::*;
     use super::*;
-    use crate::backends::CapturedFrame;
+    use crate::backends::{AuthProgress, CapturedFrame};
+    use crate::ticket_client::test_keyd::TestKeyd;
 
     #[test]
     fn enrollment_commit_persists_the_engine_template_for_the_session_uid() {
@@ -393,8 +523,8 @@ mod tests {
         let mut core = Biometrics::new(Box::new(FakeSensor), Box::new(engine), Box::new(storage), DEFAULT_TARGET_FAR);
         assert!(!core.verify(1000).unwrap());
         let log = log.lock().unwrap();
-        assert_eq!(log.frames_submitted as usize, MAX_ATTEMPT_FRAMES);
-        assert_eq!(log.sessions_ended, 1);
+        assert_eq!(log.frames_submitted as usize, MAX_ATTEMPT_FRAMES * MAX_ATTEMPTS as usize);
+        assert_eq!(log.sessions_ended, MAX_ATTEMPTS);
     }
 
     #[test]
@@ -450,5 +580,365 @@ mod tests {
         let (mut core, _) = core_with(storage.clone(), true, b"mine");
         core.purge(1000).unwrap();
         assert!(storage.files.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_unreachable_keyd_still_purges_the_template_but_the_purge_is_reported_as_failed() {
+        use crate::keyd_client::{KeyPurge, KeydBus, KeydClient};
+        let storage = MemoryStorage::default();
+        storage.files.lock().unwrap().insert(1000, b"mine".to_vec());
+        let (core, _) = core_with(storage.clone(), true, b"mine");
+        let mut core = core.with_keyd_client(Some(KeydClient::new(KeydBus::Address("unix:path=/nonexistent/bus".into()))));
+        assert!(core.purge(1000).is_err());
+        assert!(storage.files.lock().unwrap().is_empty());
+        assert_eq!(core.last_key_purge(), Some(KeyPurge::Unavailable));
+    }
+
+    #[derive(Clone, Copy)]
+    enum Script {
+        Accept,
+        Reject,
+        NoFace,
+    }
+
+    #[derive(Default)]
+    struct Counters {
+        begun: AtomicUsize,
+        ended: AtomicUsize,
+        frames: AtomicUsize,
+        released: AtomicUsize,
+    }
+
+    struct ScriptedEngine {
+        script: Vec<Script>,
+        counters: Arc<Counters>,
+        uid: u32,
+    }
+
+    impl EngineBackend for ScriptedEngine {
+        fn enroll_begin(&mut self, _: u64) -> Result<u64, DaemonError> {
+            Ok(1)
+        }
+
+        fn enroll_submit(&mut self, _: u64, _: u64, _: &CapturedFrame) -> Result<EnrollProgress, DaemonError> {
+            unreachable!()
+        }
+
+        fn enroll_commit(&mut self, _: u64) -> Result<Vec<u8>, DaemonError> {
+            unreachable!()
+        }
+
+        fn enroll_discard(&mut self, _: u64) -> Result<(), DaemonError> {
+            Ok(())
+        }
+
+        fn auth_begin(&mut self, _: &[(u32, Vec<u8>)], _: f64, _: u32) -> Result<u64, DaemonError> {
+            Ok(self.counters.begun.fetch_add(1, Ordering::SeqCst) as u64)
+        }
+
+        fn auth_submit(&mut self, session: u64, _: &CapturedFrame) -> Result<AuthProgress, DaemonError> {
+            self.counters.frames.fetch_add(1, Ordering::SeqCst);
+            let verdict = match self.script.get(session as usize).copied().unwrap_or(Script::Reject) {
+                Script::Accept => AuthVerdict::Accepted(self.uid),
+                Script::Reject => AuthVerdict::Rejected,
+                Script::NoFace => AuthVerdict::Continue,
+            };
+            Ok(AuthProgress { verdict, scored_frames: 1 })
+        }
+
+        fn auth_end(&mut self, _: u64) -> Result<(), DaemonError> {
+            self.counters.ended.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct ManualClock(Arc<AtomicU64>);
+
+    impl Clock for ManualClock {
+        fn elapsed(&self) -> Duration {
+            Duration::from_millis(self.0.load(Ordering::SeqCst))
+        }
+    }
+
+    struct TimedSensor {
+        counters: Arc<Counters>,
+        clock: ManualClock,
+        frame_cost: Duration,
+        fail_from_frame: Option<usize>,
+        frames: usize,
+    }
+
+    impl SensorBackend for TimedSensor {
+        fn capture(&mut self) -> Result<CapturedFrame, DaemonError> {
+            self.frames += 1;
+            if self.fail_from_frame.is_some_and(|from| self.frames >= from) {
+                return Err(DaemonError::Backend("camera unplugged".into()));
+            }
+            self.clock.0.fetch_add(self.frame_cost.as_millis() as u64, Ordering::SeqCst);
+            Ok(CapturedFrame { width: 1, height: 1, pixels: vec![0] })
+        }
+
+        fn release(&mut self) {
+            self.counters.released.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    struct Rig {
+        core: Biometrics,
+        counters: Arc<Counters>,
+        clock: ManualClock,
+    }
+
+    fn rig(script: &[Script], frame_cost: Duration, fail_from_frame: Option<usize>) -> Rig {
+        let clock = ManualClock::default();
+        let counters = Arc::new(Counters::default());
+        let engine = ScriptedEngine { script: script.to_vec(), counters: counters.clone(), uid: 1000 };
+        let sensor = TimedSensor { counters: counters.clone(), clock: clock.clone(), frame_cost, fail_from_frame, frames: 0 };
+        let core = Biometrics::new(Box::new(sensor), Box::new(engine), Box::new(storage_with(&[(1000, b"mine")])), DEFAULT_TARGET_FAR)
+            .with_clock(Box::new(clock.clone()));
+        Rig { core, counters, clock }
+    }
+
+    impl Rig {
+        fn begun(&self) -> usize {
+            self.counters.begun.load(Ordering::SeqCst)
+        }
+
+        fn ended(&self) -> usize {
+            self.counters.ended.load(Ordering::SeqCst)
+        }
+
+        fn released(&self) -> usize {
+            self.counters.released.load(Ordering::SeqCst)
+        }
+    }
+
+    const FRAME: Duration = Duration::from_millis(100);
+
+    // @spec:AC-042
+    #[test]
+    fn a_request_accepts_a_face_seen_on_the_first_second_or_third_attempt_and_stops_there() {
+        use Script::{Accept, Reject};
+        for (script, expected_attempts) in [(vec![Accept], 1), (vec![Reject, Accept], 2), (vec![Reject, Reject, Accept], 3)] {
+            let mut rig = rig(&script, FRAME, None);
+            assert!(rig.core.verify(1000).unwrap(), "{expected_attempts}");
+            assert_eq!((rig.begun(), rig.ended()), (expected_attempts, expected_attempts));
+        }
+        let mut identified = rig(&[Reject, Accept], FRAME, None);
+        assert_eq!(identified.core.identify().unwrap(), Some(1000));
+        assert_eq!((identified.begun(), identified.ended()), (2, 2));
+    }
+
+    // @spec:AC-044
+    #[test]
+    fn the_camera_is_released_as_soon_as_the_request_is_decided_whatever_the_outcome() {
+        let mut accepted = rig(&[Script::Accept], FRAME, None);
+        assert!(accepted.core.verify(1000).unwrap());
+        assert_eq!(accepted.released(), 1);
+        let mut refused = rig(&[Script::Reject; 5], FRAME, None);
+        assert!(!refused.core.verify(1000).unwrap());
+        assert_eq!(refused.released(), 1);
+        let mut identified = rig(&[Script::Accept], FRAME, None);
+        assert_eq!(identified.core.identify().unwrap(), Some(1000));
+        assert_eq!(identified.released(), 1);
+        let mut broken = rig(&[Script::Accept], FRAME, Some(1));
+        assert!(broken.core.verify(1000).is_err());
+        assert_eq!(broken.released(), 1);
+        let mut left = rig(&[Script::Accept], FRAME, None);
+        assert!(left.core.verify_cancellable(1000, &|| true).is_err());
+        assert_eq!(left.released(), 1);
+    }
+
+    // @spec:AC-042
+    #[test]
+    fn three_rejections_refuse_the_request_with_every_engine_session_closed_and_no_ticket() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("keyd.sock");
+        let keyd = TestKeyd::start(&socket, 3);
+        let mut rig = rig(&[Script::Reject; 5], FRAME, None);
+        rig.core = rig.core.with_ticket_client(Some(TicketClient::new(&socket)));
+        assert!(!rig.core.verify(1000).unwrap());
+        assert_eq!((rig.begun(), rig.ended()), (3, 3));
+        assert_eq!(rig.counters.frames.load(Ordering::SeqCst), 3);
+        assert_eq!(rig.core.last_ticket_delivery(), None);
+        assert_eq!(*keyd.connections.lock().unwrap(), 0);
+        assert_eq!(rig.core.identify().unwrap(), None);
+        assert_eq!(rig.begun(), 6);
+        assert_eq!(rig.ended(), 6);
+    }
+
+    // @spec:AC-042
+    #[test]
+    fn an_attempt_that_reaches_the_frame_limit_without_a_decision_counts_as_an_attempt() {
+        let mut rig = rig(&[Script::NoFace; 3], Duration::ZERO, None);
+        assert!(!rig.core.verify(1000).unwrap());
+        assert_eq!((rig.begun(), rig.ended()), (3, 3));
+        assert_eq!(rig.counters.frames.load(Ordering::SeqCst), MAX_ATTEMPT_FRAMES * 3);
+    }
+
+    // @spec:AC-041
+    #[test]
+    fn the_three_attempts_share_one_ten_second_clock_and_the_default_is_ten_seconds() {
+        assert_eq!(ATTEMPT_BUDGET, Duration::from_secs(10));
+
+        let mut no_face = rig(&[Script::NoFace; 3], Duration::from_secs(1), None);
+        assert!(!no_face.core.verify(1000).unwrap());
+        assert_eq!(no_face.counters.frames.load(Ordering::SeqCst), 10);
+        assert_eq!((no_face.begun(), no_face.ended()), (1, 1));
+        assert_eq!(no_face.clock.elapsed(), ATTEMPT_BUDGET);
+
+        let mut slow = rig(&[Script::Reject; 3], Duration::from_secs(6), None);
+        assert!(!slow.core.verify(1000).unwrap());
+        assert_eq!((slow.begun(), slow.ended()), (2, 2));
+
+        let mut quick = rig(&[Script::Reject; 3], Duration::from_secs(4), None);
+        assert!(!quick.core.verify(1000).unwrap());
+        assert_eq!((quick.begun(), quick.ended()), (3, 3));
+    }
+
+    // @spec:AC-043
+    #[test]
+    fn camera_errors_do_not_count_as_attempts_and_close_the_session() {
+        let mut rig = rig(&[Script::Reject, Script::Accept], FRAME, Some(2));
+        assert!(matches!(rig.core.verify(1000), Err(DaemonError::Backend(_))));
+        assert_eq!((rig.begun(), rig.ended()), (2, 2));
+        assert_eq!(rig.counters.frames.load(Ordering::SeqCst), 1);
+
+        let mut unplugged = rig_failing_at_start();
+        assert!(matches!(unplugged.core.verify(1000), Err(DaemonError::Backend(_))));
+        assert_eq!((unplugged.begun(), unplugged.ended()), (1, 1));
+    }
+
+    fn rig_failing_at_start() -> Rig {
+        rig(&[Script::Accept], FRAME, Some(1))
+    }
+
+    // @spec:AC-043
+    #[test]
+    fn a_caller_that_leaves_between_attempts_ends_the_request_without_another_attempt() {
+        let mut rig = rig(&[Script::Reject; 3], FRAME, None);
+        let counters = rig.counters.clone();
+        let result = rig.core.verify_cancellable(1000, &|| counters.ended.load(Ordering::SeqCst) >= 1);
+        assert!(matches!(result, Err(DaemonError::Cancelled)));
+        assert_eq!((rig.begun(), rig.ended()), (1, 1));
+    }
+
+    // @spec:AC-040
+    #[test]
+    fn a_caller_that_leaves_stops_the_capture_ends_the_session_and_gets_no_ticket() {
+        let mut rig = rig(&[Script::NoFace], FRAME, None);
+        let counters = rig.counters.clone();
+        let result = rig.core.verify_cancellable(1000, &|| counters.frames.load(Ordering::SeqCst) >= 3);
+        assert!(matches!(result, Err(DaemonError::Cancelled)));
+        assert_eq!(rig.counters.frames.load(Ordering::SeqCst), 3);
+        assert_eq!((rig.begun(), rig.ended()), (1, 1));
+
+        let mut queued = self::rig(&[Script::Accept], FRAME, None);
+        assert!(matches!(queued.core.verify_cancellable(1000, &|| true), Err(DaemonError::Cancelled)));
+        assert!(matches!(queued.core.identify_cancellable(&|| true), Err(DaemonError::Cancelled)));
+        assert_eq!((queued.begun(), queued.counters.frames.load(Ordering::SeqCst)), (0, 0));
+    }
+
+    // @spec:AC-040
+    #[test]
+    fn a_verdict_reached_after_the_caller_left_delivers_no_ticket() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("keyd.sock");
+        let keyd = TestKeyd::start(&socket, 3);
+        let mut rig = rig(&[Script::Accept], FRAME, None);
+        rig.core = rig.core.with_ticket_client(Some(TicketClient::new(&socket)));
+        let counters = rig.counters.clone();
+        let result = rig.core.verify_cancellable(1000, &|| counters.frames.load(Ordering::SeqCst) >= 1);
+        assert!(matches!(result, Err(DaemonError::Cancelled)));
+        assert_eq!(rig.ended(), 1);
+        assert_eq!(rig.core.last_ticket_delivery(), None);
+        assert_eq!(*keyd.connections.lock().unwrap(), 0);
+    }
+
+    fn keyd_core(storage: MemoryStorage, live: bool, template: &[u8], socket: &std::path::Path) -> Biometrics {
+        let (core, _) = core_with(storage, live, template);
+        core.with_ticket_client(Some(TicketClient::new(socket)))
+    }
+
+    fn storage_with(entries: &[(u32, &[u8])]) -> MemoryStorage {
+        let storage = MemoryStorage::default();
+        for (uid, template) in entries {
+            storage.files.lock().unwrap().insert(*uid, template.to_vec());
+        }
+        storage
+    }
+
+    // @spec:AC-019
+    #[test]
+    fn a_matching_verify_delivers_a_ticket_the_keyd_verifier_accepts() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("keyd.sock");
+        let keyd = TestKeyd::start(&socket, 3);
+        let mut core = keyd_core(storage_with(&[(1000, b"mine")]), true, b"mine", &socket);
+        assert!(core.verify(1000).unwrap());
+        assert_eq!(core.last_ticket_delivery(), Some(TicketDelivery::Delivered));
+        assert_eq!(*keyd.accepted_uids.lock().unwrap(), vec![1000]);
+    }
+
+    // @spec:AC-019
+    #[test]
+    fn identify_delivers_a_ticket_only_for_the_winning_uid() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("keyd.sock");
+        let keyd = TestKeyd::start(&socket, 3);
+        let storage = storage_with(&[(1000, b"a"), (1001, b"b")]);
+        let mut core = keyd_core(storage, true, b"b", &socket);
+        assert_eq!(core.identify().unwrap(), Some(1001));
+        assert_eq!(*keyd.accepted_uids.lock().unwrap(), vec![1001]);
+    }
+
+    // @spec:AC-023
+    #[test]
+    fn no_match_sends_nothing_to_the_keyd_socket() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("keyd.sock");
+        let keyd = TestKeyd::start(&socket, 3);
+        let storage = storage_with(&[(1000, b"mine")]);
+        let mut no_face = keyd_core(storage.clone(), false, b"mine", &socket);
+        assert!(!no_face.verify(1000).unwrap());
+        assert_eq!(no_face.identify().unwrap(), None);
+        let mut stranger = keyd_core(storage, true, b"someone-else", &socket);
+        assert!(!stranger.verify(1000).unwrap());
+        assert_eq!(stranger.identify().unwrap(), None);
+        assert_eq!(no_face.last_ticket_delivery(), None);
+        assert_eq!(stranger.last_ticket_delivery(), None);
+        assert_eq!(*keyd.connections.lock().unwrap(), 0);
+        assert!(keyd.accepted_uids.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_unavailable_keyd_does_not_change_the_verify_result() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut core = keyd_core(storage_with(&[(1000, b"mine")]), true, b"mine", &dir.path().join("missing.sock"));
+        assert!(core.verify(1000).unwrap());
+        assert_eq!(core.last_ticket_delivery(), Some(TicketDelivery::Unavailable));
+        assert_eq!(core.identify().unwrap(), Some(1000));
+    }
+
+    #[test]
+    fn without_a_ticket_client_verify_behaves_as_before() {
+        let (mut core, _) = core_with(storage_with(&[(1000, b"mine")]), true, b"mine");
+        assert!(core.verify(1000).unwrap());
+        assert_eq!(core.last_ticket_delivery(), None);
+    }
+
+    #[test]
+    fn a_keyd_restart_between_verifies_still_delivers() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("keyd.sock");
+        let first = TestKeyd::start(&socket, 3);
+        let mut core = keyd_core(storage_with(&[(1000, b"mine")]), true, b"mine", &socket);
+        assert!(core.verify(1000).unwrap());
+        first.stop();
+        let second = TestKeyd::start(&socket, 5);
+        assert!(core.verify(1000).unwrap());
+        assert_eq!(core.last_ticket_delivery(), Some(TicketDelivery::Delivered));
+        assert_eq!(*second.accepted_uids.lock().unwrap(), vec![1000]);
     }
 }

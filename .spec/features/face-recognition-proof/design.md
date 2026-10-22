@@ -27,14 +27,15 @@ crates/
   `Verify`, `Identify` dispatch. Enforces polkit authorization (AC-013/P-009) before creating an enrollment
   session. Never holds key material — only calls into Storage Adapter for encrypted reads/writes and into
   Engine Adapter for match decisions.
-- **`sensor-adapter-ir`** — opens the IR V4L2 node and returns only IR-illuminated frames (AC-011). It starts
-  the stream and probes brightness: a camera that already strobes lit/unlit frames (Windows Hello's
-  alternating-illumination mode) or lights steadily is left untouched and unlit frames are dropped by a
-  brightness filter; a dark stream triggers the emitter control, chosen as (1) a vendor XU from
-  `OPENHELLO_IR_EMITTER=unit:selector:hex`, else (2) the Microsoft face-auth XU (GUID
-  `0f3f95dc-2632-4c4e-92c9-a04782f43bc8`, selector 6) found by GUID in the USB descriptors, written only with
-  `OPENHELLO_IR_EMITTER_ALLOW_WRITE=1` and verified by read-back, else (3) an explicit error. MIPI/IPU6
-  cameras are out of scope.
+- **`sensor-adapter-ir`** — opens the IR V4L2 node and returns only IR-illuminated frames (AC-011, AC-039). For a
+  camera that exposes the Microsoft face-auth XU (GUID `0f3f95dc-2632-4c4e-92c9-a04782f43bc8`, selector 6, found by
+  GUID in the USB descriptors) it reads the control before every capture, writes alternating-illumination mode 2
+  when the current mode is not 2, confirms it by read-back, and admits frames only from a stream that alternates
+  lit/unlit (unlit frames dropped); a refused write, an unconfirmed write or a stream that never alternates is an
+  explicit error. Cameras with no controllable emitter keep the brightness probe (a vendor XU from
+  `OPENHELLO_IR_EMITTER=unit:selector:hex` is activated when the stream is dark, else an explicit error). The
+  failure reason is exported through the optional `openhello_sensor_last_error` symbol and logged by the daemon.
+  MIPI/IPU6 cameras are out of scope.
 - **`engine-adapter-face`** — YuNet detection + AuraFace (`glintr100`) embedding via `ort` (ONNX Runtime),
   pose-bucket/blur/occlusion quality gating for enrollment (AC-001–AC-004), FAR-calibrated match decision
   (AC-005/AC-006/P-007), and 1:N identify (AC-007/AC-008). It has no anti-spoofing in v1a (ASM-005).

@@ -11,3 +11,9 @@ zbus = { version = "5", default-features = false, features = ["blocking-api", "a
 [dev-dependencies]
 openhellod = { path = "../openhellod" }
 async-io = "2"
+openhello-keyd = { path = "../openhello-keyd" }
+openhello-ticket = { path = "../openhello-ticket" }
+openhello-pkcs11 = { path = "../openhello-pkcs11" }
+tempfile = "3"
+openhello-auth-proto = { path = "../openhello-auth-proto" }
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }

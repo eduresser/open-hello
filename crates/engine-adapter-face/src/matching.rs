@@ -35,7 +35,7 @@ impl Template {
         if count == 0 || dim == 0 || body.len() != count.checked_mul(dim).and_then(|n| n.checked_mul(4)).ok_or_else(invalid)? {
             return Err(invalid());
         }
-        let values: Vec<f32> = body.chunks_exact(4).map(|c| f32::from_le_bytes(c.try_into().unwrap())).collect();
+        let values: Vec<f32> = body.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
         Self::new(values.chunks(dim).map(<[f32]>::to_vec).collect())
     }
 

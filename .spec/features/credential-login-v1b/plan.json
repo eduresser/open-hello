@@ -1,0 +1,179 @@
+{
+  "runId": "open-hello-credential-login-v1b-mvhi0zj6",
+  "feature": "credential-login-v1b",
+  "agent": "claude",
+  "mode": "sequential",
+  "parallelize": null,
+  "forcedModel": null,
+  "forcedEffort": null,
+  "generatedAt": "2026-10-21 02:34",
+  "workBranch": "spec/credential-login-v1b",
+  "baseDir": ".spec/features/credential-login-v1b",
+  "specDir": ".spec",
+  "repoName": "open-hello",
+  "logsDir": "../onp-worktrees/open-hello-credential-login-v1b-logs",
+  "waves": [],
+  "tracks": [],
+  "sequentialTasks": [
+    {
+      "id": "T-014",
+      "title": "Spike: tpm2-pkcs11 + pam_pkcs11 + C_Login override on swtpm",
+      "model": "claude-sonnet-5",
+      "effort": "high",
+      "files": [
+        "scripts/spike-pkcs11.sh",
+        ".spec/features/credential-login-v1b/spike.md"
+      ],
+      "refs": [
+        "AC-019",
+        "AC-027"
+      ]
+    },
+    {
+      "id": "T-015",
+      "title": "Ticket library (HMAC, TTL, single use)",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "files": [
+        "crates/openhello-ticket/Cargo.toml",
+        "crates/openhello-ticket/src/lib.rs"
+      ],
+      "refs": [
+        "AC-020",
+        "AC-021",
+        "AC-022"
+      ]
+    },
+    {
+      "id": "T-016",
+      "title": "openhello-keyd: workspace crate and TPM key provisioning",
+      "model": "claude-sonnet-5",
+      "effort": "high",
+      "files": [
+        "Cargo.toml",
+        "crates/openhello-keyd/Cargo.toml",
+        "crates/openhello-keyd/src/lib.rs",
+        "crates/openhello-keyd/src/tpm.rs",
+        "crates/openhello-keyd/src/provision.rs"
+      ],
+      "refs": [
+        "AC-016",
+        "AC-017",
+        "AC-018"
+      ]
+    },
+    {
+      "id": "T-017",
+      "title": "openhello-keyd: Protectors (biometric, PIN, recovery) and lockout",
+      "model": "claude-sonnet-5",
+      "effort": "xhigh",
+      "files": [
+        "crates/openhello-keyd/src/protector.rs",
+        "crates/openhello-keyd/src/ticket_socket.rs",
+        "crates/openhello-keyd/tests/protectors.rs"
+      ],
+      "refs": [
+        "AC-019",
+        "AC-024",
+        "AC-025",
+        "AC-026",
+        "AC-031",
+        "AC-032"
+      ]
+    },
+    {
+      "id": "T-018",
+      "title": "openhellod: issue a ticket after a successful Verify",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "files": [
+        "crates/openhellod/src/ticket_client.rs",
+        "crates/openhellod/src/core.rs",
+        "crates/openhellod/Cargo.toml"
+      ],
+      "refs": [
+        "AC-023",
+        "AC-019"
+      ]
+    },
+    {
+      "id": "T-019",
+      "title": "openhello-pkcs11: wrapper module overriding C_Login",
+      "model": "claude-sonnet-5",
+      "effort": "xhigh",
+      "files": [
+        "crates/openhello-pkcs11/Cargo.toml",
+        "crates/openhello-pkcs11/src/lib.rs",
+        "crates/openhello-pkcs11/tests/login.rs"
+      ],
+      "refs": [
+        "AC-019",
+        "AC-024",
+        "AC-025"
+      ]
+    },
+    {
+      "id": "T-020",
+      "title": "openhello-keyd: D-Bus service, polkit and systemd sandbox",
+      "model": "claude-sonnet-5",
+      "effort": "high",
+      "files": [
+        "crates/openhello-keyd/src/main.rs",
+        "crates/openhello-keyd/src/dbus_service.rs",
+        "crates/openhello-keyd/src/polkit.rs",
+        "packaging/io.openhello.Keyd1.conf",
+        "packaging/openhello-keyd.service"
+      ],
+      "refs": [
+        "AC-034"
+      ]
+    },
+    {
+      "id": "T-021",
+      "title": "Purge integration and log redaction",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "files": [
+        "crates/openhello-keyd/src/purge.rs",
+        "crates/openhello-keyd/src/logging.rs",
+        "crates/openhellod/src/dbus_service.rs"
+      ],
+      "refs": [
+        "AC-033",
+        "AC-035"
+      ]
+    },
+    {
+      "id": "T-022",
+      "title": "PAM stack, installer and sudo end-to-end",
+      "model": "claude-sonnet-5",
+      "effort": "high",
+      "files": [
+        "packaging/pam/sudo-openhello",
+        "packaging/pam/pam_pkcs11.conf",
+        "scripts/install.sh",
+        "crates/openhello-cli/tests/pam_sudo.rs"
+      ],
+      "refs": [
+        "AC-027",
+        "AC-029",
+        "AC-030"
+      ]
+    },
+    {
+      "id": "T-023",
+      "title": "KDE lock screen verification",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "files": [
+        "packaging/pam/kde-openhello",
+        ".spec/features/credential-login-v1b/lockscreen.md"
+      ],
+      "refs": [
+        "AC-028"
+      ]
+    }
+  ],
+  "doneTasks": [],
+  "warnings": []
+}

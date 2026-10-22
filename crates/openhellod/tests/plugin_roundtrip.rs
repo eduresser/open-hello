@@ -55,6 +55,6 @@ fn engine_and_sensor_cdylibs_load_and_report_configuration_problems() {
         .unwrap();
     assert!(matches!(engine_error, DaemonError::InvalidRequest(_)), "{engine_error}");
 
-    let sensor_error = SensorPlugin::load(&plugins.join("libsensor_adapter_ir.so"), "/dev/video2").err().unwrap();
+    let sensor_error = SensorPlugin::load(&plugins.join("libsensor_adapter_ir.so"), "/dev/openhello-test-missing-video").err().unwrap();
     assert!(matches!(sensor_error, DaemonError::Backend(_)), "{sensor_error}");
 }

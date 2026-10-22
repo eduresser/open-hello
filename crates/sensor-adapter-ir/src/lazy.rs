@@ -35,6 +35,10 @@ impl<S: FrameSource> LazyCapture<S> {
         frame
     }
 
+    pub fn release(&mut self) {
+        self.session = None;
+    }
+
     pub fn release_if_idle(&mut self, now: Instant, idle: Duration) -> bool {
         let expired = self.session.is_some() && now.duration_since(self.last_used) >= idle;
         if expired {
@@ -134,6 +138,17 @@ mod tests {
         assert!(!fixture.lazy.is_open());
         assert_eq!(fixture.released.load(Ordering::SeqCst), 1);
         fixture.lazy.next_frame(fixture.start + Duration::from_secs(10)).unwrap();
+        assert_eq!(fixture.opened.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn explicit_release_closes_the_camera_at_once_and_the_next_frame_reopens_it() {
+        let mut fixture = fixture(None);
+        fixture.lazy.next_frame(fixture.start).unwrap();
+        fixture.lazy.release();
+        assert!(!fixture.lazy.is_open());
+        assert_eq!(fixture.released.load(Ordering::SeqCst), 1);
+        fixture.lazy.next_frame(fixture.start).unwrap();
         assert_eq!(fixture.opened.load(Ordering::SeqCst), 2);
     }
 

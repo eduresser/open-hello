@@ -4,8 +4,8 @@ use std::path::Path;
 use libloading::{Library, Symbol};
 use openhello_plugin_abi::{
     AuthProgress as AbiAuthProgress, AuthState as AbiAuthState, EngineEntry, EngineHandle, EngineInterface,
-    EnrollState as AbiEnrollState, EnrollVerdict, FrameView, SensorEntry, SensorHandle, SensorInterface, Status, StorageEntry,
-    StorageHandle, StorageInterface, TemplateRef, ABI_VERSION, ENGINE_ENTRY_SYMBOL, SENSOR_ENTRY_SYMBOL, STORAGE_ENTRY_SYMBOL,
+    EnrollState as AbiEnrollState, EnrollVerdict, FrameView, SensorEntry, SensorHandle, SensorInterface, SensorLastError, Status, StorageEntry,
+    StorageHandle, StorageInterface, TemplateRef, ABI_VERSION, ENGINE_ENTRY_SYMBOL, SENSOR_ENTRY_SYMBOL, SENSOR_LAST_ERROR_SYMBOL, STORAGE_ENTRY_SYMBOL,
 };
 
 use crate::backends::{
@@ -54,6 +54,25 @@ fn check_abi(version: u32, path: &Path) -> Result<(), DaemonError> {
 pub struct SensorPlugin {
     interface: &'static SensorInterface,
     handle: SensorHandle,
+    last_error: Option<SensorLastError>,
+}
+
+const LAST_ERROR_CAPACITY: usize = 256;
+
+fn last_error_reason(last_error: Option<SensorLastError>) -> Option<String> {
+    let mut buffer = [0u8; LAST_ERROR_CAPACITY];
+    let length = unsafe { last_error?(buffer.as_mut_ptr(), buffer.len()) }.min(LAST_ERROR_CAPACITY);
+    (length > 0).then(|| String::from_utf8_lossy(&buffer[..length]).into_owned())
+}
+
+fn check_with_reason(status: Status, context: &str, last_error: Option<SensorLastError>) -> Result<(), DaemonError> {
+    if status == Status::Ok {
+        return Ok(());
+    }
+    match last_error_reason(last_error) {
+        Some(reason) => check(status, &format!("{context} ({reason})")),
+        None => check(status, context),
+    }
 }
 
 unsafe impl Send for SensorPlugin {}
@@ -67,23 +86,29 @@ impl SensorPlugin {
         };
         let interface: &'static SensorInterface = unsafe { &*(interface as *const SensorInterface) };
         check_abi(interface.abi_version, path)?;
+        let last_error: Option<SensorLastError> =
+            unsafe { library.get::<SensorLastError>(SENSOR_LAST_ERROR_SYMBOL.as_bytes()) }.ok().map(|symbol| *symbol);
         let device = c_string(device)?;
         let mut handle: SensorHandle = std::ptr::null_mut();
-        check(unsafe { (interface.open)(device.as_ptr(), &mut handle) }, "sensor open")?;
-        Ok(Self { interface, handle })
+        check_with_reason(unsafe { (interface.open)(device.as_ptr(), &mut handle) }, "sensor open", last_error)?;
+        Ok(Self { interface, handle, last_error })
     }
 }
 
 impl SensorBackend for SensorPlugin {
     fn capture(&mut self) -> Result<CapturedFrame, DaemonError> {
         let mut view = FrameView { width: 0, height: 0, data: std::ptr::null(), len: 0, timestamp_us: 0 };
-        check(unsafe { (self.interface.capture)(self.handle, &mut view) }, "sensor capture")?;
+        check_with_reason(unsafe { (self.interface.capture)(self.handle, &mut view) }, "sensor capture", self.last_error)?;
         if view.data.is_null() {
             return Err(DaemonError::Backend("sensor returned a frame without data".into()));
         }
         let pixels = unsafe { std::slice::from_raw_parts(view.data, view.len) }.to_vec();
         unsafe { (self.interface.release_frame)(self.handle, &view) };
         Ok(CapturedFrame { width: view.width, height: view.height, pixels })
+    }
+
+    fn release(&mut self) {
+        unsafe { (self.interface.release)(self.handle) };
     }
 }
 
@@ -301,5 +326,19 @@ mod tests {
         assert!(matches!(check(Status::NotFound, "x"), Err(DaemonError::NotFound)));
         assert!(matches!(check(Status::AuthenticationFailed, "x"), Err(DaemonError::Tampered)));
         assert!(matches!(check(Status::EmitterFailure, "x"), Err(DaemonError::Backend(_))));
+    }
+
+    unsafe extern "C" fn fake_last_error(buffer: *mut u8, capacity: usize) -> usize {
+        let message = b"camera refused the write";
+        std::ptr::copy_nonoverlapping(message.as_ptr(), buffer, message.len().min(capacity));
+        message.len()
+    }
+
+    #[test]
+    fn sensor_failures_carry_the_reason_exported_by_the_plugin() {
+        let error = check_with_reason(Status::EmitterFailure, "sensor capture", Some(fake_last_error)).unwrap_err();
+        assert!(error.to_string().contains("camera refused the write"), "{error}");
+        assert!(check_with_reason(Status::Ok, "x", Some(fake_last_error)).is_ok());
+        assert!(check_with_reason(Status::EmitterFailure, "x", None).is_err());
     }
 }

@@ -1,6 +1,9 @@
 use std::io::Write;
 
 pub mod dbus_client;
+pub mod keyd_client;
+pub mod pam_enable;
+pub mod terminal;
 
 const MAX_CAPTURES: u32 = 400;
 
@@ -22,12 +25,23 @@ pub trait BiometricsClient {
     fn purge(&mut self, uid: u32) -> Result<(), String>;
 }
 
+pub trait KeyClient {
+    fn provision(&mut self, uid: u32) -> Result<String, String>;
+    fn set_pin(&mut self, uid: u32, pin: &str) -> Result<(), String>;
+}
+
+pub trait PinPrompt {
+    fn read_secret(&mut self, prompt: &str) -> Result<String, String>;
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
     Enroll { uid: u32 },
     Verify { uid: u32 },
     Identify,
     Purge { uid: u32 },
+    SetPin { uid: u32 },
+    Provision { uid: u32 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +61,7 @@ pub enum Outcome {
     Success,
     Rejected,
     Failed(String),
+    ProvisionFailed(String),
 }
 
 impl Outcome {
@@ -55,11 +70,12 @@ impl Outcome {
             Outcome::Success => 0,
             Outcome::Rejected => 1,
             Outcome::Failed(_) => 3,
+            Outcome::ProvisionFailed(_) => 4,
         }
     }
 }
 
-pub const USAGE: &str = "usage: openhello-cli [--bus system|session] <enroll|verify|purge> [--uid N] | identify";
+pub const USAGE: &str = "usage: openhello-cli [--bus system|session] <enroll|verify|purge|set-pin|provision> [--uid N] | identify";
 
 pub fn parse_args(args: impl IntoIterator<Item = String>, current_uid: u32) -> Result<Invocation, String> {
     let mut bus = Bus::System;
@@ -88,6 +104,8 @@ pub fn parse_args(args: impl IntoIterator<Item = String>, current_uid: u32) -> R
         Some("enroll") => Command::Enroll { uid: uid_or_current },
         Some("verify") => Command::Verify { uid: uid_or_current },
         Some("purge") => Command::Purge { uid: uid_or_current },
+        Some("set-pin") => Command::SetPin { uid: uid_or_current },
+        Some("provision") => Command::Provision { uid: uid_or_current },
         Some("identify") if uid.is_none() => Command::Identify,
         Some("identify") => return Err("identify checks every enrolled account and takes no --uid".into()),
         Some(other) => return Err(format!("unknown command `{other}`")),
@@ -96,17 +114,24 @@ pub fn parse_args(args: impl IntoIterator<Item = String>, current_uid: u32) -> R
     Ok(Invocation { bus, command })
 }
 
-pub fn execute(client: &mut dyn BiometricsClient, command: Command, out: &mut dyn Write) -> Outcome {
-    match run(client, command, out) {
+pub struct Services<'a> {
+    pub biometrics: &'a mut dyn BiometricsClient,
+    pub keys: &'a mut dyn KeyClient,
+    pub pins: &'a mut dyn PinPrompt,
+}
+
+pub fn execute(services: &mut Services, command: Command, out: &mut dyn Write) -> Outcome {
+    match run(services, command, out) {
         Ok(outcome) => outcome,
         Err(problem) => Outcome::Failed(problem),
     }
 }
 
-fn run(client: &mut dyn BiometricsClient, command: Command, out: &mut dyn Write) -> Result<Outcome, String> {
+fn run(services: &mut Services, command: Command, out: &mut dyn Write) -> Result<Outcome, String> {
+    let Services { biometrics: client, keys, pins } = services;
     let mut say = |line: String| writeln!(out, "{line}").map_err(|e| format!("cannot write output: {e}"));
     match command {
-        Command::Enroll { uid } => enroll(client, uid, &mut say),
+        Command::Enroll { uid } => enroll(*client, *keys, uid, &mut say),
         Command::Verify { uid } => {
             if client.verify(uid)? {
                 say(format!("verified uid {uid}"))?;
@@ -131,10 +156,28 @@ fn run(client: &mut dyn BiometricsClient, command: Command, out: &mut dyn Write)
             say(format!("purged uid {uid}"))?;
             Ok(Outcome::Success)
         }
+        Command::Provision { uid } => provision(*keys, uid, RETRY_FAILURE, &mut say),
+        Command::SetPin { uid } => {
+            let pin = pins.read_secret("New PIN: ")?;
+            if pin.is_empty() {
+                return Err("the PIN cannot be empty".into());
+            }
+            if pins.read_secret("Repeat the PIN: ")? != pin {
+                return Err("the two PINs differ; nothing was changed".into());
+            }
+            keys.set_pin(uid, &pin)?;
+            say(format!("PIN set for uid {uid}"))?;
+            Ok(Outcome::Success)
+        }
     }
 }
 
-fn enroll(client: &mut dyn BiometricsClient, uid: u32, say: &mut dyn FnMut(String) -> Result<(), String>) -> Result<Outcome, String> {
+fn enroll(
+    client: &mut dyn BiometricsClient,
+    keys: &mut dyn KeyClient,
+    uid: u32,
+    say: &mut dyn FnMut(String) -> Result<(), String>,
+) -> Result<Outcome, String> {
     let handle = client.enroll_begin(uid)?;
     say(format!("enrolling uid {uid}: turn your head slowly through all poses"))?;
     for _ in 0..MAX_CAPTURES {
@@ -144,7 +187,7 @@ fn enroll(client: &mut dyn BiometricsClient, uid: u32, say: &mut dyn FnMut(Strin
             "complete" => {
                 client.enroll_commit(&handle)?;
                 say(format!("enrolled uid {uid}"))?;
-                return Ok(Outcome::Success);
+                return provision(keys, uid, &enrolled_failure(uid), say);
             }
             "failed" => return Err("enrollment failed: timed out without covering every pose".into()),
             _ => {}
@@ -152,6 +195,23 @@ fn enroll(client: &mut dyn BiometricsClient, uid: u32, say: &mut dyn FnMut(Strin
     }
     client.enroll_discard(&handle)?;
     Err(format!("enrollment abandoned after {MAX_CAPTURES} captures without covering every pose"))
+}
+
+const RETRY_FAILURE: &str = "the login key could not be created; run this from the desktop session and check the openhello-keyd service log";
+
+fn enrolled_failure(uid: u32) -> String {
+    format!("the face of uid {uid} was enrolled and kept, but the login key could not be created, so sudo face login will not work yet; run `openhello-cli provision` from the desktop session (no new enrollment needed) and check the openhello-keyd service log")
+}
+
+fn provision(keys: &mut dyn KeyClient, uid: u32, failure: &str, say: &mut dyn FnMut(String) -> Result<(), String>) -> Result<Outcome, String> {
+    match keys.provision(uid) {
+        Ok(code) => {
+            say("recovery code (shown only now, store it safely; it unlocks the key if the PIN is lost):".to_string())?;
+            say(code)?;
+            Ok(Outcome::Success)
+        }
+        Err(_) => Ok(Outcome::ProvisionFailed(failure.to_string())),
+    }
 }
 
 #[cfg(test)]
@@ -211,10 +271,121 @@ mod tests {
         }
     }
 
-    fn run_command(client: &mut FakeClient, command: Command) -> (Outcome, String) {
+    #[derive(Default)]
+    struct FakeKeys {
+        calls: Vec<String>,
+        provision_fails: bool,
+    }
+
+    const RECOVERY_CODE: &str = "RC-7Q2M-4KXD";
+
+    impl KeyClient for FakeKeys {
+        fn provision(&mut self, uid: u32) -> Result<String, String> {
+            self.calls.push(format!("provision {uid}"));
+            if self.provision_fails {
+                return Err("Provision refused (io.openhello.Keyd1.Failed)".into());
+            }
+            Ok(RECOVERY_CODE.into())
+        }
+
+        fn set_pin(&mut self, uid: u32, pin: &str) -> Result<(), String> {
+            self.calls.push(format!("set-pin {uid} {pin}"));
+            Ok(())
+        }
+    }
+
+    struct TypedPins(Vec<&'static str>);
+
+    impl PinPrompt for TypedPins {
+        fn read_secret(&mut self, _: &str) -> Result<String, String> {
+            Ok(self.0.remove(0).to_string())
+        }
+    }
+
+    fn run_with(client: &mut FakeClient, keys: &mut FakeKeys, pins: &mut TypedPins, command: Command) -> (Outcome, String) {
         let mut out = Vec::new();
-        let outcome = execute(client, command, &mut out);
+        let mut services = Services { biometrics: client, keys, pins };
+        let outcome = execute(&mut services, command, &mut out);
         (outcome, String::from_utf8(out).unwrap())
+    }
+
+    fn run_command(client: &mut FakeClient, command: Command) -> (Outcome, String) {
+        run_with(client, &mut FakeKeys::default(), &mut TypedPins(vec![]), command)
+    }
+
+    fn enrolled_client() -> FakeClient {
+        FakeClient { progress: vec![progress("complete", 6)], ..Default::default() }
+    }
+
+    // @covers:AC-016-cli
+    #[test]
+    fn enroll_provisions_the_key_after_the_commit_and_prints_the_recovery_code_once() {
+        let mut client = enrolled_client();
+        let mut keys = FakeKeys::default();
+        let (outcome, output) = run_with(&mut client, &mut keys, &mut TypedPins(vec![]), Command::Enroll { uid: 1000 });
+        assert_eq!(outcome, Outcome::Success);
+        assert_eq!(keys.calls, vec!["provision 1000"]);
+        assert_eq!(client.calls.last().unwrap(), "commit h1");
+        assert_eq!(output.matches(RECOVERY_CODE).count(), 1);
+    }
+
+    // @covers:AC-016-cli
+    #[test]
+    fn a_provision_failure_keeps_the_template_exits_with_its_own_code_and_prints_no_code() {
+        let mut client = enrolled_client();
+        let mut keys = FakeKeys { provision_fails: true, ..Default::default() };
+        let (outcome, output) = run_with(&mut client, &mut keys, &mut TypedPins(vec![]), Command::Enroll { uid: 1000 });
+        assert!(matches!(&outcome, Outcome::ProvisionFailed(m) if m.contains("enrolled and kept") && m.contains("openhello-cli provision") && !m.contains("Keyd1")));
+        assert_eq!(outcome.exit_code(), 4);
+        assert!(!client.calls.iter().any(|c| c.starts_with("discard")));
+        assert!(!output.contains(RECOVERY_CODE) && !output.contains("recovery"));
+    }
+
+    // @covers:AC-016-cli
+    #[test]
+    fn provision_command_retries_the_key_without_enrolling_and_prints_the_code_once() {
+        let mut client = FakeClient::default();
+        let mut keys = FakeKeys::default();
+        let (outcome, output) = run_with(&mut client, &mut keys, &mut TypedPins(vec![]), Command::Provision { uid: 1000 });
+        assert_eq!(outcome, Outcome::Success);
+        assert_eq!(keys.calls, vec!["provision 1000"]);
+        assert!(client.calls.is_empty());
+        assert_eq!(output.matches(RECOVERY_CODE).count(), 1);
+
+        let mut keys = FakeKeys { provision_fails: true, ..Default::default() };
+        let (outcome, output) = run_with(&mut client, &mut keys, &mut TypedPins(vec![]), Command::Provision { uid: 1000 });
+        assert!(matches!(&outcome, Outcome::ProvisionFailed(m) if !m.contains("Keyd1")));
+        assert_eq!(outcome.exit_code(), 4);
+        assert!(!output.contains(RECOVERY_CODE));
+    }
+
+    #[test]
+    fn enroll_that_never_commits_does_not_provision() {
+        let mut client = FakeClient { progress: vec![progress("failed", 1)], ..Default::default() };
+        let mut keys = FakeKeys::default();
+        run_with(&mut client, &mut keys, &mut TypedPins(vec![]), Command::Enroll { uid: 1000 });
+        assert!(keys.calls.is_empty());
+    }
+
+    // @covers:AC-025-cli
+    #[test]
+    fn set_pin_asks_twice_and_sends_the_confirmed_pin() {
+        let mut keys = FakeKeys::default();
+        let (outcome, output) = run_with(&mut FakeClient::default(), &mut keys, &mut TypedPins(vec!["482916", "482916"]), Command::SetPin { uid: 1000 });
+        assert_eq!(outcome, Outcome::Success);
+        assert_eq!(keys.calls, vec!["set-pin 1000 482916"]);
+        assert!(!output.contains("482916"));
+    }
+
+    // @covers:AC-025-cli
+    #[test]
+    fn set_pin_rejects_a_mismatch_or_an_empty_pin_without_calling_the_keyd() {
+        for typed in [vec!["482916", "482917"], vec!["", ""]] {
+            let mut keys = FakeKeys::default();
+            let (outcome, _) = run_with(&mut FakeClient::default(), &mut keys, &mut TypedPins(typed), Command::SetPin { uid: 1000 });
+            assert!(matches!(&outcome, Outcome::Failed(m) if !m.contains("482916")), "{outcome:?}");
+            assert!(keys.calls.is_empty());
+        }
     }
 
     fn args(items: &[&str]) -> Vec<String> {
@@ -275,6 +446,8 @@ mod tests {
         let parsed = parse_args(args(&["--bus", "session", "purge", "--uid", "1002"]), 1000).unwrap();
         assert_eq!(parsed, Invocation { bus: Bus::Session, command: Command::Purge { uid: 1002 } });
         assert_eq!(parse_args(args(&["identify"]), 1000).unwrap().command, Command::Identify);
+        assert_eq!(parse_args(args(&["set-pin"]), 1000).unwrap().command, Command::SetPin { uid: 1000 });
+        assert_eq!(parse_args(args(&["provision", "--uid", "1001"]), 1000).unwrap().command, Command::Provision { uid: 1001 });
 
         for bad in [vec![], vec!["dance"], vec!["verify", "--uid", "-1"], vec!["--bus", "mars", "verify"], vec!["identify", "--uid", "5"], vec!["verify", "extra"], vec!["--uid"]] {
             assert!(parse_args(args(&bad), 1000).is_err(), "{bad:?}");
