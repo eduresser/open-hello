@@ -277,3 +277,10 @@
 - Model: claude-sonnet-5
 - Effort: low
 - Notes: found on a freshly reset VM (2026-10-21): `sudo` never asked for the face and logged `reason=keyd-unavailable`, because the setuid path reads the keyd socket only from root-owned `/etc/openhello/pkcs11.conf`, which `install.sh` never created (earlier VMs had it by hand). The module now falls back to the compiled default `/run/openhello/keyd-token.sock` when the file is absent. The shared `config.rs` of the PKCS#11 crate is unchanged. T-050 removed the unused template `packaging/pam/pkcs11.conf`; it was never installed.
+
+## T-052 — The login screen's helper counts as a local session [done]
+- Refs: AC-028
+- Files: crates/openhello-pam/src/session.rs, crates/openhello-pam/src/lib.rs, .spec/features/credential-login-v1b/lockscreen.md
+- Model: claude-sonnet-5
+- Effort: low
+- Notes: the greeter's helper runs as root in the display manager's service cgroup with no session scope or display variables, so the module ignored it (`not-local`). When no other signal decides, a logind session with `CLASS=greeter` and `REMOTE=0` makes the process local. Proven on the plasmalogin VM (2026-10-22): the face logs in after Enter with an empty password. An automatic Enter through `/dev/uinput` worked but was removed by owner decision (fragile, extra attack surface); the manual Enter stays.
