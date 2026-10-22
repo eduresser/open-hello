@@ -5,6 +5,9 @@ pub const ABI_VERSION: u32 = 2;
 pub const SENSOR_ENTRY_SYMBOL: &str = "openhello_sensor_interface";
 pub const ENGINE_ENTRY_SYMBOL: &str = "openhello_engine_interface";
 pub const STORAGE_ENTRY_SYMBOL: &str = "openhello_storage_interface";
+pub const SENSOR_LAST_ERROR_SYMBOL: &str = "openhello_sensor_last_error";
+
+pub type SensorLastError = unsafe extern "C" fn(buffer: *mut u8, capacity: usize) -> usize;
 
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -208,8 +208,8 @@ if [ ! -e "$CONF_DIR/openhello.env" ]; then
     cat > "$CONF_DIR/openhello.env" <<ENV
 OPENHELLO_DEVICE=/dev/video2
 ORT_DYLIB_PATH=$LIB_DIR/libonnxruntime.so
-# Emitter is detected automatically. Only for cameras that stay dark: OPENHELLO_IR_EMITTER=unit:selector:hexpayload
-# (find it with linux-enable-ir-emitter) or OPENHELLO_IR_EMITTER_ALLOW_WRITE=1 to let open-hello switch the Microsoft face-auth mode
+# Emitter is detected and switched on automatically. Only for cameras that stay dark: OPENHELLO_IR_EMITTER=unit:selector:hexpayload
+# (find it with linux-enable-ir-emitter)
 # OPENHELLO_TPM_TCTI=device:/dev/tpmrm0
 ENV
   fi
