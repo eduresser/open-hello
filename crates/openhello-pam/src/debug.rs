@@ -69,6 +69,12 @@ pub fn report(enabled: bool, sink: &dyn Fn(&str), reason: Reason, service: &str)
     }
 }
 
+pub fn report_text(enabled: bool, sink: &dyn Fn(&str), text: &str) {
+    if enabled {
+        sink(text);
+    }
+}
+
 pub fn syslog(message: &str) {
     let Ok(text) = CString::new(message) else {
         return;

@@ -82,8 +82,13 @@ int main(int argc, char **argv) {
   pam_set_item(h, PAM_TTY, tty ? tty : "/dev/pts/0");
   if (rhost) pam_set_item(h, PAM_RHOST, rhost);
   pam_fail_delay(h, 0);
+  sigset_t only_int;
+  sigemptyset(&only_int);
+  sigaddset(&only_int, SIGINT);
   if (getenv("PAMTEST_CATCH_SIGINT")) signal(SIGINT, on_interrupt);
+  if (getenv("PAMTEST_BLOCK_SIGINT")) sigprocmask(SIG_BLOCK, &only_int, NULL);
   rc = pam_authenticate(h, 0);
+  sigprocmask(SIG_UNBLOCK, &only_int, NULL);
   printf("RESULT %d\n", rc);
   printf("SIGINT %d\n", (int)interrupted);
   pam_end(h, rc);
@@ -388,6 +393,7 @@ struct Stack {
     rhost: Option<&'static str>,
     user: Option<&'static str>,
     interrupt_after: Option<Duration>,
+    block_sigint: bool,
 }
 
 impl Stack {
@@ -403,6 +409,14 @@ impl Stack {
             rhost: None,
             user: None,
             interrupt_after: None,
+            block_sigint: false,
+        }
+    }
+
+    fn blocking_sigint(self) -> Self {
+        Self {
+            block_sigint: true,
+            ..self
         }
     }
 
@@ -579,6 +593,9 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
     }
     if stack.interrupt_after.is_some() {
         client.env("PAMTEST_CATCH_SIGINT", "1");
+    }
+    if stack.block_sigint {
+        client.env("PAMTEST_BLOCK_SIGINT", "1");
     }
     let child = client
         .args([
@@ -1310,5 +1327,20 @@ fn an_interrupt_while_the_camera_waits_ends_the_module_at_once_and_hands_the_sig
         );
         assert!(interrupted.sigint_seen, "the caller never saw its SIGINT");
         assert!(interrupted.showed_no_message());
+
+        let blocked = scenario(
+            &rig,
+            fixture,
+            &services,
+            Stack::face(Verify::Hangs)
+                .interrupted_after(Duration::from_secs(1))
+                .blocking_sigint(),
+        );
+        assert!(
+            blocked.elapsed < Duration::from_secs(5),
+            "a signal the caller blocks was not served: {:?}",
+            blocked.elapsed
+        );
+        assert!(blocked.sigint_seen, "the caller never saw its SIGINT");
     });
 }
