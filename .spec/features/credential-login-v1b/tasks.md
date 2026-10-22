@@ -263,3 +263,10 @@
 - Model: claude-sonnet-5
 - Effort: low
 - Notes: found on the VM (2026-10-21): the polkit dialog runs `polkit-agent-helper-1` inside the agent's user service (cgroup `user@UID.service/...`, no `session-N.scope`), with a cleared environment and no TTY, so the module returned `not-local` and polkit never tried the face. When the cgroup has no session scope but names `user-UID.slice`, the module reads the user's `DISPLAY=` session from logind and applies the same `REMOTE=` rule. No desktop-specific data; a missing or empty `DISPLAY=` stays unknown (silent ignore).
+
+## T-050 — Remove the orphaned NSS provisioning and pam_pkcs11 configuration [done]
+- Refs: AC-027
+- Files: crates/openhello-keyd/src/certificate.rs, crates/openhello-keyd/src/provision.rs, crates/openhello-keyd/src/purge.rs, crates/openhello-keyd/src/config.rs, crates/openhello-keyd/src/tpm.rs, crates/openhello-keyd/tests/certificate.rs, packaging/pam/pam_pkcs11.conf, packaging/pam/pkcs11.conf, scripts/pam-survey.sh
+- Model: claude-sonnet-5
+- Effort: low
+- Notes: `pam_openhello` verifies in pure Rust, so nothing reads the NSS trust database any more. Removed: `nss_dir` and `certutil` from `KeydConfig` and from the `OPENHELLO_KEYD_NSS_DIR` and `OPENHELLO_KEYD_CERTUTIL` variables, `import_trusted`, `remove_trusted`, the certutil runner, the NSS provisioning test, the two `pam_pkcs11` packaging files and the `pam_pkcs11.so` and `certutil` lines of the survey script. Kept: the PKCS#11 proxy crate, the token socket and the certificate and subject map, which keep their own tests.
