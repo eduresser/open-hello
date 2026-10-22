@@ -262,41 +262,46 @@ impl Answers for Replies {
     }
 }
 
-fn enroll_answering(client: &mut DbusClient, replies: Vec<&'static str>) -> (Outcome, String) {
+fn run_answering(client: &mut DbusClient, command: Command, replies: Vec<&'static str>) -> (Outcome, String) {
     let mut out = Vec::new();
     let mut services = Services { biometrics: client, keys: &mut NoKeys, pins: &mut NoPins, answers: &mut Replies(replies) };
-    let outcome = execute(&mut services, Command::Enroll { uid: 1000 }, &mut out);
+    let outcome = execute(&mut services, command, &mut out);
     (outcome, String::from_utf8(out).unwrap())
 }
 
 // @spec:AC-055
+// @spec:AC-060
 #[test]
-fn cli_enrolls_the_face_then_two_fingers_through_the_real_dbus_interface_keeping_the_first() {
+fn cli_enrolls_two_fingers_without_the_camera_and_the_face_command_leaves_the_reader_alone() {
     let bus = PrivateBus::start();
     let reader = Reader::default();
     serve_with(&bus, Some(Arc::new(reader.clone())));
     let mut client = DbusClient::on_address(&bus.address).unwrap();
 
-    let (outcome, output) = enroll_answering(&mut client, vec!["", "", "y", "1", "n"]);
+    let (outcome, output) = run_answering(&mut client, Command::EnrollFinger { uid: 1000 }, vec!["", "y", "1", "n"]);
     assert_eq!(outcome, Outcome::Success, "{output}");
-    assert!(output.contains("enrolled uid 1000") && output.contains("stage 5 of 5 done") && output.contains("enrolled the right index finger") && output.contains("enrolled the left thumb"), "{output}");
+    assert!(!output.contains("poses covered") && !output.contains("enrolled uid"), "{output}");
+    assert!(output.contains("stage 5 of 5 done") && output.contains("enrolled the right index finger") && output.contains("enrolled the left thumb"), "{output}");
     assert_eq!(*reader.enrolled.lock().unwrap(), vec!["right-index-finger", "left-thumb"]);
     assert_eq!(reader.stopped.load(std::sync::atomic::Ordering::SeqCst), 2);
+    assert_eq!(run_answering(&mut client, Command::Verify { uid: 1000 }, vec![]).0, Outcome::Rejected);
 
-    let (outcome, output) = enroll_answering(&mut client, vec!["", "2", "n"]);
+    let (outcome, output) = run_answering(&mut client, Command::Enroll { uid: 1000 }, vec!["", "2", "n"]);
     assert_eq!(outcome, Outcome::Success, "{output}");
-    assert_eq!(*reader.enrolled.lock().unwrap(), vec!["right-index-finger", "left-thumb", "left-index-finger"]);
+    assert!(output.contains("enrolled uid 1000") && !output.contains("finger"), "{output}");
+    assert_eq!(*reader.enrolled.lock().unwrap(), vec!["right-index-finger", "left-thumb"]);
+    assert_eq!(run_answering(&mut client, Command::Verify { uid: 1000 }, vec![]).0, Outcome::Success);
 }
 
 // @spec:AC-057
 #[test]
-fn cli_without_a_reader_enrolls_the_face_and_says_so_in_one_line_through_the_real_dbus_interface() {
+fn cli_without_a_reader_says_so_in_one_line_and_enrolls_nothing_through_the_real_dbus_interface() {
     let bus = PrivateBus::start();
     serve(&bus);
     let mut client = DbusClient::on_address(&bus.address).unwrap();
-    let (outcome, output) = enroll_answering(&mut client, vec!["", ""]);
+    let (outcome, output) = run_answering(&mut client, Command::EnrollFinger { uid: 1000 }, vec!["", ""]);
     assert_eq!(outcome, Outcome::Success, "{output}");
-    assert!(output.contains("enrolled uid 1000"));
-    assert_eq!(output.lines().filter(|line| line.contains("no fingerprint reader was found")).count(), 1, "{output}");
-    assert!(!output.contains("Add a fingerprint"));
+    assert_eq!(output.lines().count(), 1, "{output}");
+    assert!(output.contains("no fingerprint reader was found"));
+    assert_eq!(run_answering(&mut client, Command::Identify, vec![]).0, Outcome::Rejected);
 }

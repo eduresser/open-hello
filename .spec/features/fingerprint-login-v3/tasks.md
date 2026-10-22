@@ -27,3 +27,8 @@
 - Refs: US-019, AC-048
 - Files: .spec/constitution.md, packaging/openhellod.service, scripts/install.sh
 - Notes: the exceptions to P-006 and P-007 are already written (ASM-019). Remaining: unit ordering after `fprintd`, installer capability check for `fprintd`, and the end-to-end run on the VM with the virtual reader (`virtual-fingerprint-reader-vm` memory), recorded as evidence. Follow the minimal-comments skill.
+
+## T-062 — Enroll face and enroll finger subcommands [done]
+- Refs: US-021, AC-055, AC-057, AC-060
+- Files: crates/openhello-cli/src/lib.rs, crates/openhello-cli/src/main.rs, crates/openhello-cli/tests/end_to_end.rs, crates/openhello-cli/tests/provisioning_flow.rs
+- Notes: owner request 2026-10-22 after seeing `enroll` open the camera before any finger step. `enroll face` is the face only (a bare `enroll` is its alias); `enroll finger` runs the finger step alone and provisions the TPM key if the user has none. Follow the minimal-comments skill.

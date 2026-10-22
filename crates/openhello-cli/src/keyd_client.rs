@@ -1,6 +1,6 @@
 use zbus::blocking::{Connection, Proxy};
 
-use crate::{Bus, KeyClient};
+use crate::{Bus, KeyClient, ALREADY_PROVISIONED};
 
 const BUS_NAME: &str = "io.openhello.Keyd1";
 const OBJECT_PATH: &str = "/io/openhello/Keyd1";
@@ -43,7 +43,10 @@ impl KeyClient for KeydClient {
     fn provision(&mut self, uid: u32) -> Result<String, String> {
         self.proxy()?
             .call("Provision", &(uid,))
-            .map_err(|e| describe("Provision", e))
+            .map_err(|e| match e {
+                zbus::Error::MethodError(_, Some(detail), _) if detail.contains("already has a key") => ALREADY_PROVISIONED.to_string(),
+                other => describe("Provision", other),
+            })
     }
 
     fn set_pin(&mut self, uid: u32, pin: &str) -> Result<(), String> {

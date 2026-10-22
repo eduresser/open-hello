@@ -53,7 +53,9 @@ impl Authorizer for AllowAll {
     }
 }
 
-struct CompletedEnrollment;
+struct CompletedEnrollment {
+    reader: bool,
+}
 
 impl BiometricsClient for CompletedEnrollment {
     fn enroll_begin(&mut self, _: u32) -> Result<String, String> {
@@ -78,15 +80,18 @@ impl BiometricsClient for CompletedEnrollment {
     }
 
     fn finger_status(&mut self, _: u32) -> Result<FingerReader, String> {
-        Ok(FingerReader { present: false, enrolled: Vec::new() })
+        Ok(FingerReader { present: self.reader, enrolled: Vec::new() })
     }
 
     fn finger_enroll_begin(&mut self, _: u32, _: &str) -> Result<String, String> {
-        Err("no reader".into())
+        if self.reader { Ok("f1".into()) } else { Err("no reader".into()) }
     }
 
     fn finger_enroll_next(&mut self, _: &str) -> Result<FingerProgress, String> {
-        Err("no reader".into())
+        if !self.reader {
+            return Err("no reader".into());
+        }
+        Ok(FingerProgress { status: "completed".into(), state: "complete".into(), passed: 5, total: 5 })
     }
 
     fn finger_enroll_discard(&mut self, _: &str) -> Result<(), String> {
@@ -157,7 +162,7 @@ fn enroll_provisions_the_real_keyd_and_set_pin_unlocks_with_the_new_pin() {
     let uid = unsafe { libc::getuid() };
     let mut run = |pins: Vec<&'static str>, command| {
         let mut out = Vec::new();
-        let mut biometrics = CompletedEnrollment;
+        let mut biometrics = CompletedEnrollment { reader: false };
         let mut typed = TypedPins(pins);
         let mut services = Services {
             biometrics: &mut biometrics,
@@ -194,7 +199,7 @@ fn enroll_provisions_the_real_keyd_and_set_pin_unlocks_with_the_new_pin() {
 fn enroll_reports_a_provision_failure_when_the_keyd_is_not_on_the_bus() {
     let bus = PrivateBus::start();
     let mut keys = KeydClient::on_address(&bus.address).unwrap();
-    let mut biometrics = CompletedEnrollment;
+    let mut biometrics = CompletedEnrollment { reader: false };
     let mut typed = TypedPins(vec![]);
     let mut services = Services {
         biometrics: &mut biometrics,
@@ -225,7 +230,7 @@ fn provision_command_creates_the_key_for_an_enrolled_user_and_refuses_a_second_r
     let uid = unsafe { libc::getuid() };
     let mut run = || {
         let mut out = Vec::new();
-        let mut biometrics = CompletedEnrollment;
+        let mut biometrics = CompletedEnrollment { reader: false };
         let mut typed = TypedPins(vec![]);
         let mut services = Services {
             biometrics: &mut biometrics,
@@ -246,6 +251,54 @@ fn provision_command_creates_the_key_for_an_enrolled_user_and_refuses_a_second_r
     let (again, output) = run();
     assert!(matches!(again, Outcome::ProvisionFailed(_)), "{again:?}");
     assert!(!output.contains(code));
+
+    protectors.purge(uid).unwrap();
+}
+
+struct Replies(Vec<&'static str>);
+
+impl Answers for Replies {
+    fn ask(&mut self, _: &str) -> Result<String, String> {
+        if self.0.is_empty() {
+            return Err("no more answers".into());
+        }
+        Ok(self.0.remove(0).to_string())
+    }
+}
+
+// @spec:AC-055
+// @spec:AC-060
+#[test]
+fn enroll_finger_provisions_the_real_keyd_for_a_user_without_a_face_and_a_second_run_changes_nothing() {
+    let rig = rig();
+    let protectors = Arc::new(Protectors::new(rig.config.clone()).unwrap());
+    let bus = PrivateBus::start();
+    serve(&bus, protectors.clone());
+    let mut keys = KeydClient::on_address(&bus.address).unwrap();
+    let uid = unsafe { libc::getuid() };
+    let mut run = || {
+        let mut out = Vec::new();
+        let mut biometrics = CompletedEnrollment { reader: true };
+        let mut typed = TypedPins(vec![]);
+        let mut services = Services {
+            biometrics: &mut biometrics,
+            keys: &mut keys,
+            pins: &mut typed,
+            answers: &mut Replies(vec!["", "n"]),
+        };
+        let outcome = execute(&mut services, Command::EnrollFinger { uid }, &mut out);
+        (outcome, String::from_utf8(out).unwrap())
+    };
+
+    let (outcome, output) = run();
+    assert_eq!(outcome, Outcome::Success, "{output}");
+    let code = output.lines().last().unwrap();
+    assert_eq!(code.len(), 32);
+    assert!(protectors.unlock_with_recovery(uid, code).is_ok());
+
+    let (again, output) = run();
+    assert_eq!(again, Outcome::Success, "{output}");
+    assert!(output.contains("enrolled the right index finger") && !output.contains("recovery"));
 
     protectors.purge(uid).unwrap();
 }
