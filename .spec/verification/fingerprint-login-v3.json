@@ -1,0 +1,11 @@
+{
+  "feature": "fingerprint-login-v3",
+  "timestamp": "2026-10-22T22:28:10.219Z",
+  "gitRev": "f1caee9",
+  "command": "cargo test",
+  "reporter": "exitcode",
+  "exitCode": 101,
+  "testsParsed": 0,
+  "results": {},
+  "principles": {}
+}
