@@ -17,8 +17,7 @@
 - Files: crates/openhellod/src/dbus_service.rs, crates/openhello-cli/src/lib.rs, crates/openhello-cli/src/dbus_client.rs, crates/openhello-cli/src/terminal.rs
 - Notes: depends on T-057. Enroll methods stay under polkit (P-009). Choosing a finger, several fingers (Q-004), "no reader" line. Follow the minimal-comments skill.
 
-## T-060 — Purge of fingers and fingerprint-safe logs [pending]
-
+## T-060 — Purge of fingers and fingerprint-safe logs [done]
 - Refs: US-022, AC-058, AC-059
 - Files: crates/openhellod/src/core.rs, crates/openhellod/src/logging.rs
 - Notes: depends on T-058 (same file). `DeleteEnrolledFingers` in purge; a failure reports "incomplete" as for the key. Follow the minimal-comments skill.

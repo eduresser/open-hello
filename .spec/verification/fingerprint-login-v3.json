@@ -1,7 +1,7 @@
 {
   "feature": "fingerprint-login-v3",
-  "timestamp": "2026-10-22T23:07:04.964Z",
-  "gitRev": "96cda69",
+  "timestamp": "2026-10-22T23:16:20.555Z",
+  "gitRev": "0fa0a58",
   "command": "cargo test",
   "reporter": "exitcode",
   "exitCode": 0,
@@ -53,6 +53,16 @@
       "method": "exitcode"
     },
     "AC-057": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-058": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-059": {
       "status": "pass",
       "testName": null,
       "method": "exitcode"

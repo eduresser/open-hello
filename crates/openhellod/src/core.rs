@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use crate::backends::{
     AuthVerdict, DaemonError, EngineBackend, EnrollProgress, EnrollState, SensorBackend, StorageBackend,
 };
-use crate::fingerprint::{verify_default_attempts, FingerprintDecision, FingerprintMatcher, Unavailability};
+use crate::fingerprint::{verify_default_attempts, FingerDeletion, FingerprintDecision, FingerprintMatcher, Unavailability};
 use crate::keyd_client::{KeyPurge, KeydClient};
 use crate::logging::{Level, Logger, Value};
 use crate::ticket_client::{TicketClient, TicketDelivery};
@@ -353,6 +353,7 @@ impl Biometrics {
         let template = self.storage.purge(uid);
         let key = self.keyd.as_ref().map(|client| client.purge(uid));
         self.last_key_purge = key;
+        let fingers = self.fingerprint.as_mut().map(|matcher| matcher.delete_enrolled(uid));
         self.logger.log(
             Level::Info,
             "purge",
@@ -360,12 +361,16 @@ impl Biometrics {
                 ("uid", Value::Uid(uid)),
                 ("template", Value::Label(if template.is_ok() { "destroyed" } else { "failed" })),
                 ("key", Value::Label(key.map_or("not-configured", KeyPurge::as_str))),
+                ("fingers", Value::Label(fingers.map_or("not-configured", FingerDeletion::as_str))),
             ],
         );
         template?;
-        match key {
-            Some(KeyPurge::Destroyed) | None => Ok(()),
-            Some(_) => Err(DaemonError::Backend("key purge incomplete".into())),
+        if matches!(key, Some(step) if step != KeyPurge::Destroyed) {
+            return Err(DaemonError::Backend("key purge incomplete".into()));
+        }
+        match fingers {
+            Some(FingerDeletion::Failed) => Err(DaemonError::Backend("fingerprint purge incomplete".into())),
+            _ => Ok(()),
         }
     }
 
@@ -591,7 +596,7 @@ mod tests {
     use super::fakes::*;
     use super::*;
     use crate::backends::{AuthProgress, CapturedFrame};
-    use crate::fingerprint::{FingerprintResult, Unavailability};
+    use crate::fingerprint::{FingerDeletion, FingerprintResult, Unavailability};
     use crate::ticket_client::test_keyd::TestKeyd;
 
     #[test]
@@ -1157,6 +1162,10 @@ mod tests {
     }
 
     impl FingerprintMatcher for ScriptedFinger {
+        fn delete_enrolled(&mut self, _: u32) -> FingerDeletion {
+            FingerDeletion::NothingToDelete
+        }
+
         fn verify(&mut self, _: u32, cancel: Cancel) -> FingerprintResult {
             let call = self.log.calls.fetch_add(1, Ordering::SeqCst);
             let step = self.steps.get(call).copied().unwrap_or(Step::Result(FingerprintResult::Unavailable(Unavailability::Unknown)));

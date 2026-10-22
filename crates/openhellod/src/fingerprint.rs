@@ -66,8 +66,26 @@ pub enum FingerprintDecision {
     Cancelled,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FingerDeletion {
+    Deleted,
+    NothingToDelete,
+    Failed,
+}
+
+impl FingerDeletion {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FingerDeletion::Deleted => "destroyed",
+            FingerDeletion::NothingToDelete => "none",
+            FingerDeletion::Failed => "failed",
+        }
+    }
+}
+
 pub trait FingerprintMatcher: Send {
     fn verify(&mut self, uid: u32, cancel: Cancel) -> FingerprintResult;
+    fn delete_enrolled(&mut self, uid: u32) -> FingerDeletion;
 }
 
 pub fn verify_with_attempts(
@@ -138,6 +156,11 @@ impl FingerprintMatcher for FprintdMatcher {
         let result = async_io::block_on(run_verify(&self.bus, &name, cancel, &mut retries));
         self.log_outcome(uid, result, retries);
         result
+    }
+
+    fn delete_enrolled(&mut self, uid: u32) -> FingerDeletion {
+        let Some(name) = (self.user_name)(uid) else { return FingerDeletion::NothingToDelete };
+        async_io::block_on(run_delete(&self.bus, &name))
     }
 }
 
@@ -592,6 +615,31 @@ async fn begin_claimed(device: &Proxy<'static>, finger: &'static str) -> Result<
     match within(SETUP_TIMEOUT, device.call::<_, _, ()>("EnrollStart", &(finger,))).await {
         Some(Ok(())) => Ok((statuses, total)),
         _ => Err(FingerEnrollError::Unavailable),
+    }
+}
+
+async fn run_delete(bus: &FprintdBus, user_name: &str) -> FingerDeletion {
+    let Some(Ok(connection)) = within(SETUP_TIMEOUT, connect(bus)).await else { return FingerDeletion::NothingToDelete };
+    let device = match within(SETUP_TIMEOUT, default_device(&connection)).await {
+        Some(Ok(device)) => device,
+        Some(Err(Unavailability::ServiceAbsent | Unavailability::NoDevice)) => return FingerDeletion::NothingToDelete,
+        Some(Err(_)) | None => return FingerDeletion::Failed,
+    };
+    match list_enrolled(&device, user_name).await {
+        Ok(enrolled) if enrolled.is_empty() => return FingerDeletion::NothingToDelete,
+        Ok(_) => {}
+        Err(_) => return FingerDeletion::Failed,
+    }
+    match within(SETUP_TIMEOUT, device.call::<_, _, ()>("Claim", &(user_name,))).await {
+        Some(Ok(())) => {}
+        _ => return FingerDeletion::Failed,
+    }
+    let deleted = within(SETUP_TIMEOUT, device.call::<_, _, ()>("DeleteEnrolledFingers2", &())).await;
+    let _ = within(CLEANUP_TIMEOUT, device.call::<_, _, ()>("Release", &())).await;
+    match deleted {
+        Some(Ok(())) => FingerDeletion::Deleted,
+        Some(Err(error)) if classify(Stage::Device, &error) == Unavailability::NoEnrolledFinger => FingerDeletion::NothingToDelete,
+        _ => FingerDeletion::Failed,
     }
 }
 

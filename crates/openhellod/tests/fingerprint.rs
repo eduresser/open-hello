@@ -260,6 +260,9 @@ fn a_match_on_the_third_attempt_is_accepted_and_stops_the_count() {
             self.1 += 1;
             self.0.remove(0)
         }
+        fn delete_enrolled(&mut self, _: u32) -> FingerDeletion {
+            FingerDeletion::NothingToDelete
+        }
     }
     let mut sequence = Sequence(
         vec![FingerprintResult::NoMatch, FingerprintResult::NoMatch, FingerprintResult::Match, FingerprintResult::NoMatch],
@@ -277,6 +280,9 @@ fn zero_allowed_attempts_refuse_without_touching_the_reader() {
         fn verify(&mut self, _: u32, _: openhellod::core::Cancel) -> FingerprintResult {
             FingerprintResult::Match
         }
+        fn delete_enrolled(&mut self, _: u32) -> FingerDeletion {
+            FingerDeletion::NothingToDelete
+        }
     }
     assert_eq!(verify_with_attempts(&mut AlwaysMatch, OWNER_UID, 0, &never), FingerprintDecision::Refused);
 }
@@ -288,6 +294,9 @@ fn attempts_stop_at_cancellation_and_at_infrastructure_errors() {
     impl FingerprintMatcher for Fixed {
         fn verify(&mut self, _: u32, _: openhellod::core::Cancel) -> FingerprintResult {
             self.0
+        }
+        fn delete_enrolled(&mut self, _: u32) -> FingerDeletion {
+            FingerDeletion::NothingToDelete
         }
     }
     assert_eq!(
