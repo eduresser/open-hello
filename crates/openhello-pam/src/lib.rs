@@ -26,6 +26,7 @@ const PAM_SERVICE: c_int = 1;
 const PAM_TTY: c_int = 3;
 const PAM_RHOST: c_int = 4;
 const PAM_USER: c_int = 2;
+const DEFAULT_TOKEN_SOCKET: &str = "/run/openhello/keyd-token.sock";
 const VERIFY_GRACE: Duration = Duration::from_secs(2);
 const VERIFY_TIMEOUT: Duration =
     openhello_auth_proto::FACE_ATTEMPT_BUDGET.saturating_add(VERIFY_GRACE);
@@ -121,7 +122,26 @@ fn module_settings(args: &[String]) -> Result<Settings, ()> {
         .iter()
         .find_map(|a| a.strip_prefix("config=").map(PathBuf::from))
         .unwrap_or_else(|| PathBuf::from(config::DEFAULT_CONFIG));
-    config::current(&config::process_env, &config).map_err(|_| ())
+    let found = config::current(&config::process_env, &config);
+    with_default_socket(found, config.exists())
+}
+
+fn with_default_socket(
+    found: Result<Settings, String>,
+    config_exists: bool,
+) -> Result<Settings, ()> {
+    let settings = match found {
+        Ok(settings) => settings,
+        Err(_) if !config_exists => Settings::default(),
+        Err(_) => return Err(()),
+    };
+    let token_socket = settings
+        .token_socket
+        .or_else(|| Some(DEFAULT_TOKEN_SOCKET.into()));
+    Ok(Settings {
+        token_socket,
+        ..settings
+    })
 }
 
 unsafe fn authenticate(pamh: *mut c_void, args: &[String]) -> Result<(), Exit> {
@@ -378,9 +398,37 @@ fn name_has_owner(address: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        permitted, Locality, Reason, BUDGET, DENIED_SERVICES, SIGN_TIMEOUT, VERIFY_TIMEOUT,
+        permitted, with_default_socket, Locality, Reason, Settings, BUDGET, DEFAULT_TOKEN_SOCKET,
+        DENIED_SERVICES, SIGN_TIMEOUT, VERIFY_TIMEOUT,
     };
     use openhello_auth_proto::FACE_ATTEMPT_BUDGET;
+
+    // @spec:AC-045
+    #[test]
+    fn a_missing_config_file_falls_back_to_the_default_token_socket() {
+        let settings = with_default_socket(Err("cannot open".into()), false).unwrap();
+        assert_eq!(settings.token_socket, Some(DEFAULT_TOKEN_SOCKET.into()));
+        assert_eq!(settings.bus_address, None);
+    }
+
+    // @spec:AC-045
+    #[test]
+    fn an_existing_but_untrusted_config_file_is_still_refused() {
+        assert!(with_default_socket(Err("must be owned by root".into()), true).is_err());
+    }
+
+    // @spec:AC-045
+    #[test]
+    fn a_configured_socket_wins_over_the_default() {
+        let configured = Settings {
+            token_socket: Some("/run/other.sock".into()),
+            bus_address: None,
+        };
+        let settings = with_default_socket(Ok(configured), true).unwrap();
+        assert_eq!(settings.token_socket, Some("/run/other.sock".into()));
+        let empty = with_default_socket(Ok(Settings::default()), true).unwrap();
+        assert_eq!(empty.token_socket, Some(DEFAULT_TOKEN_SOCKET.into()));
+    }
 
     #[test]
     fn remote_or_headless_sessions_are_ignored_before_the_service_is_considered() {
