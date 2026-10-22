@@ -24,6 +24,7 @@ pub struct Probes<'a> {
     pub cgroup: &'a dyn Fn() -> Option<String>,
     pub session: &'a dyn Fn(&str) -> Option<String>,
     pub user: &'a dyn Fn(&str) -> Option<String>,
+    pub sessions: &'a dyn Fn() -> Vec<String>,
 }
 
 pub fn locate(probes: &Probes) -> Locality {
@@ -39,11 +40,18 @@ pub fn locate(probes: &Probes) -> Locality {
         Some(value) => !value.is_empty(),
         None => false,
     });
-    if probes.tty || graphical || logind == Some(false) {
+    if probes.tty || graphical || logind == Some(false) || local_greeter_present(probes) {
         Locality::Local
     } else {
         Locality::Unknown
     }
+}
+
+fn local_greeter_present(probes: &Probes) -> bool {
+    (probes.sessions)().iter().any(|text| {
+        let has = |entry: &str| text.lines().any(|line| line.trim() == entry);
+        has("CLASS=greeter") && has("REMOTE=0")
+    })
 }
 
 fn logind_remote(probes: &Probes) -> Option<bool> {
@@ -90,6 +98,20 @@ pub fn process_session(id: &str) -> Option<String> {
     std::fs::read_to_string(Path::new(SESSION_DIR).join(id)).ok()
 }
 
+pub fn process_sessions() -> Vec<String> {
+    std::fs::read_dir(SESSION_DIR)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry.file_name().to_str().is_some_and(|name| {
+                !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric())
+            })
+        })
+        .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
+        .collect()
+}
+
 pub fn process_user(uid: &str) -> Option<String> {
     std::fs::read_to_string(Path::new(USER_DIR).join(uid)).ok()
 }
@@ -103,6 +125,7 @@ mod tests {
         cgroup: Option<&'a str>,
         session: Option<&'a str>,
         user: Option<&'a str>,
+        sessions: &'a [&'a str],
         rhost: bool,
         tty: bool,
     }
@@ -125,7 +148,9 @@ mod tests {
             assert_eq!(uid, "1000");
             case.user.map(str::to_string)
         };
+        let sessions = || case.sessions.iter().map(|s| s.to_string()).collect();
         locate(&Probes {
+            sessions: &sessions,
             rhost: case.rhost,
             tty: case.tty,
             env: &env,
@@ -140,6 +165,7 @@ mod tests {
         cgroup: None,
         session: None,
         user: None,
+        sessions: &[],
         rhost: false,
         tty: false,
     };
@@ -310,5 +336,44 @@ mod tests {
         assert_eq!(session_id("0::/system.slice/cron.service"), None);
         assert_eq!(session_id("0::/x/session-..%2f.scope"), None);
         assert_eq!(session_id("0::/x/session-.scope"), None);
+    }
+
+    const GREETER_CGROUP: &str = "0::/system.slice/display-manager.service\n";
+
+    // @covers:AC-028-pam-local-session
+    #[test]
+    fn a_login_manager_helper_is_local_when_logind_has_a_local_greeter_session() {
+        let greeter = Case {
+            cgroup: Some(GREETER_CGROUP),
+            sessions: &[
+                "CLASS=user\nREMOTE=0\n",
+                "CLASS=greeter\nSEAT=seat0\nREMOTE=0\n",
+            ],
+            ..NOTHING
+        };
+        assert_eq!(run(greeter), Locality::Local);
+    }
+
+    // @covers:AC-028-pam-local-session
+    #[test]
+    fn a_greeter_session_does_not_make_remote_or_unrelated_processes_local() {
+        let remote_greeter = Case {
+            cgroup: Some(GREETER_CGROUP),
+            sessions: &["CLASS=greeter\nREMOTE=1\n"],
+            ..NOTHING
+        };
+        assert_eq!(run(remote_greeter), Locality::Unknown);
+        let user_only = Case {
+            cgroup: Some(GREETER_CGROUP),
+            sessions: &["CLASS=user\nREMOTE=0\n"],
+            ..NOTHING
+        };
+        assert_eq!(run(user_only), Locality::Unknown);
+        let ssh = Case {
+            env: &[("SSH_CONNECTION", "10.0.0.1 22 10.0.0.2 22")],
+            sessions: &["CLASS=greeter\nREMOTE=0\n"],
+            ..NOTHING
+        };
+        assert_eq!(run(ssh), Locality::Remote);
     }
 }
