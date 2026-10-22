@@ -44,12 +44,16 @@ fn interrupted() -> bool {
 
 struct SignalGuard {
     previous: Vec<(c_int, libc::sigaction)>,
+    mask: libc::sigset_t,
+    interrupt_was_blocked: bool,
+    interrupt_prior: &'static str,
 }
 
 impl SignalGuard {
     fn engage() -> Self {
         INTERRUPTION.store(0, Ordering::SeqCst);
-        let previous = HANDLED_SIGNALS
+        let (mask, interrupt_was_blocked) = unsafe { unblock_handled_signals() };
+        let previous: Vec<(c_int, libc::sigaction)> = HANDLED_SIGNALS
             .iter()
             .map(|&signal| unsafe {
                 let mut action: libc::sigaction = std::mem::zeroed();
@@ -60,8 +64,37 @@ impl SignalGuard {
                 (signal, old)
             })
             .collect();
-        Self { previous }
+        let interrupt_prior = match previous.first().map(|(_, old)| old.sa_sigaction) {
+            Some(libc::SIG_IGN) => "ignored",
+            Some(libc::SIG_DFL) => "default",
+            _ => "handler",
+        };
+        Self {
+            previous,
+            mask,
+            interrupt_was_blocked,
+            interrupt_prior,
+        }
     }
+
+    fn describe(&self) -> String {
+        format!(
+            "signals sigint-blocked={} sigint-prior={}",
+            self.interrupt_was_blocked, self.interrupt_prior
+        )
+    }
+}
+
+unsafe fn unblock_handled_signals() -> (libc::sigset_t, bool) {
+    let mut wanted: libc::sigset_t = std::mem::zeroed();
+    libc::sigemptyset(&mut wanted);
+    for signal in HANDLED_SIGNALS {
+        libc::sigaddset(&mut wanted, signal);
+    }
+    let mut before: libc::sigset_t = std::mem::zeroed();
+    libc::pthread_sigmask(libc::SIG_UNBLOCK, &wanted, &mut before);
+    let blocked = libc::sigismember(&before, libc::SIGINT) == 1;
+    (before, blocked)
 }
 
 impl Drop for SignalGuard {
@@ -69,6 +102,7 @@ impl Drop for SignalGuard {
         for (signal, old) in &self.previous {
             unsafe { libc::sigaction(*signal, old, std::ptr::null_mut()) };
         }
+        unsafe { libc::pthread_sigmask(libc::SIG_SETMASK, &self.mask, std::ptr::null_mut()) };
         let caught = INTERRUPTION.swap(0, Ordering::SeqCst);
         if caught != 0 {
             unsafe { libc::raise(caught) };
@@ -213,6 +247,11 @@ unsafe fn authenticate(pamh: *mut c_void, args: &[String]) -> Result<(), Exit> {
         .ok_or(ignore(Reason::KeydUnavailable))?;
     service_available(&settings, started).map_err(ignore)?;
     let _signals = SignalGuard::engage();
+    debug::report_text(
+        args.iter().any(|a| a == "debug"),
+        &debug::syslog,
+        &_signals.describe(),
+    );
     let challenge = challenge::random_challenge().ok_or(ignore(Reason::KeydUnavailable))?;
     let remaining = || BUDGET.saturating_sub(started.elapsed());
     match verify_face(

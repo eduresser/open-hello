@@ -215,7 +215,7 @@ As a laptop owner, I want the camera and the IR emitter to stop as soon as the s
 #### AC-046 — An interrupt ends the wait for the camera at once
 
 - **Given** `pam_openhello` waiting for the daemon's verdict inside a program that handles SIGINT or SIGTERM itself (such as `sudo`)
-- **When** the signal arrives
+- **When** the signal arrives, even if the program blocks it while it authenticates
 - **Then** the module stops waiting within 100 milliseconds, closes its bus connection so the daemon cancels the capture (AC-040), returns "ignore", restores the program's own signal handlers and raises the signal again so the program reacts as it normally would
 
 #### AC-047 — An enrollment whose owner leaves is discarded
