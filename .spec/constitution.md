@@ -45,6 +45,9 @@ raw private key bytes; the PKCS#11 token surface exposes signing/decryption oper
 The template database is encrypted with a real AEAD primitive (confidentiality + integrity in the
 same primitive). Any ciphertext tampering is detected, never silently accepted.
 
+Scope: the face template database that open-hello owns. Fingerprint templates are kept by `fprintd`
+in its own storage and are outside this principle (owner decision 2026-10-22, `fingerprint-login-v3` ASM-019).
+
 - check(test): @principle:P-006
 
 ## P-007 [MUST] Matching is calibrated against a target false-accept rate, never an arbitrary distance cutoff
@@ -52,6 +55,10 @@ same primitive). Any ciphertext tampering is detected, never silently accepted.
 The public match/verify API is parameterized by a target FAR (default `1e-5`), with an internal
 calibration layer converting the model's raw score into that unit. No uncalibrated "distance >
 magic number" check ships as the decision boundary.
+
+Scope: the face engine. The fingerprint false-accept rate is decided inside `libfprint`, which does not
+expose it, so fingerprint matching is outside this principle (owner decision 2026-10-22,
+`fingerprint-login-v3` ASM-019).
 
 - check(test): @principle:P-007
 
