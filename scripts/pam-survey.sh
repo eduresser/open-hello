@@ -52,9 +52,7 @@ done
 say
 say "## Dependencies"
 find_lib() { for d in /usr/lib64 /usr/lib /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu; do for pat in "$@"; do ls "$d"/$pat 2>/dev/null; done; done | head -1; }
-kv pam_pkcs11.so "$(find_lib 'security/pam_pkcs11.so')"
 kv tpm2_pkcs11 "$(find_lib 'pkcs11/libtpm2_pkcs11.so' 'libtpm2_pkcs11.so*')"
-kv certutil "$(command -v certutil || true)"
 kv tpm2-abrmd "$(command -v tpm2-abrmd || true) service=$(state is-enabled tpm2-abrmd)"
 kv /dev/tpmrm0 "$(exists /dev/tpmrm0)"
 kv /dev/tpm0 "$(exists /dev/tpm0)"

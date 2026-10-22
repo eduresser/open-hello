@@ -3,7 +3,7 @@ use cryptoki::object::{Attribute, AttributeType, KeyType, ObjectClass};
 use zeroize::Zeroizing;
 
 use crate::certificate::{
-    assemble, import_trusted, linux_user_name, pem, tbs_certificate, tbs_digest, upsert_mapping,
+    assemble, linux_user_name, pem, tbs_certificate, tbs_digest, upsert_mapping,
 };
 use crate::tpm::{decode_hex, failure, lock, p11_failure, DumpedObject, Guard, TokenDump};
 use crate::{validate_uid, KeydConfig, KeydError, Secret};
@@ -81,7 +81,6 @@ impl Keyd {
         if has_key(&dump) {
             let key = self.describe(&guard, &label, &dump)?;
             self.ensure_certificate(&guard, &label, &key, &dump, secret)?;
-            self.trust_certificate(&guard, &label, &key, uid)?;
             upsert_mapping(&self.config.mapfile, uid, &user)?;
             crate::auth_keys::write_public_key(&self.config.auth_dir, uid, &key.public_key)?;
             return Ok(Provisioned {
@@ -125,7 +124,6 @@ impl Keyd {
             self.check_protection(&guard, &label, &key, secret)?;
             let dump = self.config.inspect(&guard, &label)?;
             self.ensure_certificate(&guard, &label, &key, &dump, secret)?;
-            self.trust_certificate(&guard, &label, &key, uid)?;
             upsert_mapping(&self.config.mapfile, uid, &user)?;
             crate::auth_keys::write_public_key(&self.config.auth_dir, uid, &key.public_key)?;
             Ok(key)
@@ -189,20 +187,6 @@ impl Keyd {
                 }
             })
             .ok_or_else(|| failure("reading the certificate", "token returned no value", &[]))
-    }
-
-    fn trust_certificate(
-        &self,
-        guard: &Guard,
-        label: &str,
-        key: &KeyInfo,
-        uid: u32,
-    ) -> Result<(), KeydError> {
-        if self.config.nss_dir.is_none() {
-            return Ok(());
-        }
-        let der = self.certificate_der(guard, label, key)?;
-        import_trusted(&self.config, uid, &pem(&der))
     }
 
     pub fn attribute(&self, uid: u32, attribute: KeyAttribute) -> Result<bool, KeydError> {
