@@ -1,6 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use futures_lite::StreamExt;
@@ -66,6 +67,7 @@ pub struct Service {
     core: Arc<Mutex<Biometrics>>,
     authorizer: Arc<dyn Authorizer>,
     logger: Logger,
+    enrollment_owners: Arc<Mutex<HashMap<String, zbus::Task<()>>>>,
 }
 
 struct CallerWatch {
@@ -112,7 +114,7 @@ async fn watch_name(conn: &Connection, name: &str, gone: Arc<AtomicBool>) -> Opt
 impl Service {
     pub fn new(core: Biometrics, authorizer: Arc<dyn Authorizer>) -> Self {
         let logger = core.logger().clone();
-        Self { core: Arc::new(Mutex::new(core)), authorizer, logger }
+        Self { core: Arc::new(Mutex::new(core)), authorizer, logger, enrollment_owners: Arc::default() }
     }
 
     async fn with_core<T: Send + 'static>(
@@ -141,6 +143,48 @@ impl Service {
                 );
                 fdo::Error::AuthFailed(format!("{}: {reason}", action.polkit_id()))
             })
+    }
+
+    async fn discard_when_owner_leaves(&self, conn: &Connection, header: &Header<'_>, handle: &str) {
+        let Some(sender) = header.sender() else { return };
+        let Ok(bus) = fdo::DBusProxy::new(conn).await else { return };
+        let Ok(mut changes) = bus.receive_name_owner_changed_with_args(&[(0, sender.as_str())]).await else { return };
+        let still_there = match zbus::names::BusName::try_from(sender.to_string()) {
+            Ok(name) => bus.name_has_owner(name).await.unwrap_or(true),
+            Err(_) => true,
+        };
+        let (core, owners, logger, key) = (self.core.clone(), self.enrollment_owners.clone(), self.logger.clone(), handle.to_string());
+        let task = conn.executor().spawn(
+            async move {
+                let left = !still_there || loop {
+                    match changes.next().await {
+                        Some(change) if change.args().is_ok_and(|args| args.new_owner().is_none()) => break true,
+                        Some(_) => {}
+                        None => break false,
+                    }
+                };
+                if left {
+                    let session = key.clone();
+                    let _ = blocking::unblock(move || match core.lock() {
+                        Ok(mut core) => core.enroll_discard(&session).is_ok(),
+                        Err(_) => false,
+                    })
+                    .await;
+                    logger.log(Level::Info, "enrollment-abandoned", &[]);
+                    owners.lock().map(|mut owners| owners.remove(&key)).ok();
+                }
+            },
+            "openhellod-enrollment-owner",
+        );
+        if let Ok(mut owners) = self.enrollment_owners.lock() {
+            owners.insert(handle.to_string(), task);
+        }
+    }
+
+    fn release_enrollment_owner(&self, handle: &str) {
+        if let Ok(mut owners) = self.enrollment_owners.lock() {
+            owners.remove(handle);
+        }
     }
 
     async fn session_uid(&self, handle: &str) -> fdo::Result<u32> {
@@ -175,7 +219,9 @@ impl Service {
         #[zbus(header)] header: Header<'_>,
     ) -> fdo::Result<String> {
         self.authorize(conn, &header, Action::EnrollBegin, uid).await?;
-        self.with_core(move |core| core.enroll_begin(uid)).await
+        let handle = self.with_core(move |core| core.enroll_begin(uid)).await?;
+        self.discard_when_owner_leaves(conn, &header, &handle).await;
+        Ok(handle)
     }
 
     async fn enroll_capture(
@@ -198,6 +244,7 @@ impl Service {
     ) -> fdo::Result<bool> {
         let uid = self.session_uid(&handle).await?;
         self.authorize(conn, &header, Action::EnrollCommit, uid).await?;
+        self.release_enrollment_owner(&handle);
         self.with_core(move |core| core.enroll_commit(&handle)).await?;
         Ok(true)
     }
@@ -210,6 +257,7 @@ impl Service {
     ) -> fdo::Result<()> {
         let uid = self.session_uid(&handle).await?;
         self.authorize(conn, &header, Action::EnrollDiscard, uid).await?;
+        self.release_enrollment_owner(&handle);
         self.with_core(move |core| core.enroll_discard(&handle)).await
     }
 

@@ -41,16 +41,20 @@ const DENIED_SERVICES: [&str; 13] = [
 ];
 const WITHIN_BUDGET: Duration = Duration::from_secs(5);
 const SLOW_VERIFY: Duration = Duration::from_secs(6);
-const MODULE_BUDGET: Duration = Duration::from_secs(15);
+const MODULE_BUDGET: Duration = Duration::from_secs(30);
 const STRICT_CONTROL: &str = "[success=done ignore=ignore default=die]";
 const PAM_AUTH_ERR: i32 = 7;
 const AUTH_OP: u8 = 11;
 
 const CLIENT_C: &str = r#"
 #include <security/pam_appl.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static volatile sig_atomic_t interrupted;
+static void on_interrupt(int signal) { (void)signal; interrupted = 1; }
 
 static int conv(int n, const struct pam_message **msg, struct pam_response **resp, void *data) {
   struct pam_response *r = calloc(n, sizeof *r);
@@ -78,8 +82,10 @@ int main(int argc, char **argv) {
   pam_set_item(h, PAM_TTY, tty ? tty : "/dev/pts/0");
   if (rhost) pam_set_item(h, PAM_RHOST, rhost);
   pam_fail_delay(h, 0);
+  if (getenv("PAMTEST_CATCH_SIGINT")) signal(SIGINT, on_interrupt);
   rc = pam_authenticate(h, 0);
   printf("RESULT %d\n", rc);
+  printf("SIGINT %d\n", (int)interrupted);
   pam_end(h, rc);
   return 0;
 }
@@ -148,7 +154,7 @@ impl FakeBiometrics {
                 deliver_ticket(&socket, uid)
             }
             Verify::Hangs => {
-                async_io::Timer::after(Duration::from_secs(15)).await;
+                async_io::Timer::after(Duration::from_secs(40)).await;
                 false
             }
             Verify::Matches => deliver_ticket(&socket, uid),
@@ -381,6 +387,7 @@ struct Stack {
     common: bool,
     rhost: Option<&'static str>,
     user: Option<&'static str>,
+    interrupt_after: Option<Duration>,
 }
 
 impl Stack {
@@ -395,6 +402,14 @@ impl Stack {
             common: false,
             rhost: None,
             user: None,
+            interrupt_after: None,
+        }
+    }
+
+    fn interrupted_after(self, after: Duration) -> Self {
+        Self {
+            interrupt_after: Some(after),
+            ..self
         }
     }
 
@@ -427,6 +442,7 @@ struct Outcome {
     prompts: Vec<(i32, String)>,
     elapsed: Duration,
     verify_calls: u32,
+    sigint_seen: bool,
 }
 
 impl Outcome {
@@ -561,7 +577,10 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
     if let Some(host) = stack.rhost {
         client.env("PAMTEST_RHOST", host);
     }
-    let output = client
+    if stack.interrupt_after.is_some() {
+        client.env("PAMTEST_CATCH_SIGINT", "1");
+    }
+    let child = client
         .args([
             service,
             &stack
@@ -579,8 +598,20 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
         .env_remove("TPM2_PKCS11_TCTI")
         .env_remove("TPM2_PKCS11_BACKEND")
         .env_remove("TPM2TOOLS_TCTI")
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .expect("the compiled PAM client must run");
+    if let Some(after) = stack.interrupt_after {
+        let pid = child.id() as libc::pid_t;
+        std::thread::spawn(move || {
+            std::thread::sleep(after);
+            unsafe { libc::kill(pid, libc::SIGINT) };
+        });
+    }
+    let output = child
+        .wait_with_output()
+        .expect("the compiled PAM client must finish");
     let elapsed = started.elapsed();
     let stdout = String::from_utf8_lossy(&output.stdout);
     let result = stdout
@@ -611,6 +642,7 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
         prompts,
         elapsed,
         verify_calls: verify_calls(),
+        sigint_seen: stdout.lines().any(|l| l == "SIGINT 1"),
     }
 }
 
@@ -846,7 +878,7 @@ fn the_module_waits_for_the_daemon_attempt_budget_and_gives_up_only_within_its_o
         assert_eq!(silent.verify_calls, 1);
         assert!(silent.showed_no_message());
         assert!(
-            silent.elapsed >= openhello_auth_proto::FACE_ATTEMPT_BUDGET,
+            silent.elapsed >= openhello_auth_proto::FACE_ATTEMPT_BUDGET + openhello_auth_proto::FACE_DECISION_BUDGET,
             "the module gave up before the daemon's budget: {:?}",
             silent.elapsed
         );
@@ -1254,4 +1286,29 @@ fn write_frame(stream: &mut UnixStream, tag: u8, body: &[u8]) -> std::io::Result
     frame.extend_from_slice(&(body.len() as u16).to_be_bytes());
     frame.extend_from_slice(body);
     stream.write_all(&frame)
+}
+
+// @spec:AC-041
+#[test]
+fn an_interrupt_while_the_camera_waits_ends_the_module_at_once_and_hands_the_signal_back_to_the_caller() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+
+        let interrupted = scenario(
+            &rig,
+            fixture,
+            &services,
+            Stack::face(Verify::Hangs).interrupted_after(Duration::from_secs(1)),
+        );
+        assert!(!interrupted.granted());
+        assert_eq!(interrupted.verify_calls, 1);
+        assert!(
+            interrupted.elapsed < Duration::from_secs(5),
+            "the interrupt waited for the camera: {:?}",
+            interrupted.elapsed
+        );
+        assert!(interrupted.sigint_seen, "the caller never saw its SIGINT");
+        assert!(interrupted.showed_no_message());
+    });
 }

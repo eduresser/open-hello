@@ -3,6 +3,7 @@ use std::time::Duration;
 use sha2::{Digest, Sha256};
 
 pub const FACE_ATTEMPT_BUDGET: Duration = Duration::from_secs(10);
+pub const FACE_DECISION_BUDGET: Duration = Duration::from_secs(10);
 
 pub const DOMAIN: &[u8] = b"openhello-pam-v1";
 pub const CHALLENGE_LEN: usize = 32;

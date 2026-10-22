@@ -300,6 +300,8 @@ struct Probe {
     captures: AtomicUsize,
     auth_begins: AtomicUsize,
     auth_ends: AtomicUsize,
+    enroll_discards: AtomicUsize,
+    releases: AtomicUsize,
 }
 
 struct ProbeSensor(Arc<Probe>);
@@ -309,6 +311,10 @@ impl SensorBackend for ProbeSensor {
         std::thread::sleep(std::time::Duration::from_millis(50));
         self.0.captures.fetch_add(1, Ordering::SeqCst);
         Ok(CapturedFrame { width: 1, height: 1, pixels: vec![0] })
+    }
+
+    fn release(&mut self) {
+        self.0.releases.fetch_add(1, Ordering::SeqCst);
     }
 }
 
@@ -328,6 +334,7 @@ impl EngineBackend for ProbeEngine {
     }
 
     fn enroll_discard(&mut self, _: u64) -> Result<(), DaemonError> {
+        self.0.enroll_discards.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 
@@ -392,4 +399,40 @@ fn a_caller_that_disconnects_stops_the_capture_and_a_queued_call_of_a_dead_calle
     assert!(captured < 40, "{captured}");
     assert_eq!(probe.auth_begins.load(Ordering::SeqCst), 1, "the dead caller's queued call started");
     assert_eq!(probe.auth_ends.load(Ordering::SeqCst), 1);
+}
+
+// @spec:AC-040
+#[test]
+fn an_enrollment_whose_owner_leaves_is_discarded_and_the_camera_is_released() {
+    let bus = PrivateBus::start();
+    let probe = Arc::new(Probe::default());
+    let core = Biometrics::new(Box::new(ProbeSensor(probe.clone())), Box::new(ProbeEngine(probe.clone())), Box::new(Storage::default()), DEFAULT_TARGET_FAR);
+    serve_core(&bus, Arc::new(AllowAll), core);
+
+    let owner = client(&bus);
+    let handle: String = proxy(&owner).call("EnrollBegin", &(my_uid(),)).unwrap();
+    drop(owner);
+    wait_until("the abandoned enrollment to be discarded", || probe.enroll_discards.load(Ordering::SeqCst) == 1);
+    assert_eq!(probe.releases.load(Ordering::SeqCst), 1);
+
+    let other = client(&bus);
+    let error = proxy(&other).call::<_, _, (String, String, u32, u32)>("EnrollCapture", &(handle.as_str(),)).unwrap_err().to_string();
+    assert!(error.contains("not valid in the current state"), "{error}");
+}
+
+// @spec:AC-040
+#[test]
+fn an_enrollment_that_is_committed_or_discarded_by_its_owner_is_not_discarded_again_when_it_leaves() {
+    let bus = PrivateBus::start();
+    let probe = Arc::new(Probe::default());
+    let core = Biometrics::new(Box::new(ProbeSensor(probe.clone())), Box::new(ProbeEngine(probe.clone())), Box::new(Storage::default()), DEFAULT_TARGET_FAR);
+    serve_core(&bus, Arc::new(AllowAll), core);
+
+    let owner = client(&bus);
+    let handle: String = proxy(&owner).call("EnrollBegin", &(my_uid(),)).unwrap();
+    proxy(&owner).call::<_, _, ()>("EnrollDiscard", &(handle.as_str(),)).unwrap();
+    drop(owner);
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    assert_eq!(probe.enroll_discards.load(Ordering::SeqCst), 1);
+    assert_eq!(probe.releases.load(Ordering::SeqCst), 1);
 }
