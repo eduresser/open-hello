@@ -438,10 +438,8 @@ impl Outcome {
             .count()
     }
 
-    fn said_looking_for_your_face(&self) -> bool {
-        self.prompts
-            .iter()
-            .any(|(style, text)| *style == 4 && text == "Looking for your face...")
+    fn showed_no_message(&self) -> bool {
+        self.prompts.iter().all(|(style, _)| *style != 4)
     }
 }
 
@@ -727,7 +725,7 @@ fn a_matching_face_authenticates_the_service_without_a_password_prompt() {
             "the password module must not run"
         );
         assert_eq!(outcome.password_prompts(), 0, "{:?}", outcome.prompts);
-        assert!(outcome.said_looking_for_your_face());
+        assert!(outcome.showed_no_message());
         assert_eq!(outcome.verify_calls, 1);
         assert_eq!(rig.lockout_counter(), before);
     });
@@ -814,7 +812,7 @@ fn a_missing_keyd_or_openhellod_or_a_silent_camera_falls_through_within_five_sec
                 "no face match without the services"
             );
             assert_eq!(outcome.password_prompts(), 0);
-            assert!(!outcome.said_looking_for_your_face());
+            assert!(outcome.showed_no_message());
             assert!(outcome.elapsed < WITHIN_BUDGET, "{:?}", outcome.elapsed);
         }
 
@@ -822,7 +820,7 @@ fn a_missing_keyd_or_openhellod_or_a_silent_camera_falls_through_within_five_sec
         assert!(!silent.granted());
         assert_eq!(silent.reached, ["authtok=unset"]);
         assert_eq!(silent.verify_calls, 1);
-        assert!(silent.said_looking_for_your_face());
+        assert!(silent.showed_no_message());
         assert!(
             silent.elapsed < WITHIN_BUDGET,
             "the camera wait took {:?}",
@@ -984,7 +982,7 @@ fn a_local_interactive_service_authenticates_a_face_without_privilege_and_falls_
         );
         assert!(granted.granted(), "{:?}", granted.prompts);
         assert!(granted.reached.is_empty() && granted.password_prompts() == 0);
-        assert!(granted.said_looking_for_your_face());
+        assert!(granted.showed_no_message());
         assert_eq!(granted.verify_calls, 1);
 
         let miss = scenario(
@@ -1029,7 +1027,7 @@ fn the_common_stack_placement_acts_on_local_services_and_ignores_the_denylist_re
             );
             assert!(acted.granted(), "{service}: {:?}", acted.prompts);
             assert_eq!(acted.verify_calls, 1, "{service}");
-            assert!(acted.said_looking_for_your_face(), "{service}");
+            assert!(acted.showed_no_message(), "{service}");
         }
 
         let mut ignored = Vec::new();
@@ -1079,7 +1077,7 @@ fn the_common_stack_placement_acts_on_local_services_and_ignores_the_denylist_re
                 outcome.verify_calls, 0,
                 "{label}: the camera must not be touched"
             );
-            assert!(!outcome.said_looking_for_your_face(), "{label}");
+            assert!(!outcome.showed_no_message(), "{label}");
             assert!(
                 outcome.elapsed < WITHIN_BUDGET,
                 "{label}: {:?}",

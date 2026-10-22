@@ -26,8 +26,6 @@ const PAM_SERVICE: c_int = 1;
 const PAM_TTY: c_int = 3;
 const PAM_RHOST: c_int = 4;
 const PAM_USER: c_int = 2;
-const PAM_CONV: c_int = 5;
-const PAM_TEXT_INFO: c_int = 4;
 const BUDGET: Duration = Duration::from_secs(5);
 const VERIFY_TIMEOUT: Duration = Duration::from_secs(4);
 const BUS_NAME: &str = "io.openhello.Biometrics1";
@@ -49,32 +47,6 @@ const DENIED_SERVICES: [&str; 13] = [
     "runuser-l",
     "other",
 ];
-const LOOKING_FOR_FACE: &CStr = c"Looking for your face...";
-
-#[repr(C)]
-struct PamMessage {
-    style: c_int,
-    text: *const c_char,
-}
-
-#[repr(C)]
-struct PamResponse {
-    text: *mut c_char,
-    code: c_int,
-}
-
-type ConvFn = unsafe extern "C" fn(
-    c_int,
-    *mut *const PamMessage,
-    *mut *mut PamResponse,
-    *mut c_void,
-) -> c_int;
-
-#[repr(C)]
-struct PamConv {
-    conv: Option<ConvFn>,
-    data: *mut c_void,
-}
 
 extern "C" {
     fn pam_get_item(pamh: *const c_void, item: c_int, value: *mut *const c_void) -> c_int;
@@ -148,7 +120,6 @@ unsafe fn authenticate(pamh: *mut c_void, args: &[String]) -> Result<(), Exit> {
         .ok_or(ignore(Reason::KeydUnavailable))?;
     service_available(&settings, started).map_err(ignore)?;
     let challenge = challenge::random_challenge().ok_or(ignore(Reason::KeydUnavailable))?;
-    tell(pamh, LOOKING_FOR_FACE);
     let remaining = || BUDGET.saturating_sub(started.elapsed());
     match verify_face(
         uid,
@@ -380,28 +351,6 @@ fn name_has_owner(address: Option<&str>) -> bool {
         .ok()
         .and_then(|name| bus.name_has_owner(name).ok())
         .unwrap_or(false)
-}
-
-unsafe fn tell(pamh: *mut c_void, text: &CStr) {
-    let mut conv: *const c_void = std::ptr::null();
-    if pam_get_item(pamh, PAM_CONV, &mut conv) != PAM_SUCCESS || conv.is_null() {
-        return;
-    }
-    let conv = &*(conv as *const PamConv);
-    let Some(callback) = conv.conv else {
-        return;
-    };
-    let message = PamMessage {
-        style: PAM_TEXT_INFO,
-        text: text.as_ptr(),
-    };
-    let mut messages: *const PamMessage = &message;
-    let mut responses: *mut PamResponse = std::ptr::null_mut();
-    callback(1, &mut messages, &mut responses, conv.data);
-    if !responses.is_null() {
-        libc::free((*responses).text.cast());
-        libc::free(responses.cast());
-    }
 }
 
 #[cfg(test)]
