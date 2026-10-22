@@ -138,11 +138,13 @@ impl Biometrics {
         let EnrollSession { uid, engine_session } = self.take_session(handle)?;
         let template = self.engine.enroll_commit(engine_session)?;
         self.logger.log(Level::Debug, "enroll-commit", &[("uid", Value::Uid(uid)), ("template_bytes", Value::Count(template.len() as u64))]);
+        self.sensor.release();
         self.storage.put(uid, &template)
     }
 
     pub fn enroll_discard(&mut self, handle: &str) -> Result<(), DaemonError> {
         let session = self.take_session(handle)?;
+        self.sensor.release();
         self.engine.enroll_discard(session.engine_session)
     }
 
@@ -245,6 +247,12 @@ impl Biometrics {
     }
 
     fn authenticate(&mut self, candidates: &[(u32, Vec<u8>)], cancel: Cancel) -> Result<AuthOutcome, DaemonError> {
+        let outcome = self.run_attempts(candidates, cancel);
+        self.sensor.release();
+        outcome
+    }
+
+    fn run_attempts(&mut self, candidates: &[(u32, Vec<u8>)], cancel: Cancel) -> Result<AuthOutcome, DaemonError> {
         let deadline = self.clock.elapsed() + ATTEMPT_BUDGET;
         let mut outcome = AuthOutcome { uid: None, frames: 0, attempts: 0 };
         while outcome.attempts < MAX_ATTEMPTS && (outcome.attempts == 0 || self.clock.elapsed() < deadline) {
@@ -598,6 +606,7 @@ mod tests {
         begun: AtomicUsize,
         ended: AtomicUsize,
         frames: AtomicUsize,
+        released: AtomicUsize,
     }
 
     struct ScriptedEngine {
@@ -653,6 +662,7 @@ mod tests {
     }
 
     struct TimedSensor {
+        counters: Arc<Counters>,
         clock: ManualClock,
         frame_cost: Duration,
         fail_from_frame: Option<usize>,
@@ -668,6 +678,10 @@ mod tests {
             self.clock.0.fetch_add(self.frame_cost.as_millis() as u64, Ordering::SeqCst);
             Ok(CapturedFrame { width: 1, height: 1, pixels: vec![0] })
         }
+
+        fn release(&mut self) {
+            self.counters.released.fetch_add(1, Ordering::SeqCst);
+        }
     }
 
     struct Rig {
@@ -680,7 +694,7 @@ mod tests {
         let clock = ManualClock::default();
         let counters = Arc::new(Counters::default());
         let engine = ScriptedEngine { script: script.to_vec(), counters: counters.clone(), uid: 1000 };
-        let sensor = TimedSensor { clock: clock.clone(), frame_cost, fail_from_frame, frames: 0 };
+        let sensor = TimedSensor { counters: counters.clone(), clock: clock.clone(), frame_cost, fail_from_frame, frames: 0 };
         let core = Biometrics::new(Box::new(sensor), Box::new(engine), Box::new(storage_with(&[(1000, b"mine")])), DEFAULT_TARGET_FAR)
             .with_clock(Box::new(clock.clone()));
         Rig { core, counters, clock }
@@ -693,6 +707,10 @@ mod tests {
 
         fn ended(&self) -> usize {
             self.counters.ended.load(Ordering::SeqCst)
+        }
+
+        fn released(&self) -> usize {
+            self.counters.released.load(Ordering::SeqCst)
         }
     }
 
@@ -710,6 +728,26 @@ mod tests {
         let mut identified = rig(&[Reject, Accept], FRAME, None);
         assert_eq!(identified.core.identify().unwrap(), Some(1000));
         assert_eq!((identified.begun(), identified.ended()), (2, 2));
+    }
+
+    // @spec:AC-044
+    #[test]
+    fn the_camera_is_released_as_soon_as_the_request_is_decided_whatever_the_outcome() {
+        let mut accepted = rig(&[Script::Accept], FRAME, None);
+        assert!(accepted.core.verify(1000).unwrap());
+        assert_eq!(accepted.released(), 1);
+        let mut refused = rig(&[Script::Reject; 5], FRAME, None);
+        assert!(!refused.core.verify(1000).unwrap());
+        assert_eq!(refused.released(), 1);
+        let mut identified = rig(&[Script::Accept], FRAME, None);
+        assert_eq!(identified.core.identify().unwrap(), Some(1000));
+        assert_eq!(identified.released(), 1);
+        let mut broken = rig(&[Script::Accept], FRAME, Some(1));
+        assert!(broken.core.verify(1000).is_err());
+        assert_eq!(broken.released(), 1);
+        let mut left = rig(&[Script::Accept], FRAME, None);
+        assert!(left.core.verify_cancellable(1000, &|| true).is_err());
+        assert_eq!(left.released(), 1);
     }
 
     // @spec:AC-042

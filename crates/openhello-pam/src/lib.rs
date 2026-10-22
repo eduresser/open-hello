@@ -247,6 +247,7 @@ unsafe fn local_session_allowed(pamh: *mut c_void) -> Result<(), Reason> {
         env: &session::process_env,
         cgroup: &session::process_cgroup,
         session: &session::process_session,
+        user: &session::process_user,
     };
     let service = item_text(pamh, PAM_SERVICE).unwrap_or_default();
     permitted(session::locate(&probes), &service)
