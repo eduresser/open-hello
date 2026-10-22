@@ -212,6 +212,12 @@ As a laptop owner, I want the camera and the IR emitter to stop as soon as the s
 - **When** the request runs
 - **Then** the daemon stops starting frames and attempts after 10 seconds of wall clock for the whole request (one budget shared by every attempt, measured on an injectable clock), and `pam_openhello` waits for the daemon's verdict for longer than that budget and falls through to the password within its own total budget (verdict wait plus signature), never sooner than the daemon and never beyond its budget
 
+#### AC-044 — The camera is released when the request is decided
+
+- **Given** a `Verify` or `Identify` request that ends by acceptance, refusal, camera error or caller departure
+- **When** the request ends
+- **Then** the daemon closes the camera stream (and with it the IR emitter) at once, without waiting for the idle period, and a later request reopens it
+
 ### US-018 — Recognition attempts per authentication request
 
 As a laptop owner, I want each authentication request to give my face a few chances before falling back to the password, so that one bad frame does not cost me a password typing, while a stranger cannot keep trying.

@@ -95,6 +95,7 @@ pub struct AuthProgress {
 
 pub trait SensorBackend: Send {
     fn capture(&mut self) -> Result<CapturedFrame, DaemonError>;
+    fn release(&mut self) {}
 }
 
 pub trait EngineBackend: Send {

@@ -106,6 +106,10 @@ impl SensorBackend for SensorPlugin {
         unsafe { (self.interface.release_frame)(self.handle, &view) };
         Ok(CapturedFrame { width: view.width, height: view.height, pixels })
     }
+
+    fn release(&mut self) {
+        unsafe { (self.interface.release)(self.handle) };
+    }
 }
 
 impl Drop for SensorPlugin {

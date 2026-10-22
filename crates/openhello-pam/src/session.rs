@@ -8,6 +8,7 @@ const DISPLAY_VARS: [&str; 4] = [
 ];
 const GRAPHICAL_SESSION_TYPES: [&str; 3] = ["wayland", "x11", "mir"];
 const SESSION_DIR: &str = "/run/systemd/sessions";
+const USER_DIR: &str = "/run/systemd/users";
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Locality {
@@ -22,6 +23,7 @@ pub struct Probes<'a> {
     pub env: &'a dyn Fn(&str) -> Option<String>,
     pub cgroup: &'a dyn Fn() -> Option<String>,
     pub session: &'a dyn Fn(&str) -> Option<String>,
+    pub user: &'a dyn Fn(&str) -> Option<String>,
 }
 
 pub fn locate(probes: &Probes) -> Locality {
@@ -45,7 +47,8 @@ pub fn locate(probes: &Probes) -> Locality {
 }
 
 fn logind_remote(probes: &Probes) -> Option<bool> {
-    let id = session_id(&(probes.cgroup)()?)?;
+    let cgroup = (probes.cgroup)()?;
+    let id = session_id(&cgroup).or_else(|| display_session_id(&cgroup, probes))?;
     let text = (probes.session)(&id)?;
     text.lines()
         .find_map(|line| line.strip_prefix("REMOTE="))
@@ -57,6 +60,20 @@ fn session_id(cgroup: &str) -> Option<String> {
         .lines()
         .flat_map(|line| line.split('/'))
         .find_map(|part| part.strip_prefix("session-")?.strip_suffix(".scope"))
+        .filter(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric()))
+        .map(str::to_string)
+}
+
+fn display_session_id(cgroup: &str, probes: &Probes) -> Option<String> {
+    let uid = cgroup
+        .lines()
+        .flat_map(|line| line.split('/'))
+        .find_map(|part| part.strip_prefix("user-")?.strip_suffix(".slice"))
+        .filter(|uid| !uid.is_empty() && uid.bytes().all(|b| b.is_ascii_digit()))?;
+    (probes.user)(uid)?
+        .lines()
+        .find_map(|line| line.strip_prefix("DISPLAY="))
+        .map(str::trim)
         .filter(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric()))
         .map(str::to_string)
 }
@@ -73,6 +90,10 @@ pub fn process_session(id: &str) -> Option<String> {
     std::fs::read_to_string(Path::new(SESSION_DIR).join(id)).ok()
 }
 
+pub fn process_user(uid: &str) -> Option<String> {
+    std::fs::read_to_string(Path::new(USER_DIR).join(uid)).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,6 +102,7 @@ mod tests {
         env: &'a [(&'a str, &'a str)],
         cgroup: Option<&'a str>,
         session: Option<&'a str>,
+        user: Option<&'a str>,
         rhost: bool,
         tty: bool,
     }
@@ -99,12 +121,17 @@ mod tests {
             assert_eq!(id, "7");
             case.session.map(str::to_string)
         };
+        let user = |uid: &str| {
+            assert_eq!(uid, "1000");
+            case.user.map(str::to_string)
+        };
         locate(&Probes {
             rhost: case.rhost,
             tty: case.tty,
             env: &env,
             cgroup: &cgroup,
             session: &session,
+            user: &user,
         })
     }
 
@@ -112,6 +139,7 @@ mod tests {
         env: &[],
         cgroup: None,
         session: None,
+        user: None,
         rhost: false,
         tty: false,
     };
@@ -230,6 +258,49 @@ mod tests {
             ..NOTHING
         };
         assert_eq!(run(silent), Locality::Unknown);
+    }
+
+    const SERVICE_CGROUP: &str =
+        "0::/user.slice/user-1000.slice/user@1000.service/background.slice/polkit-agent.service\n";
+
+    // @covers:AC-028-pam-local-session
+    #[test]
+    fn a_user_service_has_no_session_scope_so_the_users_display_session_decides() {
+        let local = Case {
+            cgroup: Some(SERVICE_CGROUP),
+            user: Some("NAME=eduresser\nDISPLAY=7\n"),
+            session: Some("REMOTE=0\n"),
+            ..NOTHING
+        };
+        assert_eq!(run(local), Locality::Local);
+        let remote = Case {
+            cgroup: Some(SERVICE_CGROUP),
+            user: Some("DISPLAY=7\n"),
+            session: Some("REMOTE=1\n"),
+            ..NOTHING
+        };
+        assert_eq!(run(remote), Locality::Remote);
+        for user in [
+            None,
+            Some("NAME=eduresser\n"),
+            Some("DISPLAY=\n"),
+            Some("DISPLAY=../x\n"),
+        ] {
+            let unknown = Case {
+                cgroup: Some(SERVICE_CGROUP),
+                user,
+                session: Some("REMOTE=0\n"),
+                ..NOTHING
+            };
+            assert_eq!(run(unknown), Locality::Unknown, "{user:?}");
+        }
+        let system = Case {
+            cgroup: Some("0::/system.slice/cron.service\n"),
+            user: Some("DISPLAY=7\n"),
+            session: Some("REMOTE=0\n"),
+            ..NOTHING
+        };
+        assert_eq!(run(system), Locality::Unknown);
     }
 
     // @covers:AC-028-pam-local-session

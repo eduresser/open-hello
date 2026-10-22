@@ -249,3 +249,17 @@
 - Model: claude-sonnet-5
 - Effort: high
 - Notes: owner decision (2026-10-21), replacing the first design of this task (persistent per-user counter, state file, `pam_sm_setcred` notification and a reset method, all discarded and recorded in design.md as deferred, ASM-016). One request makes up to three attempts, each with a new engine session that is always ended; the first acceptance stops it, three rejections refuse at once so the module falls to the password; engine and camera errors and cancellation are not attempts; the three attempts share the 10 s budget of T-046 on an injectable clock (ASM-015). `pam_sm_setcred` stays `PAM_IGNORE`.
+
+## T-048 — Release the camera as soon as the request is decided [done]
+- Refs: AC-044, AC-011
+- Files: crates/openhellod/src/core.rs, crates/openhellod/src/backends.rs, crates/openhellod/src/plugin_loader.rs, crates/sensor-adapter-ir/src/lib.rs, crates/sensor-adapter-ir/src/lazy.rs, crates/openhello-plugin-abi/src/lib.rs, .spec/features/credential-login-v1b/spec.md
+- Model: claude-sonnet-5
+- Effort: medium
+- Notes: owner policy (2026-10-21): the camera stays on for the minimum time. The camera used to stay open for the 3 s idle period after the last frame (released by a thread polling every 500 ms). `SensorInterface` gains `release` (plugin ABI 3); `authenticate` calls it on every exit path, and enroll commit/discard call it too. The idle release stays as a safety net for enrollment captures.
+
+## T-049 — A user service resolves its locality through the user's logind display session [done]
+- Refs: AC-028
+- Files: crates/openhello-pam/src/session.rs, crates/openhello-pam/src/lib.rs
+- Model: claude-sonnet-5
+- Effort: low
+- Notes: found on the VM (2026-10-21): the polkit dialog runs `polkit-agent-helper-1` inside the agent's user service (cgroup `user@UID.service/...`, no `session-N.scope`), with a cleared environment and no TTY, so the module returned `not-local` and polkit never tried the face. When the cgroup has no session scope but names `user-UID.slice`, the module reads the user's `DISPLAY=` session from logind and applies the same `REMOTE=` rule. No desktop-specific data; a missing or empty `DISPLAY=` stays unknown (silent ignore).

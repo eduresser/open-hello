@@ -273,6 +273,16 @@ unsafe extern "C" fn sensor_capture(handle: SensorHandle, out: *mut FrameView) -
 
 unsafe extern "C" fn sensor_release_frame(_handle: SensorHandle, _frame: *const FrameView) {}
 
+unsafe extern "C" fn sensor_release(handle: SensorHandle) {
+    if handle.is_null() {
+        return;
+    }
+    let shared = &*(handle as *const SharedState);
+    if let Ok(mut state) = shared.lock() {
+        state.capture.release();
+    }
+}
+
 unsafe extern "C" fn sensor_close(handle: SensorHandle) {
     if !handle.is_null() {
         drop(Box::from_raw(handle as *mut SharedState));
@@ -284,6 +294,7 @@ static SENSOR_INTERFACE: SensorInterface = SensorInterface {
     open: sensor_open,
     capture: sensor_capture,
     release_frame: sensor_release_frame,
+    release: sensor_release,
     close: sensor_close,
 };
 

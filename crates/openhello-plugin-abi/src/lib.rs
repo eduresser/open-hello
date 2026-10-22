@@ -1,6 +1,6 @@
 use std::os::raw::{c_char, c_void};
 
-pub const ABI_VERSION: u32 = 2;
+pub const ABI_VERSION: u32 = 3;
 
 pub const SENSOR_ENTRY_SYMBOL: &str = "openhello_sensor_interface";
 pub const ENGINE_ENTRY_SYMBOL: &str = "openhello_engine_interface";
@@ -100,6 +100,7 @@ pub struct SensorInterface {
     pub open: unsafe extern "C" fn(device_path: *const c_char, out: *mut SensorHandle) -> Status,
     pub capture: unsafe extern "C" fn(handle: SensorHandle, out: *mut FrameView) -> Status,
     pub release_frame: unsafe extern "C" fn(handle: SensorHandle, frame: *const FrameView),
+    pub release: unsafe extern "C" fn(handle: SensorHandle),
     pub close: unsafe extern "C" fn(handle: SensorHandle),
 }
 
