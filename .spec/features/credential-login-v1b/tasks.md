@@ -284,3 +284,10 @@
 - Model: claude-sonnet-5
 - Effort: low
 - Notes: the greeter's helper runs as root in the display manager's service cgroup with no session scope or display variables, so the module ignored it (`not-local`). When no other signal decides, a logind session with `CLASS=greeter` and `REMOTE=0` makes the process local. Proven on the plasmalogin VM (2026-10-22): the face logs in after Enter with an empty password. An automatic Enter through `/dev/uinput` worked but was removed by owner decision (fragile, extra attack surface); the manual Enter stays.
+
+## T-053 — At the login screen the face is tried only when the password is empty [done]
+- Refs: AC-028
+- Files: crates/openhello-pam/src/lib.rs, crates/openhello-pam/src/session.rs, crates/openhello-pam/src/debug.rs, .spec/features/credential-login-v1b/lockscreen.md
+- Model: claude-sonnet-5
+- Effort: low
+- Notes: found on the VM (2026-10-22): the module is `sufficient` and runs before the password, so at the login screen it opened the camera and accepted the face whatever was typed (a wrong password logged in; a correct one still lit the camera). For the login manager's helper (no user session, a local `CLASS=greeter` session in logind) the module now reads the submitted password with `pam_get_authtok` and acts only when it is empty; otherwise it returns `password-typed` (ignore) and `pam_unix` decides. Unreadable password: ignore. Proven on the plasmalogin VM. Greeters that start PAM on user selection (GDM, LightDM, greetd) get the same rule, not verified.
