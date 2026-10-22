@@ -49,7 +49,7 @@ packaging/
   caller and received K over the unlock socket was removed: it cannot work without K crossing the socket.
 - **PAM** — `pam_pkcs11` configured against `openhello-pkcs11` in the common auth stack (every local service except a compiled denylist of non-desktop services),
   marked `sufficient` and placed before `pam_unix`, so any failure, timeout or missing daemon falls through
-  to the Linux password (AC-029/030). A PAM text line shows "Looking for your face..." (Q-003).
+  to the Linux password (AC-029/030). The module shows no text (Q-003).
 
 ## Findings before the PAM task
 
