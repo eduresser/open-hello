@@ -1,0 +1,104 @@
+{
+  "runId": "open-hello-fingerprint-login-v3-mvk42o3v",
+  "feature": "fingerprint-login-v3",
+  "agent": "claude",
+  "mode": "sequential",
+  "parallelize": null,
+  "forcedModel": null,
+  "forcedEffort": null,
+  "generatedAt": "2026-10-22 22:27",
+  "workBranch": "spec/fingerprint-login-v3",
+  "baseDir": ".spec/features/fingerprint-login-v3",
+  "specDir": ".spec",
+  "repoName": "open-hello",
+  "logsDir": "../onp-worktrees/open-hello-fingerprint-login-v3-logs",
+  "waves": [],
+  "tracks": [],
+  "sequentialTasks": [
+    {
+      "id": "T-057",
+      "title": "fprintd client and fingerprint backend in openhellod",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "files": [
+        "crates/openhellod/src/fingerprint.rs",
+        "crates/openhellod/src/lib.rs",
+        "crates/openhellod/Cargo.toml"
+      ],
+      "refs": [
+        "US-019",
+        "AC-048",
+        "AC-049",
+        "AC-050",
+        "AC-051"
+      ]
+    },
+    {
+      "id": "T-058",
+      "title": "Face and finger in one request, first match wins",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "files": [
+        "crates/openhellod/src/core.rs",
+        "crates/openhellod/src/backends.rs",
+        "crates/openhellod/src/main.rs"
+      ],
+      "refs": [
+        "US-020",
+        "AC-052",
+        "AC-053",
+        "AC-054"
+      ]
+    },
+    {
+      "id": "T-059",
+      "title": "Finger enrollment through openhellod and the CLI",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "files": [
+        "crates/openhellod/src/dbus_service.rs",
+        "crates/openhello-cli/src/lib.rs",
+        "crates/openhello-cli/src/dbus_client.rs",
+        "crates/openhello-cli/src/terminal.rs"
+      ],
+      "refs": [
+        "US-021",
+        "AC-055",
+        "AC-056",
+        "AC-057"
+      ]
+    },
+    {
+      "id": "T-060",
+      "title": "Purge of fingers and fingerprint-safe logs",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "files": [
+        "crates/openhellod/src/core.rs",
+        "crates/openhellod/src/logging.rs"
+      ],
+      "refs": [
+        "US-022",
+        "AC-058",
+        "AC-059"
+      ]
+    },
+    {
+      "id": "T-061",
+      "title": "Constitution exceptions, packaging and VM evidence",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "files": [
+        ".spec/constitution.md",
+        "packaging/openhellod.service",
+        "scripts/install.sh"
+      ],
+      "refs": [
+        "US-019",
+        "AC-048"
+      ]
+    }
+  ],
+  "doneTasks": [],
+  "warnings": []
+}
