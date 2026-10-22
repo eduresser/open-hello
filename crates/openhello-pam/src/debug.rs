@@ -13,12 +13,13 @@ pub enum Reason {
     FaceRefused,
     SignatureInvalid,
     PasswordTyped,
+    Interrupted,
     Success,
 }
 
 impl Reason {
     #[cfg(test)]
-    pub const ALL: [Reason; 12] = [
+    pub const ALL: [Reason; 13] = [
         Reason::Remote,
         Reason::NotLocal,
         Reason::ServiceDenied,
@@ -30,6 +31,7 @@ impl Reason {
         Reason::FaceRefused,
         Reason::SignatureInvalid,
         Reason::PasswordTyped,
+        Reason::Interrupted,
         Reason::Success,
     ];
 
@@ -46,6 +48,7 @@ impl Reason {
             Reason::FaceRefused => "face-refused",
             Reason::SignatureInvalid => "signature-invalid",
             Reason::PasswordTyped => "password-typed",
+            Reason::Interrupted => "interrupted",
             Reason::Success => "success",
         }
     }
@@ -63,6 +66,12 @@ pub fn line(reason: Reason, service: &str) -> String {
 pub fn report(enabled: bool, sink: &dyn Fn(&str), reason: Reason, service: &str) {
     if enabled {
         sink(&line(reason, service));
+    }
+}
+
+pub fn report_text(enabled: bool, sink: &dyn Fn(&str), text: &str) {
+    if enabled {
+        sink(text);
     }
 }
 

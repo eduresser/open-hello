@@ -22,6 +22,22 @@ def prepare_lfw_parquet(parquet_path, out_dir):
     return counts
 
 
+def prepare_cbsr_nir(source_dir, out_dir):
+    import cv2
+
+    counts = collections.Counter()
+    for path in sorted(Path(source_dir).rglob("*.bmp")):
+        person = path.stem.split("-")[0]
+        image = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+        if not person or image is None:
+            continue
+        folder = Path(out_dir) / person
+        folder.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(folder / f"{path.stem}.png"), image)
+        counts[person] += 1
+    return counts
+
+
 def list_identities(images_dir):
     people = {}
     for folder in sorted(p for p in Path(images_dir).iterdir() if p.is_dir()):

@@ -61,6 +61,13 @@ pub struct IdentifyMatch {
     pub achieved_far: f64,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Scored {
+    pub found: Option<IdentifyMatch>,
+    pub best_score: f32,
+    pub threshold: f64,
+}
+
 pub struct Matcher {
     calibration: FarCalibration,
 }
@@ -82,8 +89,17 @@ impl Matcher {
         enrolled: &[(u32, Template)],
         target_far: f64,
     ) -> Result<Option<IdentifyMatch>, EngineError> {
+        Ok(self.identify_scored(probe, enrolled, target_far)?.found)
+    }
+
+    pub fn identify_scored(
+        &self,
+        probe: &[f32],
+        enrolled: &[(u32, Template)],
+        target_far: f64,
+    ) -> Result<Scored, EngineError> {
         if enrolled.is_empty() {
-            return Ok(None);
+            return Ok(Scored { found: None, best_score: f32::MIN, threshold: f64::INFINITY });
         }
         let comparisons: usize = enrolled.iter().map(|(_, template)| template.len()).sum();
         let per_comparison_far = target_far / comparisons as f64;
@@ -96,12 +112,12 @@ impl Matcher {
                 best = Some((*uid, score));
             }
         }
-        Ok(best.and_then(|(uid, score)| {
-            (f64::from(score) >= threshold).then(|| IdentifyMatch {
-                uid,
-                achieved_far: self.calibration.far_at(f64::from(score)) * comparisons as f64,
-            })
-        }))
+        let (uid, best_score) = best.expect("enrolled is not empty");
+        let found = (f64::from(best_score) >= threshold).then(|| IdentifyMatch {
+            uid,
+            achieved_far: self.calibration.far_at(f64::from(best_score)) * comparisons as f64,
+        });
+        Ok(Scored { found, best_score, threshold })
     }
 }
 
@@ -250,6 +266,20 @@ mod tests {
         let sixfold = Template::new(std::iter::once(anchor).chain((0..5).map(|_| rng.identity())).collect()).unwrap();
         assert!(matcher.verify(&probe, &single, far).unwrap());
         assert!(!matcher.verify(&probe, &sixfold, far).unwrap());
+    }
+
+    #[test]
+    fn identify_scored_reports_the_best_score_against_the_threshold_it_was_judged_by() {
+        let mut rng = Rng(31);
+        let matcher = calibrated_matcher(&mut rng);
+        let me = rng.identity();
+        let enrolled = vec![(1000, enroll(&mut rng, &me))];
+        let genuine = matcher.identify_scored(&rng.capture_of(&me, 0.03), &enrolled, DEFAULT_TARGET_FAR).unwrap();
+        assert!(genuine.found.is_some() && f64::from(genuine.best_score) >= genuine.threshold);
+        let stranger = matcher.identify_scored(&rng.identity(), &enrolled, DEFAULT_TARGET_FAR).unwrap();
+        assert!(stranger.found.is_none() && f64::from(stranger.best_score) < stranger.threshold);
+        let nobody = matcher.identify_scored(&rng.identity(), &[], DEFAULT_TARGET_FAR).unwrap();
+        assert!(nobody.found.is_none() && nobody.threshold.is_infinite());
     }
 
     #[test]

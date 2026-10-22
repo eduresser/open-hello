@@ -291,3 +291,17 @@
 - Model: claude-sonnet-5
 - Effort: low
 - Notes: found on the VM (2026-10-22): the module is `sufficient` and runs before the password, so at the login screen it opened the camera and accepted the face whatever was typed (a wrong password logged in; a correct one still lit the camera). For the login manager's helper (no user session, a local `CLASS=greeter` session in logind) the module now reads the submitted password with `pam_get_authtok` and acts only when it is empty; otherwise it returns `password-typed` (ignore) and `pam_unix` decides. Unreadable password: ignore. Proven on the plasmalogin VM. Greeters that start PAM on user selection (GDM, LightDM, greetd) get the same rule, not verified.
+
+## T-055 — Ten seconds only wait for a face; the three attempts have their own window [done]
+- Refs: AC-041
+- Files: crates/openhellod/src/core.rs, crates/openhello-auth-proto/src/lib.rs, crates/openhello-pam/src/lib.rs, crates/openhello-cli/tests/pam_sudo.rs
+- Model: claude-sonnet-5
+- Effort: low
+- Notes: owner decision (2026-10-22). One clock for the whole request cut the third attempt of a stranger short (48 frames take about 9 s). The 10 s `FACE_ATTEMPT_BUDGET` now ends at the first scored frame; from there `FACE_DECISION_BUDGET` (10 s) bounds the three attempts, so a request lasts at most 20 s. The module's verdict wait grew to 22 s.
+
+## T-056 — Ctrl+C stops the camera in `sudo` and in enrollment [done]
+- Refs: AC-046, AC-047
+- Files: crates/openhello-pam/src/lib.rs, crates/openhello-pam/src/debug.rs, crates/openhellod/src/dbus_service.rs, crates/openhellod/tests/dbus_service.rs, crates/openhello-cli/tests/pam_sudo.rs
+- Model: claude-sonnet-5
+- Effort: medium
+- Notes: owner report (2026-10-22): Ctrl+C could not stop the camera. In `sudo` the module blocked inside `pam_authenticate` until the daemon answered (the program's handler only set a flag): it now handles SIGINT and SIGTERM for the duration of the wait, closes its bus connection (also on timeout) and re-raises the signal. In enrollment the daemon never learned that the CLI had gone and the camera stayed on until the 3 s idle release: it now watches the owner of each enrollment session. Verified on the KDE neon VM with real `sudo`, `openhello-cli verify` and `openhello-cli enroll` (2026-10-22): the camera stops within about a second of Ctrl+C. The module also lifts a SIGINT block the caller sets while it authenticates and restores the mask afterwards.
