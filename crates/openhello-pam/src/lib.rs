@@ -26,6 +26,7 @@ const PAM_SERVICE: c_int = 1;
 const PAM_TTY: c_int = 3;
 const PAM_RHOST: c_int = 4;
 const PAM_USER: c_int = 2;
+const PAM_AUTHTOK: c_int = 6;
 const DEFAULT_TOKEN_SOCKET: &str = "/run/openhello/keyd-token.sock";
 const VERIFY_GRACE: Duration = Duration::from_secs(2);
 const VERIFY_TIMEOUT: Duration =
@@ -54,6 +55,12 @@ const DENIED_SERVICES: [&str; 13] = [
 
 extern "C" {
     fn pam_get_item(pamh: *const c_void, item: c_int, value: *mut *const c_void) -> c_int;
+    fn pam_get_authtok(
+        pamh: *mut c_void,
+        item: c_int,
+        authtok: *mut *const c_char,
+        prompt: *const c_char,
+    ) -> c_int;
 }
 
 #[no_mangle]
@@ -147,6 +154,9 @@ fn with_default_socket(
 unsafe fn authenticate(pamh: *mut c_void, args: &[String]) -> Result<(), Exit> {
     let started = Instant::now();
     let (uid, service, key) = eligible(pamh, args)?;
+    if login_manager_helper(pamh) && !password_left_empty(pamh) {
+        return Err(ignore(Reason::PasswordTyped));
+    }
     let settings = module_settings(args).map_err(|_| ignore(Reason::KeydUnavailable))?;
     let socket = settings
         .token_socket
@@ -260,7 +270,7 @@ unsafe fn item_text(pamh: *mut c_void, item: c_int) -> Option<String> {
         .map(str::to_string)
 }
 
-unsafe fn local_session_allowed(pamh: *mut c_void) -> Result<(), Reason> {
+unsafe fn with_probes<T>(pamh: *mut c_void, use_probes: impl FnOnce(&session::Probes) -> T) -> T {
     let probes = session::Probes {
         rhost: item_text(pamh, PAM_RHOST).is_some_and(|h| !h.is_empty()),
         tty: item_text(pamh, PAM_TTY).is_some_and(|t| !t.is_empty()),
@@ -270,8 +280,23 @@ unsafe fn local_session_allowed(pamh: *mut c_void) -> Result<(), Reason> {
         user: &session::process_user,
         sessions: &session::process_sessions,
     };
+    use_probes(&probes)
+}
+
+unsafe fn local_session_allowed(pamh: *mut c_void) -> Result<(), Reason> {
+    let locality = with_probes(pamh, session::locate);
     let service = item_text(pamh, PAM_SERVICE).unwrap_or_default();
-    permitted(session::locate(&probes), &service)
+    permitted(locality, &service)
+}
+
+unsafe fn login_manager_helper(pamh: *mut c_void) -> bool {
+    with_probes(pamh, |probes| session::is_login_manager_helper(probes))
+}
+
+unsafe fn password_left_empty(pamh: *mut c_void) -> bool {
+    let mut token: *const c_char = std::ptr::null();
+    let rc = pam_get_authtok(pamh, PAM_AUTHTOK, &mut token, std::ptr::null());
+    rc == PAM_SUCCESS && !token.is_null() && *token == 0
 }
 
 fn permitted(locality: Locality, service: &str) -> Result<(), Reason> {

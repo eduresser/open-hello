@@ -47,6 +47,18 @@ pub fn locate(probes: &Probes) -> Locality {
     }
 }
 
+pub fn is_login_manager_helper(probes: &Probes) -> bool {
+    let Some(cgroup) = (probes.cgroup)() else {
+        return false;
+    };
+    let in_user_tree = session_id(&cgroup).is_some()
+        || cgroup
+            .lines()
+            .flat_map(|line| line.split('/'))
+            .any(|part| part.starts_with("user-") && part.ends_with(".slice"));
+    !in_user_tree && local_greeter_present(probes)
+}
+
 fn local_greeter_present(probes: &Probes) -> bool {
     (probes.sessions)().iter().any(|text| {
         let has = |entry: &str| text.lines().any(|line| line.trim() == entry);
@@ -375,5 +387,52 @@ mod tests {
             ..NOTHING
         };
         assert_eq!(run(ssh), Locality::Remote);
+    }
+
+    // @covers:AC-028-pam-local-session
+    #[test]
+    fn the_login_manager_helper_is_outside_every_user_session_with_a_local_greeter() {
+        let greeters: &[&str] = &["CLASS=greeter\nREMOTE=0\n"];
+        let helper = Case {
+            cgroup: Some(GREETER_CGROUP),
+            sessions: greeters,
+            ..NOTHING
+        };
+        assert!(helper_of(helper));
+        for cgroup in [
+            Some(SESSION_CGROUP),
+            Some(SERVICE_CGROUP),
+            Some("0::/user.slice/user-1000.slice/user@1000.service/app.slice/x.scope\n"),
+            None,
+        ] {
+            let other = Case {
+                cgroup,
+                sessions: greeters,
+                ..NOTHING
+            };
+            assert!(!helper_of(other), "{cgroup:?}");
+        }
+        let no_greeter = Case {
+            cgroup: Some(GREETER_CGROUP),
+            ..NOTHING
+        };
+        assert!(!helper_of(no_greeter));
+    }
+
+    fn helper_of(case: Case) -> bool {
+        let env = |_: &str| None;
+        let cgroup = || case.cgroup.map(str::to_string);
+        let session = |_: &str| None;
+        let user = |_: &str| None;
+        let sessions = || case.sessions.iter().map(|s| s.to_string()).collect();
+        is_login_manager_helper(&Probes {
+            rhost: false,
+            tty: false,
+            env: &env,
+            cgroup: &cgroup,
+            session: &session,
+            user: &user,
+            sessions: &sessions,
+        })
     }
 }

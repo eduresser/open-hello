@@ -31,7 +31,7 @@ When the face starts depends on the greeter, not on open-hello:
 | SDDM, plasmalogin | when the form is submitted | choose the user, press Enter with an empty password, face the camera |
 | GDM, LightDM, greetd | when the user is chosen (not verified here) | face the camera |
 
-A failed face is a wrong password: the user types the password. An automatic Enter was built and removed (2026-10-22): every variant (virtual keyboard, fixed delay, burst of Enters, human-activity guard) adds a fragile surface, and a burst can trip `pam_faillock`.
+The face is tried only when the password field is empty. At the login screen the module reads the submitted password (`pam_get_authtok`, only to tell empty from non-empty, never stored or logged); anything typed returns `password-typed` and `pam_unix` decides, so a wrong password is refused and a correct one never turns the camera on. This applies only to the login manager's helper (no user session, a local greeter in logind); `sudo`, `polkit` and the lock screen still start the camera by themselves. A failed face is a wrong password: the user types the password. An automatic Enter was built and removed (2026-10-22): every variant (virtual keyboard, fixed delay, burst of Enters, human-activity guard) adds a fragile surface, and a burst can trip `pam_faillock`.
 
 Upstream paths to watch: SDDM pull request 2176 (parallel authentication) and the Plasma Login Manager prototype that reuses the lock screen authenticators.
 
@@ -40,6 +40,7 @@ Upstream paths to watch: SDDM pull request 2176 (parallel authentication) and th
 | Distro | Desktop | Locker | PAM service | Result | Notes |
 |---|---|---|---|---|---|
 | KDE neon VM (Ubuntu noble) | Plasma Login Manager | greeter | `plasmalogin` | passed | Face authenticated at the login screen after Enter with an empty password (`reason=success`, 2026-10-22). |
+| KDE neon VM (Ubuntu noble) | Plasma Login Manager | greeter | `plasmalogin` | passed | Typed passwords (wrong or correct) give `reason=password-typed` and the camera stays off; an empty password still gives `reason=success` (2026-10-22). |
 | KDE neon VM (Ubuntu noble) | graphical session | PAM-based locker | locker's own | passed | Face authenticated without a password (`reason=success`, 2026-10-21). The locker then shows its own confirmation; open-hello does not change that. |
 
 Only `sudo`, the locker above and the plasmalogin login screen (Enter with an empty password, `reason=success service=plasmalogin`, 2026-10-22) are verified on a real system; others are not verified. The face does not unlock a keyring that needs the password.
