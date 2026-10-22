@@ -88,7 +88,7 @@ Sources (Microsoft):
 | Aspect | Content |
 |---|---|
 | (a) Windows | Credential provider `FaceBioListener` handles camera states, group-policy lock, `ProcessWinBioRecognizeResult`; shared PIN/bio UI library `cngcredui.dll` (WH-doc, **confirmed**). PIN soft lockout with backoff (`ContainerGetSoftLockoutInfo`, **confirmed**). Windows also falls back to PIN after repeated failed biometric attempts (general product behavior, **not in the sources checked: inferred, unverified**). |
-| (b) Ours | No text; the blinking IR emitter is the indicator (Q-003); failure falls through to the password within 5 s; no biometric failure counter or state messages. |
+| (b) Ours | No text; the blinking IR emitter is the indicator (Q-003); failure falls through to the password within 5 s; three attempts within 10 s per request and no persistent failure counter (ASM-015, ASM-016); no state messages. |
 | (c) Status | Messages: diverges-justifiable (greeter UX is roadmap v2, Q-003 documented). Failure counter: **no-evidence-in-windows** for the number of attempts; the concept (backoff on PIN) is confirmed for the PIN only. Biometric attempts are bounded by FAR only (ASM-008). |
 | (d) Recommendation | Optional now: show short state lines through the PAM conversation (camera unavailable / no face / not recognized), same mechanism as the existing line. Decide a biometric retry cap per window (for example require PIN or password after N failures) as an explicit assumption; label it "Linux design", not "Windows behavior", until verified. |
 

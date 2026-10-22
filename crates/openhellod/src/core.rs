@@ -10,7 +10,7 @@ use crate::ticket_client::{TicketClient, TicketDelivery};
 
 pub const MAX_SCORED_FRAMES: u32 = 16;
 pub const MAX_ATTEMPT_FRAMES: usize = 48;
-pub const MAX_ATTEMPTS: u32 = 1;
+pub const MAX_ATTEMPTS: u32 = 3;
 pub const DEFAULT_TARGET_FAR: f64 = 1e-5;
 pub const ATTEMPT_BUDGET: Duration = openhello_auth_proto::FACE_ATTEMPT_BUDGET;
 
@@ -698,23 +698,92 @@ mod tests {
 
     const FRAME: Duration = Duration::from_millis(100);
 
+    // @spec:AC-042
+    #[test]
+    fn a_request_accepts_a_face_seen_on_the_first_second_or_third_attempt_and_stops_there() {
+        use Script::{Accept, Reject};
+        for (script, expected_attempts) in [(vec![Accept], 1), (vec![Reject, Accept], 2), (vec![Reject, Reject, Accept], 3)] {
+            let mut rig = rig(&script, FRAME, None);
+            assert!(rig.core.verify(1000).unwrap(), "{expected_attempts}");
+            assert_eq!((rig.begun(), rig.ended()), (expected_attempts, expected_attempts));
+        }
+        let mut identified = rig(&[Reject, Accept], FRAME, None);
+        assert_eq!(identified.core.identify().unwrap(), Some(1000));
+        assert_eq!((identified.begun(), identified.ended()), (2, 2));
+    }
+
+    // @spec:AC-042
+    #[test]
+    fn three_rejections_refuse_the_request_with_every_engine_session_closed_and_no_ticket() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("keyd.sock");
+        let keyd = TestKeyd::start(&socket, 3);
+        let mut rig = rig(&[Script::Reject; 5], FRAME, None);
+        rig.core = rig.core.with_ticket_client(Some(TicketClient::new(&socket)));
+        assert!(!rig.core.verify(1000).unwrap());
+        assert_eq!((rig.begun(), rig.ended()), (3, 3));
+        assert_eq!(rig.counters.frames.load(Ordering::SeqCst), 3);
+        assert_eq!(rig.core.last_ticket_delivery(), None);
+        assert_eq!(*keyd.connections.lock().unwrap(), 0);
+        assert_eq!(rig.core.identify().unwrap(), None);
+        assert_eq!(rig.begun(), 6);
+        assert_eq!(rig.ended(), 6);
+    }
+
+    // @spec:AC-042
+    #[test]
+    fn an_attempt_that_reaches_the_frame_limit_without_a_decision_counts_as_an_attempt() {
+        let mut rig = rig(&[Script::NoFace; 3], Duration::ZERO, None);
+        assert!(!rig.core.verify(1000).unwrap());
+        assert_eq!((rig.begun(), rig.ended()), (3, 3));
+        assert_eq!(rig.counters.frames.load(Ordering::SeqCst), MAX_ATTEMPT_FRAMES * 3);
+    }
+
     // @spec:AC-041
     #[test]
-    fn one_ten_second_clock_ends_the_request_and_the_default_is_ten_seconds() {
+    fn the_three_attempts_share_one_ten_second_clock_and_the_default_is_ten_seconds() {
         assert_eq!(ATTEMPT_BUDGET, Duration::from_secs(10));
-        let mut no_face = rig(&[Script::NoFace], Duration::from_secs(1), None);
+
+        let mut no_face = rig(&[Script::NoFace; 3], Duration::from_secs(1), None);
         assert!(!no_face.core.verify(1000).unwrap());
         assert_eq!(no_face.counters.frames.load(Ordering::SeqCst), 10);
         assert_eq!((no_face.begun(), no_face.ended()), (1, 1));
         assert_eq!(no_face.clock.elapsed(), ATTEMPT_BUDGET);
+
+        let mut slow = rig(&[Script::Reject; 3], Duration::from_secs(6), None);
+        assert!(!slow.core.verify(1000).unwrap());
+        assert_eq!((slow.begun(), slow.ended()), (2, 2));
+
+        let mut quick = rig(&[Script::Reject; 3], Duration::from_secs(4), None);
+        assert!(!quick.core.verify(1000).unwrap());
+        assert_eq!((quick.begun(), quick.ended()), (3, 3));
     }
 
-    // @spec:AC-040
+    // @spec:AC-043
     #[test]
-    fn camera_errors_end_the_session_and_the_request() {
-        let mut unplugged = rig(&[Script::Accept], FRAME, Some(1));
+    fn camera_errors_do_not_count_as_attempts_and_close_the_session() {
+        let mut rig = rig(&[Script::Reject, Script::Accept], FRAME, Some(2));
+        assert!(matches!(rig.core.verify(1000), Err(DaemonError::Backend(_))));
+        assert_eq!((rig.begun(), rig.ended()), (2, 2));
+        assert_eq!(rig.counters.frames.load(Ordering::SeqCst), 1);
+
+        let mut unplugged = rig_failing_at_start();
         assert!(matches!(unplugged.core.verify(1000), Err(DaemonError::Backend(_))));
         assert_eq!((unplugged.begun(), unplugged.ended()), (1, 1));
+    }
+
+    fn rig_failing_at_start() -> Rig {
+        rig(&[Script::Accept], FRAME, Some(1))
+    }
+
+    // @spec:AC-043
+    #[test]
+    fn a_caller_that_leaves_between_attempts_ends_the_request_without_another_attempt() {
+        let mut rig = rig(&[Script::Reject; 3], FRAME, None);
+        let counters = rig.counters.clone();
+        let result = rig.core.verify_cancellable(1000, &|| counters.ended.load(Ordering::SeqCst) >= 1);
+        assert!(matches!(result, Err(DaemonError::Cancelled)));
+        assert_eq!((rig.begun(), rig.ended()), (1, 1));
     }
 
     // @spec:AC-040

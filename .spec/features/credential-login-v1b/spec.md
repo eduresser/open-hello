@@ -212,6 +212,22 @@ As a laptop owner, I want the camera and the IR emitter to stop as soon as the s
 - **When** the request runs
 - **Then** the daemon stops starting frames and attempts after 10 seconds of wall clock for the whole request (one budget shared by every attempt, measured on an injectable clock), and `pam_openhello` waits for the daemon's verdict for longer than that budget and falls through to the password within its own total budget (verdict wait plus signature), never sooner than the daemon and never beyond its budget
 
+### US-018 — Recognition attempts per authentication request
+
+As a laptop owner, I want each authentication request to give my face a few chances before falling back to the password, so that one bad frame does not cost me a password typing, while a stranger cannot keep trying.
+
+#### AC-042 — A request makes up to three attempts and stops at the first acceptance
+
+- **Given** an enrolled user and a request (`Verify`, or `Identify`)
+- **When** the engine accepts the face on the first, second or third attempt, or rejects three attempts in a row
+- **Then** acceptance on any attempt ends the request as a success after that attempt, three rejections end it as a refusal at once (the module falls through to the password), every attempt uses a new engine session that is always ended, an attempt is one engine rejection or the per-attempt frame limit reached without a decision, and a refusal delivers no ticket
+
+#### AC-043 — Infrastructure errors and cancellation are not attempts
+
+- **Given** a request in progress
+- **When** the camera or the engine fails, or the caller leaves between or during attempts
+- **Then** the request ends with an error (the module ignores it and falls through), no further attempt starts, the open engine session is ended, and the failure is not reported as a rejection
+
 ## Out of scope
 
 - Graphical login through a display-manager greeter and its UX (roadmap v2).
@@ -234,7 +250,8 @@ As a laptop owner, I want the camera and the IR emitter to stop as soon as the s
 | ASM-012 | Purge destroys the user's key the way P-008 intends. | confirmed | Accepted by parity with Windows Hello, where NGC containers are logical and no persistent TPM handle exists either (MS-HOW, `windows-hello-alignment.md`). `tpm2-pkcs11` keeps the key as a wrapped blob in its store under a deterministic primary; Purge removes the token and every Protector, so nobody can unlock it. An attacker holding a copy of the store, the sealed Protector blobs and the same TPM could still sign (T-020 test); closing that would need a persistent TPM object per user and goes beyond Windows. AC-033 is worded accordingly. |
 | ASM-013 | The embedded calibration table, measured on visible-light photos (LFW) through the real detector and embedding model, is an acceptable provisional default for the infrared camera. | open | Not proven: infrared impostor scores may differ and the 2-person live test (ASM-001) does not measure FAR. Replace the table with one measured on infrared captures from the target camera once enough people are available; the table is one 1,072-byte file plus the golden test, so swapping it is cheap. |
 | ASM-014 | `pam_openhello` can ask keyd to sign a random challenge and verify the ECDSA P-256 signature itself against a root-owned public key, so the PAM path needs no `pam_pkcs11`, NSS database or certificate mapping (owner decision, 2026-10-21). | confirmed | Three failures on the first Ubuntu run came from `pam_pkcs11` build differences (search templates, NSS trust, subject format), and Arch has no official package. The PKCS#11 token and certificate stay for SSH and LUKS. ASM-006 and ASM-007 describe the earlier `pam_pkcs11` path and remain true for it, but the PAM stacks stop depending on it. Windows basis (`windows-hello-alignment.md`): the Entra/Cloud AP and AD key-trust flows sign a nonce and verify it against a registered public key without a PKI (MS-AUTH, confirmed); local-account Hello uses no asymmetric key (MS-OVR, confirmed), so this is an adaptation of the Entra pattern, not a copy of the local case. Verification runs inside the PAM process: equivalent to Windows under `sudo` (root), weaker on user-level lock screens where Windows verifies outside the UI process. Accepted for v1b; moving the check to a root helper or keyd is a later improvement. Live evidence (2026-10-21, KDE neon VM, Ubuntu noble, real vTPM): `sudo true` authenticated by face through `pam_openhello` alone (Verify accepted, ticket delivered, TPM signature of the PAM challenge verified against `/etc/openhello/auth/1000.pub`), no password prompt, exit 0; a single run reported by the owner, so it is evidence of the path, not a success rate or a timing. Not yet measured on the physical TPM or with a second person. |
-| ASM-015 | A request may look for a face for at most 10 seconds in total. | open | Owner decision (2026-10-21, from watching real use: "tenta identificar por uns 10 segundos"), not proven Windows parity. Windows evidence is indirect: `facecredentialprovider.dll` carries timeout telemetry names (`BioListenerDisabledDueToCredProvTimeout`, `CameraStartupTimeout`) and the policy `HKLM\SOFTWARE\Policies\Microsoft\Biometrics\Credential Provider\SwitchTimeoutInSeconds` (default not found), confidence medium. The number is one constant (`FACE_ATTEMPT_BUDGET`). |
+| ASM-015 | A request may look for a face for at most 10 seconds in total, shared by up to three attempts. | open | Owner decision (2026-10-21, from watching real use: "tenta identificar por uns 10 segundos"), not proven Windows parity. Windows evidence is indirect: `facecredentialprovider.dll` carries timeout telemetry names (`BioListenerDisabledDueToCredProvTimeout`, `CameraStartupTimeout`) and the policy `HKLM\SOFTWARE\Policies\Microsoft\Biometrics\Credential Provider\SwitchTimeoutInSeconds` (default not found), confidence medium. The number is one constant (`FACE_ATTEMPT_BUDGET`). |
+| ASM-016 | Three attempts per request is the policy; the Windows counter that persists across events and blocks the face until another login method (`mismatchCount`, N=3, per SID) is not implemented. | open | Owner decision (2026-10-21). Windows evidence (REA, `facecredentialprovider.dll`, confidence high): N=3 consecutive failures fixed in code, a per-user `REG_DWORD mismatchCount` that survives lock cycles, block until a login with another method; the reset point was not proven (probably a successful logon). Persistent lockout is deferred, see `design.md`. |
 
 ## Open questions
 
