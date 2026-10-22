@@ -257,6 +257,11 @@ run systemctl restart openhellod 2>/dev/null || true
 echo
 echo "open-hello installed and started. Check OPENHELLO_DEVICE (the IR camera node) in $CONF_DIR/openhello.env"
 echo "PAM module installed at $PAM_MODULE_DIR/pam_openhello.so"
+if command -v fprintd-list >/dev/null 2>&1 || [ -x /usr/libexec/fprintd ] || [ -x /usr/lib/fprintd/fprintd ]; then
+  echo "Fingerprint: fprintd found. With a reader, add a finger with: openhello-cli enroll"
+else
+  echo "Fingerprint: fprintd not found; the face and the password work as usual. Install fprintd to use a fingerprint reader."
+fi
 if [ "$PAM_ENABLED" = 1 ] || { [ "$DRY_RUN" = 1 ] && [ "$ENABLE_PAM" = 1 ]; }; then
   echo "PAM module enabled once in the common auth stack (every local service except login, su, sshd, cron and similar). It only acts for users who enrolled a face; passwords keep working. Undo with: sudo openhello-cli pam disable (check with: openhello-cli pam status)"
 else
