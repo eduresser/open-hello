@@ -10,6 +10,11 @@ use crate::matching::{Matcher, Template};
 use crate::{EngineError, GrayImage};
 
 const MIN_OCCLUSION_FREE_SCORE: f32 = 0.9;
+const SCORE_LOG_ENV: &str = "OPENHELLO_SCORE_LOG";
+
+fn score_log_enabled() -> bool {
+    std::env::var(SCORE_LOG_ENV).is_ok_and(|value| value == "1")
+}
 
 pub struct ConfidenceOcclusionDetector;
 
@@ -177,13 +182,30 @@ impl Engine {
             .ok_or_else(|| EngineError::InvalidInput(format!("unknown authentication session {id}")))?;
         let detection = match best_face(self.detector.detect(image)?) {
             Ok(detection) => detection,
-            Err(EngineError::NoFace) => return Ok(AuthProgress { verdict: AuthVerdict::Continue, scored_frames: session.scored_frames }),
+            Err(EngineError::NoFace) => {
+                if score_log_enabled() {
+                    eprintln!("openhello-score no-face scored_frames={}", session.scored_frames);
+                }
+                return Ok(AuthProgress { verdict: AuthVerdict::Continue, scored_frames: session.scored_frames });
+            }
             Err(other) => return Err(other),
         };
         session.scored_frames += 1;
         let probe = embed_detected(self.embedder.as_ref(), image, &detection)?;
-        let matched = self.matcher.identify(&probe, &session.candidates, session.far_per_frame)?;
-        let verdict = match matched {
+        let scored = self.matcher.identify_scored(&probe, &session.candidates, session.far_per_frame)?;
+        if score_log_enabled() {
+            eprintln!(
+                "openhello-score frame={} face={}x{} detector={:.2} score={:.4} threshold={:.4} accepted={}",
+                session.scored_frames,
+                detection.width as u32,
+                detection.height as u32,
+                detection.score,
+                scored.best_score,
+                scored.threshold,
+                scored.found.is_some()
+            );
+        }
+        let verdict = match scored.found {
             Some(found) => AuthVerdict::Accepted { uid: found.uid },
             None if session.scored_frames >= session.max_scored_frames => AuthVerdict::Rejected,
             None => AuthVerdict::Continue,

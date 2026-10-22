@@ -47,8 +47,20 @@ fn run(config: Config) -> Result<(), String> {
     })
 }
 
+const TARGET_FAR_ENV: &str = "OPENHELLO_TARGET_FAR";
+
+fn command_line() -> Vec<String> {
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    if let Ok(far) = std::env::var(TARGET_FAR_ENV) {
+        if !args.iter().any(|a| a == "--target-far") {
+            args.extend(["--target-far".to_string(), far]);
+        }
+    }
+    args
+}
+
 fn main() -> ExitCode {
-    let config = match Config::parse(std::env::args().skip(1)) {
+    let config = match Config::parse(command_line()) {
         Ok(config) => config,
         Err(problem) => {
             eprintln!("openhellod: {problem}\n{USAGE}");
