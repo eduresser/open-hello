@@ -10,6 +10,8 @@ pub enum DaemonError {
     InvalidRequest(String),
     #[error("backend failure: {0}")]
     Backend(String),
+    #[error("the caller left before the attempt finished")]
+    Cancelled,
 }
 
 impl DaemonError {
@@ -18,6 +20,7 @@ impl DaemonError {
             DaemonError::NotFound => "no biometric data is enrolled for this user",
             DaemonError::Tampered | DaemonError::Backend(_) => "the biometric service could not complete the operation",
             DaemonError::InvalidRequest(_) => "the request was not valid in the current state",
+            DaemonError::Cancelled => "the request was cancelled",
         }
     }
 }

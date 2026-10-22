@@ -918,7 +918,9 @@ version = "0.1.0"
 dependencies = [
  "async-io",
  "blocking",
+ "futures-lite",
  "libloading 0.8.9",
+ "openhello-auth-proto",
  "openhello-keyd",
  "openhello-plugin-abi",
  "openhello-ticket",

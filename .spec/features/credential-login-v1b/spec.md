@@ -125,7 +125,7 @@ As a laptop owner on any Linux distribution and desktop, I want `sudo` and the l
 
 - **Given** `openhellod`, `openhello-keyd` or the camera is unavailable
 - **When** authentication runs
-- **Then** the open-hello module returns "ignore" within 5 seconds and the password prompt appears
+- **Then** the open-hello module returns "ignore" within 5 seconds and the password prompt appears; a daemon that answers the call but stays silent is bounded by the attempt budget instead (AC-041)
 
 ### US-014 — Recovery code
 
@@ -196,6 +196,22 @@ As a person installing open-hello, I want the false-accept calibration to ship i
 - **When** the sensor adapter begins a capture
 - **Then** for the Microsoft control it reads the control before every capture, writes the alternating-illumination mode and confirms it by read-back when the current mode is not alternating (no environment switch), and admits frames only from a stream that alternates lit/unlit; for a camera with no controllable emitter the existing brightness rule applies unchanged; a refused write, an unconfirmed write or a stream that never alternates fails the capture with a distinct error and no frame is returned
 
+### US-017 — Cancelable capture and time budget
+
+As a laptop owner, I want the camera and the IR emitter to stop as soon as the screen or command that asked for my face is gone, and I want a request to look for my face for a bounded, known time, so that the emitter never blinks after I unlock with the password.
+
+#### AC-040 — A caller that leaves cancels its capture
+
+- **Given** a `Verify` or `Identify` call in progress or queued behind another call, and a D-Bus caller whose unique name then disappears from the bus
+- **When** the daemon next checks the caller (before every frame, and before it starts a queued call)
+- **Then** a running capture stops without another frame, a queued call of a departed caller never starts, the engine session is always ended, and no ticket is delivered
+
+#### AC-041 — One 10-second clock bounds the request and the module waits for it
+
+- **Given** a request whose attempts find no face, or a daemon that stays silent
+- **When** the request runs
+- **Then** the daemon stops starting frames and attempts after 10 seconds of wall clock for the whole request (one budget shared by every attempt, measured on an injectable clock), and `pam_openhello` waits for the daemon's verdict for longer than that budget and falls through to the password within its own total budget (verdict wait plus signature), never sooner than the daemon and never beyond its budget
+
 ## Out of scope
 
 - Graphical login through a display-manager greeter and its UX (roadmap v2).
@@ -218,6 +234,7 @@ As a person installing open-hello, I want the false-accept calibration to ship i
 | ASM-012 | Purge destroys the user's key the way P-008 intends. | confirmed | Accepted by parity with Windows Hello, where NGC containers are logical and no persistent TPM handle exists either (MS-HOW, `windows-hello-alignment.md`). `tpm2-pkcs11` keeps the key as a wrapped blob in its store under a deterministic primary; Purge removes the token and every Protector, so nobody can unlock it. An attacker holding a copy of the store, the sealed Protector blobs and the same TPM could still sign (T-020 test); closing that would need a persistent TPM object per user and goes beyond Windows. AC-033 is worded accordingly. |
 | ASM-013 | The embedded calibration table, measured on visible-light photos (LFW) through the real detector and embedding model, is an acceptable provisional default for the infrared camera. | open | Not proven: infrared impostor scores may differ and the 2-person live test (ASM-001) does not measure FAR. Replace the table with one measured on infrared captures from the target camera once enough people are available; the table is one 1,072-byte file plus the golden test, so swapping it is cheap. |
 | ASM-014 | `pam_openhello` can ask keyd to sign a random challenge and verify the ECDSA P-256 signature itself against a root-owned public key, so the PAM path needs no `pam_pkcs11`, NSS database or certificate mapping (owner decision, 2026-10-21). | confirmed | Three failures on the first Ubuntu run came from `pam_pkcs11` build differences (search templates, NSS trust, subject format), and Arch has no official package. The PKCS#11 token and certificate stay for SSH and LUKS. ASM-006 and ASM-007 describe the earlier `pam_pkcs11` path and remain true for it, but the PAM stacks stop depending on it. Windows basis (`windows-hello-alignment.md`): the Entra/Cloud AP and AD key-trust flows sign a nonce and verify it against a registered public key without a PKI (MS-AUTH, confirmed); local-account Hello uses no asymmetric key (MS-OVR, confirmed), so this is an adaptation of the Entra pattern, not a copy of the local case. Verification runs inside the PAM process: equivalent to Windows under `sudo` (root), weaker on user-level lock screens where Windows verifies outside the UI process. Accepted for v1b; moving the check to a root helper or keyd is a later improvement. Live evidence (2026-10-21, KDE neon VM, Ubuntu noble, real vTPM): `sudo true` authenticated by face through `pam_openhello` alone (Verify accepted, ticket delivered, TPM signature of the PAM challenge verified against `/etc/openhello/auth/1000.pub`), no password prompt, exit 0; a single run reported by the owner, so it is evidence of the path, not a success rate or a timing. Not yet measured on the physical TPM or with a second person. |
+| ASM-015 | A request may look for a face for at most 10 seconds in total. | open | Owner decision (2026-10-21, from watching real use: "tenta identificar por uns 10 segundos"), not proven Windows parity. Windows evidence is indirect: `facecredentialprovider.dll` carries timeout telemetry names (`BioListenerDisabledDueToCredProvTimeout`, `CameraStartupTimeout`) and the policy `HKLM\SOFTWARE\Policies\Microsoft\Biometrics\Credential Provider\SwitchTimeoutInSeconds` (default not found), confidence medium. The number is one constant (`FACE_ATTEMPT_BUDGET`). |
 
 ## Open questions
 
