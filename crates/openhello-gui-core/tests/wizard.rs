@@ -81,7 +81,6 @@ fn short_long_non_ascii_or_different_pins_are_rejected_and_nothing_is_stored() {
 fn a_mismatch_shows_the_windows_hello_wording_in_each_language() {
     use openhello_gui_core::{Strings, Text};
     assert_eq!(Strings::new(Language::English).get(PinError::Mismatch.text()), "These PINs don’t match.");
-    assert_eq!(Strings::new(Language::PortugueseBr).get(PinError::Mismatch.text()), "Esses PINs não correspondem.");
     assert_ne!(Strings::new(Language::English).get(Text::PinInvalid), "");
 }
 
@@ -153,11 +152,11 @@ fn a_busy_camera_and_a_stuck_sensor_explain_what_to_do_and_never_commit() {
 fn a_camera_that_is_busy_when_the_session_starts_is_an_error_without_a_session_to_discard() {
     let (mut client, calls) = fake(fresh(), vec![]);
     client.begin_error = Some(ClientErrorKind::CameraBusy);
-    let mut flow = EnrollmentFlow::new(client, 1000, Language::PortugueseBr);
+    let mut flow = EnrollmentFlow::new(client, 1000, Language::English);
     flow.start();
     flow.confirm_identity();
     assert_eq!(flow.step(), Step::Error(FailureCause::CameraBusy));
-    assert!(flow.strings().failure_explanation(FailureCause::CameraBusy).contains("Feche o aplicativo"));
+    assert!(flow.strings().failure_explanation(FailureCause::CameraBusy).contains("Close the app"));
     drop(flow);
     assert_eq!(calls.borrow().discards, 0);
     assert_eq!(calls.borrow().commits, 0);

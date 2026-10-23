@@ -41,11 +41,11 @@ As a laptop owner, I want a step-by-step window that shows me the camera and tel
 - **When** frames arrive from the daemon
 - **Then** the window shows the live camera image, one guidance sentence for the latest verdict, and "n of 6" progress that grows with each accepted sample
 
-#### AC-060 — Every verdict has a sentence in English, with Brazilian Portuguese available
+#### AC-060 — Every verdict has a sentence in English
 
-- **Given** the interface language is English (the default) or Brazilian Portuguese (chosen only with `OPENHELLO_GUI_LANG=pt-BR`; the system locale is ignored for now)
+- **Given** the interface (English only for now)
 - **When** the daemon reports any enrollment verdict (accepted, too-soon, no-face, move-left, move-right, move-up, move-down, too-close, too-far, too-dark, too-bright, yaw-out-of-range, blurred, occluded)
-- **Then** the capture screen shows the sentence for that verdict in the interface language, taken from the Windows Hello wording where one exists
+- **Then** the capture screen shows the sentence for that verdict, taken from the Windows Hello wording where one exists
 
 #### AC-061 — Enrollment failures explain what to do
 
@@ -118,7 +118,7 @@ As a laptop owner on any distribution and desktop, I want to find the app in the
 - "Improve recognition" (adding a second recognition profile): see Q-004.
 - A page inside KDE System Settings or GNOME Settings (an optional thin layer later).
 - Flatpak packaging, display-manager greeter, fingerprint, gaze or eyes-open checks.
-- Languages other than English and Brazilian Portuguese, and following the system locale (English only for now; Portuguese is opt-in).
+- Any language other than English (the interface is English only for now).
 
 ## Assumptions
 
@@ -126,7 +126,7 @@ As a laptop owner on any distribution and desktop, I want to find the app in the
 |---|---|---|---|
 | ASM-020 | A GTK 4 + libadwaita app in Rust, talking to the daemons over the D-Bus system bus, is acceptable on any desktop; it looks foreign on KDE but needs no per-desktop code. | open | Recommended by the toolkit research (2026-10-23); confirm on the KDE neon VM. |
 | ASM-021 | One 640x360 8-bit grayscale frame per call, handed over as a sealed memory file descriptor in a method reply, is fast enough for a smooth preview. | open | Method replies carry descriptors reliably; signals do not. Measure on the VM. |
-| ASM-022 | The wizard wording reuses the Windows Hello strings extracted from `BioEnrollment` (en-US and pt-BR). | confirmed | Extracted 2026-10-23 from the local Windows install; used for wording only. |
+| ASM-022 | The wizard wording reuses the Windows Hello strings extracted from `BioEnrollment` (English wording only for now). | confirmed | Extracted 2026-10-23 from the local Windows install; used for wording only. |
 | ASM-023 | GTK 4 and libadwaita development packages are installable on the VM (Ubuntu noble ships libadwaita 1.5). | open | Check with the package manager before the GUI task starts. |
 
 ## Open questions
