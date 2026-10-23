@@ -44,8 +44,7 @@
 - Effort: high
 - Notes: superseded by T-069 (GTK shell removed; see git history f68e6a3). Was excluded from `default-members` so `cargo test` needs no GTK; oval guide and progress ring drawn over the preview.
 
-## T-066 — Desktop entry and installer step [pending]
-
+## T-066 — Desktop entry and installer step [done]
 - Refs: AC-067, AC-068
 - Files: packaging/openhello.desktop, scripts/install.sh
 - Model: claude-sonnet-5

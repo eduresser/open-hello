@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Face recognition
+Comment=Enroll and manage face recognition for sign-in
+Exec=openhello-gui
+Icon=camera-web
+Terminal=false
+Categories=Settings;Security;
+Keywords=face;biometric;login;hello;
+StartupNotify=true
