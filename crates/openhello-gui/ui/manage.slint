@@ -1,4 +1,4 @@
-import { ActionButton, Brand, Column, Footer, Intro, LinkButton, MarkRow, Spacer, TestStatus } from "components.slint";
+import { ActionButton, Brand, Column, Footer, Intro, SudoNotice, LinkButton, MarkRow, Spacer, TestStatus } from "components.slint";
 import { T } from "texts.slint";
 
 export component ManagePage inherits VerticalLayout {
@@ -9,7 +9,10 @@ export component ManagePage inherits VerticalLayout {
     in property <string> blocked-title;
     in property <string> blocked-body;
     in-out property <bool> confirming;
+    in property <bool> sudo-asks-root;
+    in property <string> sudo-message;
     callback test();
+    callback use-own-sudo();
     callback set-up-again();
 
     property <bool> usable: !root.busy && !root.confirming && !root.blocked;
@@ -27,6 +30,12 @@ export component ManagePage inherits VerticalLayout {
         Intro {
             title: root.blocked ? root.blocked-title : T.window-title;
             body: root.blocked ? root.blocked-body : T.manage-body;
+        }
+        SudoNotice {
+            asks-root: root.sudo-asks-root && !root.blocked;
+            message: root.sudo-message;
+            enabled: root.usable;
+            use-own => { root.use-own-sudo(); }
         }
     }
     Footer {

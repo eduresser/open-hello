@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use openhello_gui_core::{ClientError, ClientErrorKind, ClientResult, ManageClient, Manager, RemoveOutcome, Status, TestOutcome};
+use openhello_gui_core::{ClientError, ClientErrorKind, ClientResult, ManageClient, Manager, RemoveOutcome, Status, SudoAccess, TestOutcome};
 
 #[derive(Default)]
 struct Log {
@@ -109,4 +109,43 @@ fn testing_again_asks_the_daemon_again_each_time() {
     assert_eq!(manager.test(), TestOutcome::NotRecognized);
     assert_eq!(manager.test(), TestOutcome::NotRecognized);
     assert_eq!(log.borrow().verifies, 2);
+}
+
+struct SudoOnly(ClientResult<SudoAccess>);
+
+impl ManageClient for SudoOnly {
+    fn status(&mut self, _: u32) -> ClientResult<Status> {
+        Ok(enrolled())
+    }
+
+    fn verify(&mut self, _: u32) -> ClientResult<bool> {
+        Ok(true)
+    }
+
+    fn purge(&mut self, _: u32) -> ClientResult<()> {
+        Ok(())
+    }
+
+    fn sudo_access(&mut self, _: u32) -> ClientResult<SudoAccess> {
+        self.0.clone()
+    }
+}
+
+#[test]
+fn daemon_policy_names_map_to_sudo_access_and_unknown_names_are_unavailable() {
+    assert_eq!(SudoAccess::parse("own-password"), SudoAccess::OwnPassword);
+    assert_eq!(SudoAccess::parse("root-password"), SudoAccess::RootPassword);
+    assert_eq!(SudoAccess::parse("unavailable"), SudoAccess::Unavailable);
+    assert_eq!(SudoAccess::parse("something-new"), SudoAccess::Unavailable);
+}
+
+#[test]
+fn the_notice_is_due_only_when_sudo_asks_for_root_and_errors_hide_it() {
+    let due = |answer| Manager::new(SudoOnly(answer), 1000).sudo_asks_root();
+    assert!(due(Ok(SudoAccess::RootPassword)));
+    assert!(!due(Ok(SudoAccess::OwnPassword)));
+    assert!(!due(Ok(SudoAccess::Unavailable)));
+    assert!(!due(Err(ClientError::new(ClientErrorKind::AuthDenied, "denied"))));
+    let (mut legacy, _) = manage(Ok(true), None);
+    assert!(!legacy.sudo_asks_root());
 }

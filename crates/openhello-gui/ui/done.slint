@@ -1,10 +1,13 @@
-import { ActionButton, Brand, Column, Footer, Intro, MarkRow, Spacer, TestStatus } from "components.slint";
+import { ActionButton, Brand, Column, Footer, Intro, SudoNotice, MarkRow, Spacer, TestStatus } from "components.slint";
 import { T } from "texts.slint";
 
 export component DonePage inherits VerticalLayout {
     in property <bool> busy;
     in property <bool> testing;
+    in property <bool> sudo-asks-root;
+    in property <string> sudo-message;
     callback test();
+    callback use-own-sudo();
     callback set-up-again();
 
     Column {
@@ -16,6 +19,12 @@ export component DonePage inherits VerticalLayout {
         TestStatus {
             busy: root.busy;
             testing: root.testing;
+        }
+        SudoNotice {
+            asks-root: root.sudo-asks-root;
+            message: root.sudo-message;
+            enabled: !root.busy;
+            use-own => { root.use-own-sudo(); }
         }
     }
     Footer {

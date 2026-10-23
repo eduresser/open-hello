@@ -74,10 +74,14 @@ pub enum Text {
     ReasonTpm,
     ReasonAuthDenied,
     ReasonOther,
+    SudoNotice,
+    SudoUseOwn,
+    SudoChanged,
+    SudoFailedPrefix,
 }
 
 impl Text {
-    pub const ALL: [Text; 60] = [
+    pub const ALL: [Text; 64] = [
         Text::WelcomeTitle,
         Text::WelcomeBody,
         Text::BlockedTitle,
@@ -138,6 +142,10 @@ impl Text {
         Text::ReasonTpm,
         Text::ReasonAuthDenied,
         Text::ReasonOther,
+        Text::SudoNotice,
+        Text::SudoUseOwn,
+        Text::SudoChanged,
+        Text::SudoFailedPrefix,
     ];
 
     fn english(self) -> &'static str {
@@ -202,6 +210,10 @@ impl Text {
             Text::ReasonTpm => "the security chip is unavailable",
             Text::ReasonAuthDenied => "the system did not authorize the request",
             Text::ReasonOther => "something went wrong",
+            Text::SudoNotice => "Your face works for sign-in and the lock screen. sudo on this computer asks for the root password, so it cannot use your face.",
+            Text::SudoUseOwn => "Use my face for sudo",
+            Text::SudoChanged => "sudo now accepts your face or your own password.",
+            Text::SudoFailedPrefix => "sudo was not changed: ",
         }
     }
 }
@@ -244,6 +256,10 @@ impl Strings {
             TestOutcome::NotRecognized => self.get(Text::NotRecognized).into(),
             TestOutcome::Failed(error) => format!("{}{}.", self.get(Text::TestFailedPrefix), self.get(reason_text(error.kind.into()))),
         }
+    }
+
+    pub fn sudo_failure(&self, cause: FailureCause) -> String {
+        format!("{}{}.", self.get(Text::SudoFailedPrefix), self.get(reason_text(cause)))
     }
 
     pub fn failure_explanation(&self, cause: FailureCause) -> &'static str {
