@@ -1,10 +1,11 @@
 use openhello_gui_core::{FailureCause, Strings, TestOutcome, Text};
-use slint::{ComponentHandle, Image, Rgb8Pixel, SharedPixelBuffer, SharedString};
+use slint::platform::WindowEvent;
+use slint::{ComponentHandle, Image, LogicalPosition, Rgb8Pixel, SharedPixelBuffer, SharedString};
 
 use crate::backend::Event;
 use crate::gate;
 use crate::capture::CaptureView;
-use crate::{trace, MainWindow, Page, T};
+use crate::{pointer, trace, MainWindow, Page, T};
 
 pub fn init(window: &MainWindow, strings: &Strings) {
     let texts = window.global::<T>();
@@ -34,6 +35,15 @@ pub fn apply(window: &MainWindow, strings: &Strings, event: Event) {
     let name = event.name();
     handle(window, strings, event);
     trace::log(format!("ui applied {name}, page {:?}", window.get_page()));
+    refresh_pointer(window);
+}
+
+fn refresh_pointer(window: &MainWindow) {
+    let shown = (window.get_page(), window.get_busy(), window.get_blocked());
+    let scale = window.window().scale_factor();
+    let Some((x, y)) = pointer::with(|tracker| tracker.refresh(shown, scale)) else { return };
+    trace::log(format!("synthetic pointer move at {x:.0},{y:.0}"));
+    window.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(x, y) });
 }
 
 fn handle(window: &MainWindow, strings: &Strings, event: Event) {

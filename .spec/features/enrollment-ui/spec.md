@@ -109,6 +109,12 @@ As a laptop owner, I want to test and delete my face from the same app, so that 
 - **When** the user clicks a button
 - **Then** the click is handled the first time: the button is disabled at once as feedback, a repeated click on it is ignored until the next screen is shown, and `--trace-input` prints each pointer event, click, worker command and screen change with its time and no frame data (principle P-010)
 
+#### AC-077 — A button that appears under a stationary pointer responds to the first click
+
+- **Given** a screen change puts a button under a pointer that has not moved
+- **When** the user clicks it once
+- **Then** the click is handled (a synthetic pointer move refreshes the target after every screen change, only when the screen, busy or blocked changed and the pointer is inside the window, and `--trace-input` prints `synthetic pointer move at X,Y`)
+
 #### AC-066 — Deleting the face asks for confirmation and reauthentication
 
 - **Given** a user with a face set up
