@@ -40,7 +40,7 @@ never asks me to move my head.
 #### AC-004 — Enrollment fails after the capture window elapses
 
 - **Given** an enrollment session has not collected 6 samples
-- **When** 20 seconds elapse since the session began
+- **When** 20 seconds elapse since the first captured frame of the session (time spent before capture starts, such as choosing a PIN, does not count)
 - **Then** the enrollment session fails with an explicit timeout error and no template is persisted
 
 #### AC-048 — Non-frontal frames are discarded during capture

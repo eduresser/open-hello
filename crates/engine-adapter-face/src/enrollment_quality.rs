@@ -146,14 +146,14 @@ pub struct EnrollmentSession<O: OcclusionDetector> {
     config: EnrollmentConfig,
     occlusion: O,
     samples: Vec<Vec<f32>>,
-    started_ms: u64,
+    started_ms: Option<u64>,
     last_accepted_ms: Option<u64>,
     failed: bool,
 }
 
 impl<O: OcclusionDetector> EnrollmentSession<O> {
-    pub fn new(config: EnrollmentConfig, occlusion: O, now_ms: u64) -> Self {
-        Self { config, occlusion, samples: Vec::new(), started_ms: now_ms, last_accepted_ms: None, failed: false }
+    pub fn new(config: EnrollmentConfig, occlusion: O, _begin_ms: u64) -> Self {
+        Self { config, occlusion, samples: Vec::new(), started_ms: None, last_accepted_ms: None, failed: false }
     }
 
     pub fn state(&self) -> SessionState {
@@ -178,7 +178,8 @@ impl<O: OcclusionDetector> EnrollmentSession<O> {
         if self.state() == SessionState::Complete {
             return Ok(());
         }
-        if now_ms.saturating_sub(self.started_ms) >= self.config.timeout_ms {
+        let started_ms = *self.started_ms.get_or_insert(now_ms);
+        if now_ms.saturating_sub(started_ms) >= self.config.timeout_ms {
             self.failed = true;
             self.samples.clear();
             return Err(timeout);
@@ -429,9 +430,9 @@ mod tests {
     fn the_capture_window_elapsing_fails_with_explicit_error_and_no_template() {
         let mut s = session(false);
         s.submit(1_000, &textured_image(), &face_at_yaw(0.0), embed).unwrap();
-        assert!(s.tick(19_999).is_ok());
+        assert!(s.tick(20_999).is_ok());
         assert_eq!(s.state(), SessionState::InProgress);
-        let error = s.tick(20_000).unwrap_err();
+        let error = s.tick(21_000).unwrap_err();
         assert!(matches!(error, EnrollmentError::Timeout { timeout_ms: 20_000 }));
         assert_eq!(s.state(), SessionState::Failed);
         assert_eq!(s.filled(), 0);
@@ -442,8 +443,19 @@ mod tests {
     #[test]
     fn late_frame_after_the_window_is_refused() {
         let mut s = session(false);
+        s.submit(1_000, &textured_image(), &face_at_yaw(0.0), embed).unwrap();
         let result = s.submit(25_000, &textured_image(), &face_at_yaw(0.0), embed);
         assert!(matches!(result, Err(EnrollmentError::Timeout { .. })));
+    }
+
+    // @spec:AC-004
+    #[test]
+    fn the_window_starts_at_the_first_frame_not_at_session_creation() {
+        let mut s = session(false);
+        let outcome = s.submit(100_000, &textured_image(), &face_at_yaw(0.0), embed).unwrap();
+        assert_eq!(outcome, FrameOutcome::Accepted);
+        assert!(s.tick(119_999).is_ok());
+        assert!(s.tick(120_000).is_err());
     }
 
     #[test]
