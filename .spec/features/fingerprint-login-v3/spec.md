@@ -87,6 +87,12 @@ As a user, I want open-hello to turn on the system's fingerprint login where it 
 - **When** `openhello-cli pam enable` runs
 - **Then** no `pam_fprintd` line is written, the open-hello line is handled exactly as before, and one plain sentence says why the fingerprint login was not switched on
 
+#### AC-075 — The common stack and the shared stacks are found by structure, never by file name
+
+- **Given** a machine whose `sudo` service includes a stack file with an arbitrary name (not any well-known one), and other services that include a second shared file
+- **When** an administrator runs `openhello-cli pam enable`, and then `openhello-cli pam enable <service>` for a name that other services include
+- **Then** the first command finds and edits the stack that `sudo` includes, whatever its name, and the second is refused because other services include that file, and no file name from any distribution or desktop is needed for either
+
 #### AC-073 — Enrolling a finger says whether the system's fingerprint login is on
 
 - **Given** a user who has just enrolled a finger with `openhello-cli enroll finger`
