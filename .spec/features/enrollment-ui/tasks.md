@@ -71,3 +71,20 @@
 - Model: claude-sonnet-5
 - Effort: high
 - Notes: depends on T-068. Built from the Slint prototype; the GTK sources are removed; the crate is GPL-3.0-only; T-065 is marked superseded.
+
+## T-070 — Stricter face fit at enrollment, tunable without rebuilding [pending]
+
+- Refs: AC-050, AC-051, AC-052, ASM-018
+- Files: crates/engine-adapter-face/src/enrollment_quality.rs, crates/engine-adapter-face/src/ffi.rs, crates/openhello-gui/ui/capture.slint, README.md
+- Model: claude-sonnet-5
+- Effort: medium
+- Notes: face height 42%-68% of the frame and center within 10%; enrollment only, authentication untouched; thresholds overridable by validated environment variables; the window's guide oval matches the target size.
+
+## T-071 — Original wording for the window and the CLI [pending]
+
+- Refs: AC-060, ASM-022
+- Files: crates/openhello-gui-core/src/strings.rs, crates/openhello-gui-core/tests/strings.rs, crates/openhello-cli/src/lib.rs
+- Model: claude-sonnet-5
+- Effort: low
+- Notes: depends on T-070. Replaces the sentences taken from Windows Hello with original ones (a given copy deck), in the window and in the CLI guidance.
+

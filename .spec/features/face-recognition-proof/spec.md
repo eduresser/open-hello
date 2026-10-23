@@ -58,19 +58,19 @@ never asks me to move my head.
 #### AC-050 — A face too far from the camera is discarded with guidance
 
 - **Given** an enrollment session is capturing frames
-- **When** the detected face is shorter than 30% of the frame height
+- **When** the detected face is shorter than 42% of the frame height
 - **Then** the frame is discarded and the verdict tells the client the face is too far
 
 #### AC-051 — A face too close to the camera is discarded with guidance
 
 - **Given** an enrollment session is capturing frames
-- **When** the detected face is taller than 85% of the frame height
+- **When** the detected face is taller than 68% of the frame height
 - **Then** the frame is discarded and the verdict tells the client the face is too close
 
 #### AC-052 — An off-center face is discarded with a direction
 
 - **Given** an enrollment session is capturing frames
-- **When** the center of the detected face is more than 20% of the frame size away from the frame center
+- **When** the center of the detected face is more than 10% of the frame size away from the frame center
 - **Then** the frame is discarded and the verdict tells the client to move left, right, up or down, along the
   larger offset
 
@@ -216,7 +216,7 @@ logs, so that debugging or crash output cannot leak my biometric data.
 | ASM-004 | Illumination of the IR emitter can be established generically, without a per-model payload. | confirmed | The Microsoft XU `{0f3f95dc-2632-4c4e-92c9-a04782f43bc8}` (selector 6, face-auth) has the mode in byte 2: on `2b7e:c757` the camera comes up in mode 1 (emitter off, ambient frames of luma 31-148) after every power-up or reset, while default and maximum are mode 2 (alternating lit/unlit, luma ~53 vs ~7, IR dot blinking). Owner rule (2026-10-21, as Windows Hello): a controllable emitter is on whenever the camera is in use and capture fails closed otherwise. The Sensor Adapter therefore reads the control by GUID before every capture, writes mode 2 with read-back confirmation when the current mode is not 2 (no environment switch; `OPENHELLO_IR_EMITTER_ALLOW_WRITE` is obsolete and ignored), and admits frames only from a stream that alternates lit/unlit; cameras without a controllable emitter keep the brightness rule, and a vendor XU from `OPENHELLO_IR_EMITTER` is still honoured. Write with read-back verified by hand on hardware via `UVCIOC_CTRL_QUERY`; some cameras are reported to hang on writes. |
 | ASM-005 | A printed photo of an enrolled user can be accepted by `Verify`/`Identify` in v1a. | confirmed | Accepted by the product owner. The micro-motion gate was removed after measurement on `2b7e:c757`: it rejected 39% of 10-frame windows of a still real face and only 15% of a propped small photo, because landmark jitter normalized by eye distance grows for small faces. Screens are already blank in IR. Laser prints are a known weakness of NIR systems (Idiap, 97-100% success). |
 | ASM-017 | The numeric defaults (20 degree yaw limit from the five-landmark heuristic, 200 ms spacing, 20 s window) let a still owner reach 6 samples without stalling, while the verify threshold stays at the existing CBSR NIR calibration (target FAR 2e-4). | open | Chosen from the +-15 degree Windows requirement plus margin for landmark jitter; measure on `2b7e:c757` with `OPENHELLO_SCORE_LOG=1` before treating as final. |
-| ASM-018 | The distance and centering limits (face height 30%-85% of the frame, center within 20%) fit the owner at 40-60 cm, and the raw IR frame is not mirrored, so a face on the left of the image means the user should move left. | open | Initial values; confirm on `2b7e:c757` in the VM and adjust. If the driver mirrors the image the left/right verdicts must swap. |
+| ASM-018 | The enrollment-only fit limits (face height 42%-68% of the frame, center within 10%) match the guide oval of the window (about 55% of the preview height) and fit the owner at 40-60 cm; the raw IR frame is not mirrored. | open | The first limits (30%-85%, 20%) let a barely fitted face pass in the VM test (2026-10-23), so they were tightened. Authentication is not affected: only enrollment applies them. They can be tuned without rebuilding with `OPENHELLO_ENROLL_MIN_FACE`, `OPENHELLO_ENROLL_MAX_FACE` and `OPENHELLO_ENROLL_MAX_OFFSET`. |
 | ASM-019 | The face-brightness limits (40 and 215 of 255) separate a usable IR face from an unlit or saturated one on this camera. | open | Initial values; measure the owner's face mean with the emitter on at 40-60 cm and in a bright room, then adjust. |
 
 ## Open questions
