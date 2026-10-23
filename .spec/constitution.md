@@ -31,6 +31,10 @@ Keys and passwords come from environment variables or TPM/PKCS#11 storage, never
 A face/fingerprint template only authorizes use of an existing TPM-sealed asymmetric key. It
 never becomes, by itself, a credential accepted anywhere outside the local matching daemon.
 
+Scope: the face. The fingerprint login is decided by the system's own `pam_fprintd`, which answers yes or no
+to PAM and is not tied to a TPM key; open-hello only manages the enrolled fingers (owner decision 2026-10-22,
+`fingerprint-login-v3` ASM-019).
+
 - check(test): @principle:P-003
 
 ## P-004 [MUST] Private key material never leaves the TPM in plaintext

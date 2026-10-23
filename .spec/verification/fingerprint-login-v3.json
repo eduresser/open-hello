@@ -1,7 +1,7 @@
 {
   "feature": "fingerprint-login-v3",
-  "timestamp": "2026-10-22T23:37:30.035Z",
-  "gitRev": "fa62917",
+  "timestamp": "2026-10-23T00:09:44.013Z",
+  "gitRev": "ae882fd",
   "command": "cargo test",
   "reporter": "exitcode",
   "exitCode": 0,
