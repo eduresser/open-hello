@@ -87,6 +87,7 @@ impl zbus::DBusError for ServiceError {
 pub enum Action {
     EnrollBegin,
     EnrollCapture,
+    EnrollFrame,
     EnrollCommit,
     EnrollDiscard,
     Purge,
@@ -97,6 +98,7 @@ impl Action {
         match self {
             Action::EnrollBegin => "io.openhello.biometrics.enroll-begin",
             Action::EnrollCapture => "io.openhello.biometrics.enroll-capture",
+            Action::EnrollFrame => "io.openhello.biometrics.enroll-frame",
             Action::EnrollCommit => "io.openhello.biometrics.enroll-commit",
             Action::EnrollDiscard => "io.openhello.biometrics.enroll-discard",
             Action::Purge => "io.openhello.biometrics.purge",
@@ -288,6 +290,23 @@ fn failure(logger: &Logger, error: DaemonError) -> ServiceError {
     }
 }
 
+fn sealed_memory_file(pixels: &[u8]) -> std::io::Result<std::fs::File> {
+    use std::os::fd::FromRawFd;
+    use std::os::unix::fs::FileExt;
+
+    let raw = unsafe { libc::memfd_create(c"openhello-enroll-frame".as_ptr(), libc::MFD_CLOEXEC | libc::MFD_ALLOW_SEALING) };
+    if raw < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let file = unsafe { std::fs::File::from_raw_fd(raw) };
+    file.write_all_at(pixels, 0)?;
+    let seals = libc::F_SEAL_WRITE | libc::F_SEAL_SHRINK | libc::F_SEAL_GROW | libc::F_SEAL_SEAL;
+    if unsafe { libc::fcntl(raw, libc::F_ADD_SEALS, seals) } < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(file)
+}
+
 async fn resolve_caller(conn: &Connection, header: &Header<'_>) -> fdo::Result<Caller> {
     let sender = header.sender().ok_or_else(|| fdo::Error::AuthFailed("message has no sender".into()))?;
     let dbus = fdo::DBusProxy::new(conn).await?;
@@ -319,6 +338,20 @@ impl Service {
         self.authorize(conn, &header, Action::EnrollCapture, uid).await?;
         let progress = self.with_core(move |core| core.enroll_capture(&handle)).await?;
         Ok((progress.verdict.as_str().into(), progress.state.as_str().into(), progress.filled, progress.required))
+    }
+
+    async fn enroll_frame(
+        &self,
+        handle: String,
+        #[zbus(connection)] conn: &Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> Result<(zbus::zvariant::OwnedFd, u32, u32), ServiceError> {
+        let uid = self.session_uid(&handle).await?;
+        self.authorize(conn, &header, Action::EnrollFrame, uid).await?;
+        let frame = self.with_core(move |core| core.enroll_frame(&handle)).await?;
+        let (width, height) = (frame.width, frame.height);
+        let file = sealed_memory_file(&frame.pixels).map_err(|error| failure(&self.logger, DaemonError::Backend(format!("preview memory file: {error}"))))?;
+        Ok((std::os::fd::OwnedFd::from(file).into(), width, height))
     }
 
     async fn enroll_commit(

@@ -16,8 +16,7 @@
 - Effort: medium
 - Notes: distinct D-Bus error names for camera busy, stuck stream, no camera and TPM unavailable; detail stays in the journal.
 
-## T-062 — Owner-only preview frame over a memory file descriptor [pending]
-
+## T-062 — Owner-only preview frame over a memory file descriptor [done]
 - Refs: AC-063, AC-064
 - Files: crates/openhellod/src/dbus_service.rs, crates/openhellod/src/core.rs, crates/openhellod/io.openhello.Biometrics1.policy, crates/openhellod/tests/dbus_service.rs
 - Model: claude-sonnet-5

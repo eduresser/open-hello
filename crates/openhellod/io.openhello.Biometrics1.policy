@@ -13,12 +13,22 @@
       <allow_inactive>no</allow_inactive>
       <allow_active>auth_self_keep</allow_active>
     </defaults>
-    <annotate key="org.freedesktop.policykit.imply">io.openhello.biometrics.enroll-capture io.openhello.biometrics.enroll-commit io.openhello.biometrics.enroll-discard</annotate>
+    <annotate key="org.freedesktop.policykit.imply">io.openhello.biometrics.enroll-capture io.openhello.biometrics.enroll-frame io.openhello.biometrics.enroll-commit io.openhello.biometrics.enroll-discard</annotate>
   </action>
 
   <action id="io.openhello.biometrics.enroll-capture">
     <description>Capture a face sample during enrollment</description>
     <message>Authentication is required to capture a face sample for this account</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_self_keep</allow_active>
+    </defaults>
+  </action>
+
+  <action id="io.openhello.biometrics.enroll-frame">
+    <description>Preview the face frame during enrollment</description>
+    <message>Authentication is required to preview the face sample captured for this account</message>
     <defaults>
       <allow_any>no</allow_any>
       <allow_inactive>no</allow_inactive>
