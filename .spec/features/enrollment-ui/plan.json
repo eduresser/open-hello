@@ -1,0 +1,132 @@
+{
+  "runId": "open-hello-enrollment-ui-mvl2oivy",
+  "feature": "enrollment-ui",
+  "agent": "claude",
+  "mode": "sequential",
+  "parallelize": null,
+  "forcedModel": null,
+  "forcedEffort": null,
+  "generatedAt": "2026-10-23 14:35",
+  "workBranch": "spec/enrollment-ui",
+  "baseDir": ".spec/features/enrollment-ui",
+  "specDir": ".spec",
+  "repoName": "open-hello",
+  "logsDir": "../onp-worktrees/open-hello-enrollment-ui-logs",
+  "waves": [],
+  "tracks": [],
+  "sequentialTasks": [
+    {
+      "id": "T-060",
+      "title": "Status query on both daemons",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "files": [
+        "crates/openhellod/src/dbus_service.rs",
+        "crates/openhellod/src/core.rs",
+        "crates/openhello-keyd/src/dbus_service.rs",
+        "crates/openhello-cli/src/dbus_client.rs"
+      ],
+      "refs": [
+        "AC-056",
+        "AC-057"
+      ]
+    },
+    {
+      "id": "T-061",
+      "title": "Typed failure causes over D-Bus",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "files": [
+        "crates/openhellod/src/backends.rs",
+        "crates/openhellod/src/dbus_service.rs",
+        "crates/openhello-cli/src/dbus_client.rs"
+      ],
+      "refs": [
+        "AC-069"
+      ]
+    },
+    {
+      "id": "T-062",
+      "title": "Owner-only preview frame over a memory file descriptor",
+      "model": "claude-sonnet-5",
+      "effort": "high",
+      "files": [
+        "crates/openhellod/src/dbus_service.rs",
+        "crates/openhellod/src/core.rs",
+        "crates/openhellod/io.openhello.Biometrics1.policy",
+        "crates/openhellod/tests/dbus_service.rs"
+      ],
+      "refs": [
+        "AC-063",
+        "AC-064"
+      ]
+    },
+    {
+      "id": "T-063",
+      "title": "GUI core: wizard state machine and wording",
+      "model": "claude-sonnet-5",
+      "effort": "high",
+      "files": [
+        "crates/openhello-gui-core/Cargo.toml",
+        "crates/openhello-gui-core/src/lib.rs",
+        "crates/openhello-gui-core/src/wizard.rs",
+        "crates/openhello-gui-core/src/strings.rs"
+      ],
+      "refs": [
+        "AC-058",
+        "AC-059",
+        "AC-060",
+        "AC-061",
+        "AC-062"
+      ]
+    },
+    {
+      "id": "T-064",
+      "title": "GUI core: daemon client, test and remove",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "files": [
+        "crates/openhello-gui-core/src/client.rs",
+        "crates/openhello-gui-core/src/manage.rs"
+      ],
+      "refs": [
+        "AC-065",
+        "AC-066"
+      ]
+    },
+    {
+      "id": "T-065",
+      "title": "GTK 4 / libadwaita shell",
+      "model": "claude-sonnet-5",
+      "effort": "high",
+      "files": [
+        "crates/openhello-gui/Cargo.toml",
+        "crates/openhello-gui/src/main.rs",
+        "crates/openhello-gui/src/window.rs",
+        "crates/openhello-gui/src/capture_view.rs",
+        "Cargo.toml"
+      ],
+      "refs": [
+        "AC-058",
+        "AC-059",
+        "AC-062"
+      ]
+    },
+    {
+      "id": "T-066",
+      "title": "Desktop entry and optional installer step",
+      "model": "claude-sonnet-5",
+      "effort": "low",
+      "files": [
+        "packaging/openhello.desktop",
+        "scripts/install.sh"
+      ],
+      "refs": [
+        "AC-067",
+        "AC-068"
+      ]
+    }
+  ],
+  "doneTasks": [],
+  "warnings": []
+}
