@@ -1,3 +1,4 @@
+use crate::manage::TestOutcome;
 use crate::wizard::FailureCause;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,9 +17,8 @@ pub enum Text {
     WelcomeTitle,
     WelcomeBody,
     BlockedTitle,
-    GetStarted,
+    SetUp,
     Next,
-    Close,
     Cancel,
     TryAgain,
     IdentityTitle,
@@ -62,21 +62,27 @@ pub enum Text {
     Testing,
     Recognized,
     NotRecognized,
-    RemoveFace,
-    RemoveFaceData,
-    RemoveConfirmTitle,
-    RemoveConfirmBody,
+    DeleteFace,
+    DeleteFaceData,
+    DeleteConfirmTitle,
+    DeleteConfirmBody,
     SetUpAgain,
+    TestFailedPrefix,
+    ReasonCameraBusy,
+    ReasonSensorStuck,
+    ReasonNoCamera,
+    ReasonTpm,
+    ReasonAuthDenied,
+    ReasonOther,
 }
 
 impl Text {
-    pub const ALL: [Text; 54] = [
+    pub const ALL: [Text; 60] = [
         Text::WelcomeTitle,
         Text::WelcomeBody,
         Text::BlockedTitle,
-        Text::GetStarted,
+        Text::SetUp,
         Text::Next,
-        Text::Close,
         Text::Cancel,
         Text::TryAgain,
         Text::IdentityTitle,
@@ -120,11 +126,18 @@ impl Text {
         Text::Testing,
         Text::Recognized,
         Text::NotRecognized,
-        Text::RemoveFace,
-        Text::RemoveFaceData,
-        Text::RemoveConfirmTitle,
-        Text::RemoveConfirmBody,
+        Text::DeleteFace,
+        Text::DeleteFaceData,
+        Text::DeleteConfirmTitle,
+        Text::DeleteConfirmBody,
         Text::SetUpAgain,
+        Text::TestFailedPrefix,
+        Text::ReasonCameraBusy,
+        Text::ReasonSensorStuck,
+        Text::ReasonNoCamera,
+        Text::ReasonTpm,
+        Text::ReasonAuthDenied,
+        Text::ReasonOther,
     ];
 
     fn english(self) -> &'static str {
@@ -132,16 +145,15 @@ impl Text {
             Text::WelcomeTitle => "Set up face recognition",
             Text::WelcomeBody => "Sign in with your face instead of typing your password. Setup takes a few seconds, your face data stays on this computer and your password keeps working.",
             Text::BlockedTitle => "Face recognition is not available on this computer",
-            Text::GetStarted => "Get started",
+            Text::SetUp => "Set up",
             Text::Next => "Next",
-            Text::Close => "Close",
             Text::Cancel => "Cancel",
             Text::TryAgain => "Try again",
             Text::IdentityTitle => "Confirm it’s you",
             Text::IdentityBody => "Enter your password when the system asks for it.",
             Text::CaptureTitle => "Look at the camera",
             Text::DoneTitle => "Face recognition is ready",
-            Text::DoneBody => "You can now sign in with your face. If recognition fails, your password still works.",
+            Text::DoneBody => "Test it now to make sure it recognizes you.",
             Text::GuidanceAccepted => "Hold still and look at the camera",
             Text::GuidanceNoFace => "No face found. Center your face in the oval",
             Text::GuidanceMoveLeft => "Move a little to your left",
@@ -176,13 +188,20 @@ impl Text {
             Text::ManageBody => "Face recognition is set up for your account.",
             Text::TestFace => "Test",
             Text::Testing => "Look at the camera…",
-            Text::Recognized => "Recognized",
-            Text::NotRecognized => "Not recognized",
-            Text::RemoveFace => "Remove",
-            Text::RemoveFaceData => "Remove face data",
-            Text::RemoveConfirmTitle => "Remove face recognition?",
-            Text::RemoveConfirmBody => "This erases your face data and your login key. You will use your password until you set it up again.",
+            Text::Recognized => "It recognized you.",
+            Text::NotRecognized => "Your face was not recognized. Test again or set it up again.",
+            Text::DeleteFace => "Delete",
+            Text::DeleteFaceData => "Delete face data",
+            Text::DeleteConfirmTitle => "Delete face recognition?",
+            Text::DeleteConfirmBody => "This erases your face data and your login key. You will use your password until you set it up again.",
             Text::SetUpAgain => "Set up again",
+            Text::TestFailedPrefix => "The test could not run: ",
+            Text::ReasonCameraBusy => "the camera is in use",
+            Text::ReasonSensorStuck => "the infrared sensor is not responding",
+            Text::ReasonNoCamera => "no infrared camera was found",
+            Text::ReasonTpm => "the security chip is unavailable",
+            Text::ReasonAuthDenied => "the system did not authorize the request",
+            Text::ReasonOther => "something went wrong",
         }
     }
 }
@@ -219,6 +238,14 @@ impl Strings {
         self.get(failure_texts(cause).0)
     }
 
+    pub fn test_message(&self, outcome: &TestOutcome) -> String {
+        match outcome {
+            TestOutcome::Recognized => self.get(Text::Recognized).into(),
+            TestOutcome::NotRecognized => self.get(Text::NotRecognized).into(),
+            TestOutcome::Failed(error) => format!("{}{}.", self.get(Text::TestFailedPrefix), self.get(reason_text(error.kind.into()))),
+        }
+    }
+
     pub fn failure_explanation(&self, cause: FailureCause) -> &'static str {
         self.get(failure_texts(cause).1)
     }
@@ -240,6 +267,17 @@ fn guidance_text(verdict: &str) -> Text {
         "blurred" => Text::GuidanceBlurred,
         "occluded" => Text::GuidanceOccluded,
         _ => Text::GuidanceNeutral,
+    }
+}
+
+fn reason_text(cause: FailureCause) -> Text {
+    match cause {
+        FailureCause::CameraBusy => Text::ReasonCameraBusy,
+        FailureCause::SensorStuck => Text::ReasonSensorStuck,
+        FailureCause::NoCamera => Text::ReasonNoCamera,
+        FailureCause::TpmUnavailable => Text::ReasonTpm,
+        FailureCause::AuthDenied => Text::ReasonAuthDenied,
+        FailureCause::Timeout | FailureCause::KeyFailed | FailureCause::Other => Text::ReasonOther,
     }
 }
 

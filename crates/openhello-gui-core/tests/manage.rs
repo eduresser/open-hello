@@ -101,3 +101,12 @@ fn a_denied_reauthentication_is_reported_as_a_failure_and_the_face_stays() {
     assert_eq!(log.borrow().purges, 1);
     assert!(manager.status().unwrap().face);
 }
+
+// @spec:AC-074
+#[test]
+fn testing_again_asks_the_daemon_again_each_time() {
+    let (mut manager, log) = manage(Ok(false), None);
+    assert_eq!(manager.test(), TestOutcome::NotRecognized);
+    assert_eq!(manager.test(), TestOutcome::NotRecognized);
+    assert_eq!(log.borrow().verifies, 2);
+}

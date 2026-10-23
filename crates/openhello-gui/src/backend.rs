@@ -19,14 +19,14 @@ pub enum Command {
 }
 
 pub enum Event {
-    Welcome { blocked: Option<FailureCause>, removable: bool },
+    Welcome { blocked: Option<FailureCause> },
     Identity,
     CaptureStarted,
     Capture(CaptureView),
     Done,
     Failed(FailureCause),
-    Manage,
-    TestResult(bool),
+    Manage { blocked: Option<FailureCause> },
+    TestResult(TestOutcome),
 }
 
 pub struct Backend {
@@ -135,13 +135,13 @@ impl<C: EnrollClient + ManageClient, E: Fn(Event) -> bool> Worker<'_, C, E> {
 
     fn set_face(&mut self, face: bool) {
         self.face = face;
-        self.flow.set_face(face);
     }
 
     fn home(&mut self) {
         self.begun = false;
         if self.face {
-            self.send(Event::Manage);
+            let blocked = self.flow.probe();
+            self.send(Event::Manage { blocked });
             return;
         }
         self.flow.start();
@@ -184,11 +184,8 @@ impl<C: EnrollClient + ManageClient, E: Fn(Event) -> bool> Worker<'_, C, E> {
     }
 
     fn test(&mut self) {
-        match self.manager.test() {
-            TestOutcome::Recognized => self.send(Event::TestResult(true)),
-            TestOutcome::NotRecognized => self.send(Event::TestResult(false)),
-            TestOutcome::Failed(error) => self.send(Event::Failed(error.kind.into())),
-        }
+        let outcome = self.manager.test();
+        self.send(Event::TestResult(outcome));
     }
 
     fn remove(&mut self) {
@@ -259,7 +256,7 @@ impl<C: EnrollClient + ManageClient, E: Fn(Event) -> bool> Worker<'_, C, E> {
     }
 
     fn welcome(&self, blocked: Option<FailureCause>) -> Event {
-        Event::Welcome { blocked, removable: self.flow.removal_offered() }
+        Event::Welcome { blocked }
     }
 
     fn send(&mut self, event: Event) {
@@ -384,18 +381,18 @@ mod tests {
 
     fn name(event: &Event) -> &'static str {
         match event {
-            Event::Welcome { blocked: None, removable: false } => "welcome",
-            Event::Welcome { blocked: None, removable: true } => "welcome-removable",
-            Event::Welcome { blocked: Some(_), removable: false } => "blocked",
-            Event::Welcome { blocked: Some(_), removable: true } => "blocked-removable",
+            Event::Welcome { blocked: None } => "welcome",
+            Event::Welcome { blocked: Some(_) } => "blocked",
             Event::Identity => "identity",
             Event::CaptureStarted => "capture",
             Event::Capture(_) => "frame",
             Event::Done => "done",
             Event::Failed(_) => "failed",
-            Event::Manage => "manage",
-            Event::TestResult(true) => "recognized",
-            Event::TestResult(false) => "not-recognized",
+            Event::Manage { blocked: None } => "manage",
+            Event::Manage { blocked: Some(_) } => "manage-blocked",
+            Event::TestResult(TestOutcome::Recognized) => "recognized",
+            Event::TestResult(TestOutcome::NotRecognized) => "not-recognized",
+            Event::TestResult(TestOutcome::Failed(_)) => "test-failed",
         }
     }
 
@@ -449,7 +446,7 @@ mod tests {
     #[test]
     fn test_reports_recognized_for_an_enrolled_user() {
         let mut harness = harness(DemoMode { enrolled: true, ..DemoMode::default() });
-        assert_eq!(names(&harness.until(|event| matches!(event, Event::Manage))), ["manage"]);
+        assert_eq!(names(&harness.until(|event| matches!(event, Event::Manage { .. }))), ["manage"]);
         harness.send(Command::Test);
         let result = harness.until(|event| matches!(event, Event::TestResult(_)));
         harness.backend.shutdown();
@@ -460,7 +457,7 @@ mod tests {
     #[test]
     fn remove_erases_the_face_and_returns_to_the_not_set_up_welcome() {
         let mut harness = harness(DemoMode { enrolled: true, ..DemoMode::default() });
-        harness.until(|event| matches!(event, Event::Manage));
+        harness.until(|event| matches!(event, Event::Manage { .. }));
         harness.send(Command::Remove);
         let after = harness.until(|event| matches!(event, Event::Welcome { .. }));
         harness.backend.shutdown();
@@ -493,17 +490,36 @@ mod tests {
     }
 
     // @spec:AC-071
+    // @spec:AC-073
     #[test]
-    fn a_blocked_welcome_reached_through_set_up_again_offers_removal_until_it_is_done() {
+    fn a_blocked_computer_with_a_face_shows_the_main_screen_with_the_cause_and_still_deletes() {
         let mut harness = harness(DemoMode { enrolled: true, blocked: true, ..DemoMode::default() });
-        harness.until(|event| matches!(event, Event::Manage));
-        harness.send(Command::Start);
-        let blocked = harness.until(|event| matches!(event, Event::Welcome { .. }));
+        let first = harness.until(|event| matches!(event, Event::Manage { .. }));
         harness.send(Command::Remove);
         let after = harness.until(|event| matches!(event, Event::Welcome { .. }));
         harness.backend.shutdown();
-        assert_eq!(names(&blocked), ["blocked-removable"]);
+        assert_eq!(names(&first), ["manage-blocked"]);
         assert_eq!(names(&after), ["blocked"]);
+    }
+
+    // @spec:AC-073
+    #[test]
+    fn the_main_screen_of_a_working_computer_is_not_blocked() {
+        let mut harness = harness(DemoMode { enrolled: true, ..DemoMode::default() });
+        let first = harness.until(|event| matches!(event, Event::Manage { .. }));
+        harness.backend.shutdown();
+        assert_eq!(names(&first), ["manage"]);
+    }
+
+    // @spec:AC-058
+    #[test]
+    fn set_up_again_from_the_main_screen_goes_straight_to_the_identity_step() {
+        let mut harness = harness(DemoMode { enrolled: true, ..DemoMode::default() });
+        harness.until(|event| matches!(event, Event::Manage { .. }));
+        harness.send(Command::Start);
+        let seen = harness.until(|event| matches!(event, Event::Done));
+        harness.backend.shutdown();
+        assert_eq!(names(&seen), ["identity", "capture", "frame", "done"]);
     }
 
     // @spec:AC-071
@@ -515,5 +531,56 @@ mod tests {
         let after = harness.until(|event| matches!(event, Event::Failed(_)));
         harness.backend.shutdown();
         assert_eq!(names(&after), ["failed"]);
+    }
+
+    fn cycling_harness(enrolled: bool) -> Harness {
+        harness(DemoMode { enrolled, cycle_tests: true, ..DemoMode::default() })
+    }
+
+    fn test_once(harness: &Harness) -> Event {
+        harness.send(Command::Test);
+        harness.until(|event| matches!(event, Event::TestResult(_) | Event::Failed(_))).pop().expect("a result arrives")
+    }
+
+    // @spec:AC-065
+    // @spec:AC-072
+    #[test]
+    fn the_final_screen_runs_the_test_and_shows_the_result_in_place() {
+        let mut harness = cycling_harness(false);
+        harness.until(|event| matches!(event, Event::Welcome { .. }));
+        harness.send(Command::Start);
+        harness.until(|event| matches!(event, Event::Done));
+        let result = test_once(&harness);
+        harness.backend.shutdown();
+        assert_eq!(name(&result), "recognized");
+        assert!(harness.events.try_recv().is_err());
+    }
+
+    // @spec:AC-074
+    #[test]
+    fn a_test_that_is_not_recognized_or_cannot_run_stays_on_the_page_and_can_be_repeated() {
+        let mut harness = cycling_harness(true);
+        harness.until(|event| matches!(event, Event::Manage { .. }));
+        let results = [test_once(&harness), test_once(&harness), test_once(&harness), test_once(&harness)];
+        harness.backend.shutdown();
+        let seen: Vec<_> = results.iter().map(name).collect();
+        assert_eq!(seen, ["recognized", "not-recognized", "test-failed", "recognized"]);
+        assert!(matches!(&results[2], Event::TestResult(TestOutcome::Failed(error)) if error.kind == ClientErrorKind::CameraBusy));
+        assert!(harness.events.try_recv().is_err());
+    }
+
+    // @spec:AC-074
+    #[test]
+    fn set_up_again_after_a_failed_test_on_the_final_screen_restarts_the_enrollment() {
+        let mut harness = cycling_harness(false);
+        harness.until(|event| matches!(event, Event::Welcome { .. }));
+        harness.send(Command::Start);
+        harness.until(|event| matches!(event, Event::Done));
+        test_once(&harness);
+        assert_eq!(name(&test_once(&harness)), "not-recognized");
+        harness.send(Command::Start);
+        let again = harness.until(|event| matches!(event, Event::Done));
+        harness.backend.shutdown();
+        assert_eq!(names(&again), ["identity", "capture", "frame", "done"]);
     }
 }

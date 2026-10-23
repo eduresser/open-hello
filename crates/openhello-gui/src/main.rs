@@ -66,10 +66,7 @@ fn wire(window: &MainWindow, commands: &Sender<Command>) {
     window.on_cancel(sender(commands, || Command::Cancel));
     window.on_set_up_again(busy_sender(window, commands, false, || Command::Start));
     window.on_test(busy_sender(window, commands, true, || Command::Test));
-    window.on_remove(busy_sender(window, commands, false, || Command::Remove));
-    window.on_finish(|| {
-        let _ = slint::quit_event_loop();
-    });
+    window.on_delete(busy_sender(window, commands, false, || Command::Remove));
 }
 
 fn sender(commands: &Sender<Command>, command: fn() -> Command) -> impl Fn() + 'static {
@@ -82,10 +79,12 @@ fn sender(commands: &Sender<Command>, command: fn() -> Command) -> impl Fn() + '
 fn busy_sender(window: &MainWindow, commands: &Sender<Command>, testing: bool, command: fn() -> Command) -> impl Fn() + 'static {
     let (weak, send) = (window.as_weak(), sender(commands, command));
     move || {
-        if let Some(window) = weak.upgrade() {
-            window.set_busy(true);
-            window.set_testing(testing);
+        let Some(window) = weak.upgrade() else { return };
+        if window.get_busy() {
+            return;
         }
+        window.set_busy(true);
+        window.set_testing(testing);
         send();
     }
 }

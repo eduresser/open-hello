@@ -107,3 +107,10 @@
 - Model: claude-sonnet-5
 - Effort: medium
 - Notes: depends on T-073. Product owner request 2026-10-23: a discreet "Remove face data" link on the welcome screen (only when the status says a face is set up) and on every error screen, opening the same confirmation overlay as the Manage page (now shared in `confirm.slint`); the purge needs no camera; on success the flow resets and starts again, on failure the error screen shows the cause and keeps the link.
+
+## T-075 — Main screen, Test and Set up again, test results shown in place [done]
+- Refs: AC-058, AC-065, AC-066, AC-070, AC-071, AC-072, AC-073, AC-074
+- Files: crates/openhello-gui-core/src/wizard.rs, crates/openhello-gui-core/src/strings.rs, crates/openhello-gui-core/tests/strings.rs, crates/openhello-gui-core/tests/manage.rs, crates/openhello-gui-core/tests/wizard.rs, crates/openhello-gui/src/backend.rs, crates/openhello-gui/src/view.rs, crates/openhello-gui/src/main.rs, crates/openhello-gui/src/demo.rs, crates/openhello-gui/src/options.rs, crates/openhello-gui/ui/app.slint, crates/openhello-gui/ui/components.slint, crates/openhello-gui/ui/texts.slint, crates/openhello-gui/ui/done.slint, crates/openhello-gui/ui/manage.slint, crates/openhello-gui/ui/welcome.slint, crates/openhello-gui/ui/confirm.slint, crates/openhello-gui/ui/error.slint
+- Model: claude-sonnet-5
+- Effort: high
+- Notes: depends on T-074. Product owner decision 2026-10-23: three states (welcome without a face with a single Set up button; main screen with a face with Test, Set up again and Delete face data; screen after setup with Test and Set up again); no Close button; a test always returns to the main screen with the result at its top (never a full-screen error); the main screen opens with the cause and Test and Set up again disabled when recognition is unavailable, Delete stays; Set up again goes straight to the identity step; "Remove" becomes "Delete" in every text; the welcome screen no longer offers deletion. Demo flags: `--demo-test` cycles recognized, not recognized and camera in use; `--demo-enrolled` opens the main screen; with `--demo-blocked` it opens blocked.

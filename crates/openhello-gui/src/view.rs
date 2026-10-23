@@ -1,4 +1,4 @@
-use openhello_gui_core::{FailureCause, Strings, Text};
+use openhello_gui_core::{FailureCause, Strings, TestOutcome, Text};
 use slint::{ComponentHandle, Image, Rgb8Pixel, SharedPixelBuffer, SharedString};
 
 use crate::backend::Event;
@@ -11,8 +11,7 @@ pub fn init(window: &MainWindow, strings: &Strings) {
     texts.set_window_title(get(Text::ManageTitle));
     texts.set_welcome_title(get(Text::WelcomeTitle));
     texts.set_welcome_body(get(Text::WelcomeBody));
-    texts.set_get_started(get(Text::GetStarted));
-    texts.set_close(get(Text::Close));
+    texts.set_set_up(get(Text::SetUp));
     texts.set_cancel(get(Text::Cancel));
     texts.set_try_again(get(Text::TryAgain));
     texts.set_identity_title(get(Text::IdentityTitle));
@@ -23,23 +22,23 @@ pub fn init(window: &MainWindow, strings: &Strings) {
     texts.set_manage_body(get(Text::ManageBody));
     texts.set_test(get(Text::TestFace));
     texts.set_testing(get(Text::Testing));
-    texts.set_remove(get(Text::RemoveFace));
-    texts.set_remove_data(get(Text::RemoveFaceData));
-    texts.set_remove_confirm_title(get(Text::RemoveConfirmTitle));
-    texts.set_remove_confirm_body(get(Text::RemoveConfirmBody));
+    texts.set_delete(get(Text::DeleteFace));
+    texts.set_delete_data(get(Text::DeleteFaceData));
+    texts.set_delete_confirm_title(get(Text::DeleteConfirmTitle));
+    texts.set_delete_confirm_body(get(Text::DeleteConfirmBody));
     texts.set_set_up_again(get(Text::SetUpAgain));
 }
 
 pub fn apply(window: &MainWindow, strings: &Strings, event: Event) {
     match event {
-        Event::Welcome { blocked, removable } => show_welcome(window, strings, blocked, removable),
+        Event::Welcome { blocked } => show_welcome(window, strings, blocked),
         Event::Identity => show(window, Page::Identity),
         Event::CaptureStarted => show_capture_start(window),
         Event::Capture(view) => show_capture(window, view),
         Event::Done => show(window, Page::Done),
         Event::Failed(cause) => show_failure(window, strings, cause),
-        Event::Manage => show(window, Page::Manage),
-        Event::TestResult(recognized) => show_test_result(window, strings, recognized),
+        Event::Manage { blocked } => show_manage(window, strings, blocked),
+        Event::TestResult(outcome) => show_test_result(window, strings, &outcome),
     }
 }
 
@@ -51,14 +50,22 @@ fn show(window: &MainWindow, page: Page) {
     window.set_confirming(false);
 }
 
-fn show_welcome(window: &MainWindow, strings: &Strings, cause: Option<FailureCause>, removable: bool) {
-    window.set_removable(removable);
+fn set_blocked(window: &MainWindow, strings: &Strings, cause: Option<FailureCause>) {
     window.set_blocked(cause.is_some());
     if let Some(cause) = cause {
         window.set_blocked_title(strings.blocked_title().into());
         window.set_blocked_body(strings.failure_explanation(cause).into());
     }
+}
+
+fn show_welcome(window: &MainWindow, strings: &Strings, cause: Option<FailureCause>) {
+    set_blocked(window, strings, cause);
     show(window, Page::Welcome);
+}
+
+fn show_manage(window: &MainWindow, strings: &Strings, cause: Option<FailureCause>) {
+    set_blocked(window, strings, cause);
+    show(window, Page::Manage);
 }
 
 fn show_failure(window: &MainWindow, strings: &Strings, cause: FailureCause) {
@@ -89,9 +96,7 @@ fn image_of(buffer: SharedPixelBuffer<Rgb8Pixel>) -> Image {
     Image::from_rgb8(buffer)
 }
 
-fn show_test_result(window: &MainWindow, strings: &Strings, recognized: bool) {
-    let text = if recognized { Text::Recognized } else { Text::NotRecognized };
-    window.set_busy(false);
-    window.set_testing(false);
-    window.set_test_result(strings.get(text).into());
+fn show_test_result(window: &MainWindow, strings: &Strings, outcome: &TestOutcome) {
+    show_manage(window, strings, None);
+    window.set_test_result(strings.test_message(outcome).into());
 }

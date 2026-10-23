@@ -1,54 +1,48 @@
-import { Button, Palette, Spinner } from "std-widgets.slint";
-import { ActionButton, Body, ButtonRow, Brand, Column, Heading } from "components.slint";
+import { Button } from "std-widgets.slint";
+import { ActionButton, Body, ButtonRow, Column, Heading, LinkButton, TestStatus } from "components.slint";
 import { T } from "texts.slint";
 
 export component ManagePage inherits Rectangle {
     in property <bool> busy;
     in property <bool> testing;
     in property <string> result;
+    in property <bool> blocked;
+    in property <string> blocked-title;
+    in property <string> blocked-body;
     in-out property <bool> confirming;
     callback test();
-    callback remove();
     callback set-up-again();
 
+    property <bool> usable: !root.busy && !root.confirming && !root.blocked;
+
     Column {
-        Heading { text: T.window-title; }
-        Body { text: T.manage-body; }
-        HorizontalLayout {
-            alignment: center;
-            spacing: 12px;
-            min-height: 40px;
-            if root.busy: Spinner {
-                indeterminate: true;
-                width: 28px;
-                height: 28px;
-            }
-            Text {
-                text: root.testing ? T.testing : root.result;
-                font-size: 18px;
-                font-weight: 600;
-                color: Palette.foreground;
-                vertical-alignment: center;
-            }
+        TestStatus {
+            busy: root.busy;
+            testing: root.testing;
+            result: root.result;
         }
+        Heading { text: root.blocked ? root.blocked-title : T.window-title; }
+        Body { text: root.blocked ? root.blocked-body : T.manage-body; }
         ButtonRow {
             ActionButton {
                 text: T.test;
-                enabled: !root.busy && !root.confirming;
+                enabled: root.usable;
                 clicked => { root.test(); }
             }
-            ActionButton {
-                text: T.remove;
-                tone: Brand.danger;
-                enabled: !root.busy && !root.confirming;
-                clicked => { root.confirming = true; }
+            Button {
+                text: T.set-up-again;
+                enabled: root.usable;
+                clicked => { root.set-up-again(); }
             }
         }
         ButtonRow {
-            Button {
-                text: T.set-up-again;
-                enabled: !root.busy && !root.confirming;
-                clicked => { root.set-up-again(); }
+            LinkButton {
+                text: T.delete-data;
+                clicked => {
+                    if (!root.busy) {
+                        root.confirming = true;
+                    }
+                }
             }
         }
     }

@@ -34,14 +34,14 @@ export component ConfirmRemoval inherits Rectangle {
                     padding: 24px;
                     spacing: 16px;
                     Text {
-                        text: T.remove-confirm-title;
+                        text: T.delete-confirm-title;
                         font-size: 20px;
                         font-weight: 700;
                         color: Palette.foreground;
                         wrap: word-wrap;
                     }
                     Text {
-                        text: T.remove-confirm-body;
+                        text: T.delete-confirm-body;
                         font-size: 15px;
                         color: Palette.foreground.with-alpha(0.78);
                         wrap: word-wrap;
@@ -53,7 +53,7 @@ export component ConfirmRemoval inherits Rectangle {
                             clicked => { root.dismissed(); }
                         }
                         ActionButton {
-                            text: T.remove;
+                            text: T.delete;
                             tone: Brand.danger;
                             clicked => { root.confirmed(); }
                         }
