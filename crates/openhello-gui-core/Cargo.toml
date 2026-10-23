@@ -1,0 +1,16 @@
+[package]
+name = "openhello-gui-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+openhello-cli = { path = "../openhello-cli" }
+
+[dev-dependencies]
+openhellod = { path = "../openhellod" }
+openhello-keyd = { path = "../openhello-keyd" }
+async-io = "2"
+libc = "0.2"
+tempfile = "3"
+zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }

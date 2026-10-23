@@ -1,0 +1,117 @@
+{
+  "feature": "enrollment-ui",
+  "timestamp": "2026-10-23T20:45:28.755Z",
+  "gitRev": "f65db06",
+  "command": "cargo test",
+  "reporter": "exitcode",
+  "exitCode": 0,
+  "testsParsed": 0,
+  "results": {
+    "AC-056": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-057": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-058": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-059": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-060": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-061": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-062": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-063": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-064": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-065": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-072": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-073": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-074": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-076": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-077": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-066": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-071": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-067": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-068": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-069": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-070": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    }
+  },
+  "principles": {}
+}

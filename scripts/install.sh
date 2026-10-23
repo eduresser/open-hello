@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # PAM directory = dirname of libpam.so.0 from the loader cache + /security: covers openSUSE (/usr/lib64), Debian/Ubuntu (multiarch) and Arch (/usr/lib).
 # Installs open-hello without touching the system's package manager: it checks capabilities, builds, and installs to neutral locations.
-# usage: sudo scripts/install.sh [--dry-run] [--skip-checks] [--no-pam] [--calibration-images DIR | --calibration-url URL]
+# usage: sudo scripts/install.sh [--dry-run] [--skip-checks] [--no-pam] [--no-gui] [--calibration-images DIR | --calibration-url URL]
 # The PAM module is enabled once in the common auth stack unless --no-pam is given; undo with `sudo openhello-cli pam disable`.
 set -euo pipefail
 
 DRY_RUN=0
 SKIP_CHECKS=0
 ENABLE_PAM=1
+BUILD_GUI=1
 CALIBRATION_IMAGES=""
 CALIBRATION_URL=""
 while [ $# -gt 0 ]; do
@@ -15,6 +16,7 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY_RUN=1 ;;
     --skip-checks) SKIP_CHECKS=1 ;;
     --no-pam) ENABLE_PAM=0 ;;
+    --no-gui) BUILD_GUI=0 ;;
     --no-deps) echo "warning: --no-deps is deprecated and ignored; the installer no longer installs packages" >&2 ;;
     --calibration-images) CALIBRATION_IMAGES="${2:?--calibration-images needs a directory}"; shift ;;
     --calibration-url) CALIBRATION_URL="${2:?--calibration-url needs a URL}"; shift ;;
@@ -35,6 +37,10 @@ POLKIT_ACTIONS_DIR=/usr/share/polkit-1/actions
 LEGACY_UNIT_DIR=/etc/systemd/system
 LDCONFIG="$(command -v ldconfig || echo /sbin/ldconfig)"
 CALIBRATION_FILE="$STATE_DIR/calibration.bin"
+APPLICATIONS_DIR=/usr/local/share/applications
+ICONS_DIR=/usr/local/share/icons/hicolor
+OS_RELEASE="${OPENHELLO_OS_RELEASE:-/etc/os-release}"
+GUI_INSTALLED=0
 
 ORT_VERSION=1.31.0
 ORT_SHA256=cc5c72baf5ae5c8238a6841f0897227be2d02826b9cf98eaf02fdefaeeb03a57
@@ -138,7 +144,10 @@ run cargo build --release --manifest-path "$REPO/Cargo.toml" \
   -p openhellod -p openhello-cli -p sensor-adapter-ir -p engine-adapter-face -p storage-adapter-templates \
   -p openhello-keyd -p openhello-pkcs11 -p openhello-pam
 
-if [ -n "${SUDO_USER:-}" ] && [ "$DRY_RUN" = 0 ]; then chown -R "$SUDO_USER" "$REPO/target"; fi
+own_target() {
+  if [ -n "${SUDO_USER:-}" ] && [ "$DRY_RUN" = 0 ]; then chown -R "$SUDO_USER" "$REPO/target"; fi
+}
+own_target
 T="$REPO/target/release"
 run systemctl stop openhellod openhello-keyd 2>/dev/null || true
 run install -d -m 0755 "$LIB_DIR" "$BIN_DIR" "$CONF_DIR"
@@ -197,6 +206,45 @@ install_pam_module() {
   fi
 }
 
+gui_packages() {
+  local ids word
+  ids="$( [ -r "$OS_RELEASE" ] && { . "$OS_RELEASE"; echo "${ID:-} ${ID_LIKE:-}"; } || true )"
+  for word in $ids; do
+    case "$word" in
+      opensuse*|suse|sles*) echo "fontconfig-devel freetype2-devel"; return ;;
+      fedora|rhel|centos) echo "fontconfig-devel freetype-devel"; return ;;
+      debian|ubuntu) echo "libfontconfig-dev libfreetype-dev"; return ;;
+      arch) echo "fontconfig freetype2"; return ;;
+    esac
+  done
+  echo "the fontconfig and FreeType development packages"
+}
+
+install_window_files() {
+  run install -m 0755 "$T/openhello-gui" /usr/local/bin/openhello-gui
+  run install -d -m 0755 "$APPLICATIONS_DIR"
+  run install -m 0644 "$REPO/packaging/openhello.desktop" "$APPLICATIONS_DIR/openhello.desktop"
+  run install -d -m 0755 "$ICONS_DIR/scalable/apps"
+  run install -m 0644 "$REPO/packaging/openhello.svg" "$ICONS_DIR/scalable/apps/openhello.svg"
+  if command -v gtk-update-icon-cache >/dev/null 2>&1; then run gtk-update-icon-cache -q -t "$ICONS_DIR" || true; fi
+  if command -v update-desktop-database >/dev/null 2>&1; then run update-desktop-database "$APPLICATIONS_DIR" || true; fi
+}
+
+install_window() {
+  [ "$BUILD_GUI" = 1 ] || return 0
+  if ! pkg-config --exists fontconfig freetype2 2>/dev/null; then
+    echo "warning: the face recognition window (openhello-gui) was skipped: fontconfig and FreeType development files not found. Install $(gui_packages) and run the installer again. Everything else is installed and openhello-cli keeps working." >&2
+    return 0
+  fi
+  if ! run cargo build --release --manifest-path "$REPO/Cargo.toml" -p openhello-gui; then
+    echo "warning: the face recognition window (openhello-gui) failed to build and was skipped. Everything else is installed and openhello-cli keeps working." >&2
+    return 0
+  fi
+  own_target
+  install_window_files
+  GUI_INSTALLED=1
+}
+
 run install -m 0644 "$REPO/packaging/io.openhello.Biometrics1.conf" "$DBUS_POLICY_DIR/io.openhello.Biometrics1.conf"
 run install -m 0644 "$REPO/crates/openhellod/io.openhello.Biometrics1.policy" "$POLKIT_ACTIONS_DIR/io.openhello.Biometrics1.policy"
 install_unit openhellod.service
@@ -253,6 +301,7 @@ run systemctl restart openhello-keyd 2>/dev/null || true
 run systemctl reset-failed openhellod 2>/dev/null || true
 run systemctl enable openhellod 2>/dev/null || true
 run systemctl restart openhellod 2>/dev/null || true
+install_window
 
 echo
 echo "open-hello installed and started. Check OPENHELLO_DEVICE (the IR camera node) in $CONF_DIR/openhello.env"
@@ -262,4 +311,5 @@ if [ "$PAM_ENABLED" = 1 ] || { [ "$DRY_RUN" = 1 ] && [ "$ENABLE_PAM" = 1 ]; }; t
 else
   echo "PAM module not enabled. Enable it with: sudo openhello-cli pam enable (whole integration) or per service: sudo openhello-cli pam enable <service>..."
 fi
+[ "$GUI_INSTALLED" = 0 ] || echo "Face recognition window installed: run openhello-gui or open Face recognition in the application menu"
 [ ! -d "$CONF_DIR/nssdb" ] || echo "$CONF_DIR/nssdb was created by an older installer and is no longer used; it can be deleted"

@@ -56,6 +56,10 @@ impl TemplateStore {
         Ok(uids)
     }
 
+    pub fn probe(&self) -> Result<(), StorageError> {
+        self.keys.probe()
+    }
+
     pub(crate) fn keys(&self) -> &TpmKeyStore {
         &self.keys
     }

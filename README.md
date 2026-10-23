@@ -19,6 +19,10 @@ sudo scripts/install.sh
 
 The script builds the project, downloads the models and ONNX Runtime with checksum verification, installs the services and enables the PAM module in the common authentication stack.
 
+The face recognition window is optional: when the fontconfig and FreeType development files are installed, the script also builds it and installs the `openhello-gui` command and a menu entry; otherwise it skips the window, names the packages to install for your distribution, and everything else works.
+
+When a click in the window seems to be lost, run `openhello-gui --trace-input` and send the lines it prints on stderr: each pointer event, button click, worker command and screen change with its time in milliseconds, and no image data.
+
 Options:
 
 | Option | Effect |
@@ -26,12 +30,12 @@ Options:
 | `--dry-run` | Shows what would be done without changing the system |
 | `--skip-checks` | Skips the requirements check |
 | `--no-pam` | Installs without enabling PAM |
+| `--no-gui` | Skips the face recognition window |
 
 ## Usage
 
 ```bash
 openhello-cli enroll        # enroll your face
-openhello-cli set-pin       # set the fallback PIN
 openhello-cli verify        # test recognition
 openhello-cli identify      # identify who is in front of the camera
 openhello-cli purge         # erase biometric data and the key

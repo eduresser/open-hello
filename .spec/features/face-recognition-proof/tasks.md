@@ -35,7 +35,8 @@
 - Files: crates/engine-adapter-face/src/enrollment_quality.rs
 - Model: claude-sonnet-5
 - Effort: medium
-- Notes: depends on T-003. Yaw-bucket coverage, blur threshold, occlusion rejection, 60s/3-attempt timeout.
+- Notes: depends on T-003. Blur threshold and occlusion rejection; its yaw-bucket coverage and 60s/3-attempt
+  timeout were replaced by T-057.
 
 ## T-005 — Engine Adapter: FAR-calibrated Verify/Identify matching [done]
 
@@ -105,3 +106,30 @@
 - Effort: medium
 - Notes: depends on T-001. Recorded IR-frame fixtures come from the developer's own camera only; any public
   NIR dataset used for calibration stays local and out of the repo (licensing, see architecture grilling).
+
+## T-057 — Frontal-sample enrollment replaces the 6-pose protocol [done]
+
+- Refs: AC-001, AC-002, AC-003, AC-004, AC-048, AC-049, ASM-002, ASM-017
+- Files: crates/engine-adapter-face/src/engine.rs, crates/engine-adapter-face/src/ffi.rs, crates/openhello-plugin-abi/src/lib.rs, crates/openhellod/src/backends.rs, crates/openhellod/src/plugin_loader.rs, crates/openhellod/tests/default_target_far.rs
+- Model: claude-sonnet-5
+- Effort: medium
+- Notes: depends on T-004. 6 spaced near-frontal samples, one 20 s window, no head movement. The template keeps 6
+  embeddings so the FAR split and the CBSR NIR calibration are unchanged. `BucketAlreadyFilled` became
+  `TooSoon`; the D-Bus verdict string `pose-already-captured` became `too-soon`.
+
+## T-058 — Enrollment guidance: distance, centering and plain-language CLI messages [done]
+
+- Refs: AC-050, AC-051, AC-052, AC-053, ASM-018
+- Files: crates/engine-adapter-face/src/enrollment_quality.rs, crates/openhello-cli/src/lib.rs
+- Model: claude-sonnet-5
+- Effort: medium
+- Notes: depends on T-057. Adds the verdicts `move-left|right|up|down`, `too-close`, `too-far` end to end (plugin ABI
+  version 4, daemon D-Bus strings, CLI sentences). The same verdicts feed the future enrollment GUI.
+
+## T-059 — Enrollment guidance: face brightness [done]
+
+- Refs: AC-054, AC-055, ASM-019
+- Files: crates/engine-adapter-face/src/enrollment_quality.rs
+- Model: claude-sonnet-5
+- Effort: low
+- Notes: depends on T-058. Adds `too-dark` and `too-bright` (plugin ABI version 5) from the mean luma of the face box.

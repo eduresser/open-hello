@@ -56,9 +56,23 @@ enum Attempt {
     Undecided,
 }
 
+#[derive(Clone)]
+pub struct HeldFrame {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Vec<u8>,
+}
+
+impl Drop for HeldFrame {
+    fn drop(&mut self) {
+        self.pixels.fill(0);
+    }
+}
+
 struct EnrollSession {
     uid: u32,
     engine_session: u64,
+    latest_frame: Option<HeldFrame>,
 }
 
 pub struct Biometrics {
@@ -119,11 +133,16 @@ impl Biometrics {
         &self.logger
     }
 
+    pub fn check_ready(&mut self) -> Result<(), DaemonError> {
+        self.sensor.probe()?;
+        self.storage.probe()
+    }
+
     pub fn enroll_begin(&mut self, uid: u32) -> Result<String, DaemonError> {
         let engine_session = self.engine.enroll_begin(self.now_ms())?;
         let handle = format!("enroll-{}", self.next_session);
         self.next_session += 1;
-        self.sessions.insert(handle.clone(), EnrollSession { uid, engine_session });
+        self.sessions.insert(handle.clone(), EnrollSession { uid, engine_session, latest_frame: None });
         self.logger.log(Level::Info, "enroll-begin", &[("uid", Value::Uid(uid))]);
         Ok(handle)
     }
@@ -146,22 +165,31 @@ impl Biometrics {
         );
         if progress.state == EnrollState::Failed {
             self.sessions.remove(handle);
+        } else if let Some(session) = self.sessions.get_mut(handle) {
+            session.latest_frame = Some(HeldFrame { width: frame.width, height: frame.height, pixels: frame.pixels });
         }
         Ok(progress)
     }
 
     pub fn enroll_commit(&mut self, handle: &str) -> Result<(), DaemonError> {
-        let EnrollSession { uid, engine_session } = self.take_session(handle)?;
+        let EnrollSession { uid, engine_session, .. } = self.take_session(handle)?;
         let template = self.engine.enroll_commit(engine_session)?;
         self.logger.log(Level::Debug, "enroll-commit", &[("uid", Value::Uid(uid)), ("template_bytes", Value::Count(template.len() as u64))]);
-        self.sensor.release();
+        self.release_sensor("enroll-commit");
         self.storage.put(uid, &template)
     }
 
     pub fn enroll_discard(&mut self, handle: &str) -> Result<(), DaemonError> {
         let session = self.take_session(handle)?;
-        self.sensor.release();
+        self.release_sensor("enroll-discard");
         self.engine.enroll_discard(session.engine_session)
+    }
+
+    pub fn enroll_frame(&self, handle: &str) -> Result<HeldFrame, DaemonError> {
+        self.session(handle)?
+            .latest_frame
+            .clone()
+            .ok_or_else(|| DaemonError::InvalidRequest(format!("enrollment session `{handle}` has no frame yet")))
     }
 
     pub fn session_uid(&self, handle: &str) -> Result<u32, DaemonError> {
@@ -234,6 +262,10 @@ impl Biometrics {
         Ok(outcome.uid)
     }
 
+    pub fn face_enrolled(&mut self, uid: u32) -> Result<bool, DaemonError> {
+        Ok(self.storage.list_uids()?.contains(&uid))
+    }
+
     pub fn purge(&mut self, uid: u32) -> Result<(), DaemonError> {
         let template = self.storage.purge(uid);
         let key = self.keyd.as_ref().map(|client| client.purge(uid));
@@ -254,6 +286,11 @@ impl Biometrics {
         }
     }
 
+    fn release_sensor(&mut self, reason: &'static str) {
+        self.logger.log(Level::Info, "sensor-release", &[("reason", Value::Label(reason))]);
+        self.sensor.release();
+    }
+
     fn deliver_ticket(&mut self, uid: u32) {
         self.last_delivery = None;
         let Some(client) = self.tickets.as_mut() else { return };
@@ -264,7 +301,7 @@ impl Biometrics {
 
     fn authenticate(&mut self, candidates: &[(u32, Vec<u8>)], cancel: Cancel) -> Result<AuthOutcome, DaemonError> {
         let outcome = self.run_attempts(candidates, cancel);
-        self.sensor.release();
+        self.release_sensor("request-end");
         outcome
     }
 
@@ -489,6 +526,31 @@ mod tests {
         assert_eq!(storage.files.lock().unwrap().get(&1000).unwrap(), b"tpl-1000");
         assert_eq!(log.lock().unwrap().committed, vec![77]);
         assert!(core.enroll_commit(&handle).is_err());
+    }
+
+    // @spec:AC-063
+    #[test]
+    fn the_held_frame_is_the_latest_capture_and_vanishes_with_the_session() {
+        let (mut core, _) = core_with(MemoryStorage::default(), true, b"x");
+        let handle = core.enroll_begin(1000).unwrap();
+        assert!(matches!(core.enroll_frame(&handle), Err(DaemonError::InvalidRequest(_))));
+        core.enroll_capture(&handle).unwrap();
+        let frame = core.enroll_frame(&handle).unwrap();
+        assert_eq!((frame.width, frame.height, frame.pixels.clone()), (2, 2, vec![1, 2, 3, 4]));
+        core.enroll_discard(&handle).unwrap();
+        assert!(matches!(core.enroll_frame(&handle), Err(DaemonError::InvalidRequest(_))));
+
+        let committed = core.enroll_begin(1000).unwrap();
+        core.enroll_capture(&committed).unwrap();
+        core.enroll_commit(&committed).unwrap();
+        assert!(matches!(core.enroll_frame(&committed), Err(DaemonError::InvalidRequest(_))));
+
+        let mut engine = FakeEngine::new(Default::default(), true, b"");
+        engine.fail_state = true;
+        let mut failing = Biometrics::new(Box::new(FakeSensor), Box::new(engine), Box::new(MemoryStorage::default()), DEFAULT_TARGET_FAR);
+        let failed = failing.enroll_begin(1000).unwrap();
+        failing.enroll_capture(&failed).unwrap();
+        assert!(matches!(failing.enroll_frame(&failed), Err(DaemonError::InvalidRequest(_))));
     }
 
     #[test]

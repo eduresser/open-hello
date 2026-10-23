@@ -105,7 +105,13 @@ pub struct V4l2Camera {
 unsafe impl Send for V4l2Camera {}
 
 fn os_error(context: &str) -> SensorError {
-    SensorError::Device(format!("{context}: {}", std::io::Error::last_os_error()))
+    let error = std::io::Error::last_os_error();
+    let detail = format!("{context}: {error}");
+    match error.raw_os_error() {
+        Some(libc::EBUSY) => SensorError::DeviceBusy(detail),
+        Some(libc::ENOENT | libc::ENODEV) => SensorError::NoDevice(detail),
+        _ => SensorError::Device(detail),
+    }
 }
 
 fn zeroed<T>() -> T {
@@ -114,6 +120,16 @@ fn zeroed<T>() -> T {
 
 impl V4l2Camera {
     pub fn open(device_path: &str) -> Result<Self, SensorError> {
+        let mut camera = Self::open_configured(device_path)?;
+        camera.map_buffers()?;
+        Ok(camera)
+    }
+
+    pub fn probe(device_path: &str) -> Result<(), SensorError> {
+        Self::open_configured(device_path).map(drop)
+    }
+
+    fn open_configured(device_path: &str) -> Result<Self, SensorError> {
         let path = CString::new(device_path)
             .map_err(|_| SensorError::Device(format!("invalid device path `{device_path}`")))?;
         let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDWR) };
@@ -122,7 +138,6 @@ impl V4l2Camera {
         }
         let mut camera = Self { fd, buffers: Vec::new(), format: PixFormat::default(), streaming: false };
         camera.negotiate_format()?;
-        camera.map_buffers()?;
         Ok(camera)
     }
 
@@ -219,6 +234,7 @@ impl FrameSource for V4l2Camera {
     }
 
     fn next_frame(&mut self) -> Result<Frame, SensorError> {
+        let mut last_bad = (0, 0);
         for _ in 0..MAX_CONSECUTIVE_BAD_FRAMES {
             let mut buffer: Buffer = zeroed();
             buffer.type_ = BUF_TYPE_VIDEO_CAPTURE;
@@ -241,9 +257,14 @@ impl FrameSource for V4l2Camera {
             if let Some(frame) = frame {
                 return Ok(frame);
             }
+            last_bad = (buffer.bytesused, buffer.flags);
         }
-        Err(SensorError::Device("camera keeps delivering incomplete frames".into()))
+        Err(incomplete_frames_error(last_bad.0, last_bad.1, self.format.sizeimage))
     }
+}
+
+fn incomplete_frames_error(bytes_used: u32, flags: u32, size_image: u32) -> SensorError {
+    SensorError::IncompleteFrames { count: MAX_CONSECUTIVE_BAD_FRAMES, bytes_used, size_image, flags }
 }
 
 // USB cameras occasionally deliver a short frame; the engine rejects it and would abort the session
@@ -278,6 +299,18 @@ mod tests {
     }
 
     #[test]
+    fn errno_decides_between_busy_missing_and_generic_device_errors() {
+        let with_errno = |code: i32| {
+            unsafe { *libc::__errno_location() = code };
+            os_error("open")
+        };
+        assert!(matches!(with_errno(libc::EBUSY), SensorError::DeviceBusy(_)));
+        assert!(matches!(with_errno(libc::ENOENT), SensorError::NoDevice(_)));
+        assert!(matches!(with_errno(libc::ENODEV), SensorError::NoDevice(_)));
+        assert!(matches!(with_errno(libc::EIO), SensorError::Device(_)));
+    }
+
+    #[test]
     fn only_full_error_free_buffers_count_as_frames() {
         assert!(is_complete(230_400, 0, 230_400));
         assert!(!is_complete(125_524, 0, 230_400));
@@ -285,9 +318,26 @@ mod tests {
         assert!(!is_complete(0, 0, 230_400));
     }
 
+    // @spec:AC-075
+    #[test]
+    fn the_incomplete_frames_error_carries_the_count_and_the_last_bad_buffer() {
+        let error = incomplete_frames_error(125_524, BUF_FLAG_ERROR, 230_400);
+        assert_eq!(
+            error.to_string(),
+            "camera device error: camera keeps delivering incomplete frames (30 in a row; last: bytesused=125524 of 230400, flags=0x40)"
+        );
+    }
+
     #[test]
     fn open_reports_missing_device() {
         let error = V4l2Camera::open("/dev/openhello-no-such-camera").err().unwrap();
-        assert!(matches!(error, SensorError::Device(_)));
+        assert!(matches!(error, SensorError::NoDevice(_)));
+    }
+
+    // @spec:AC-070
+    #[test]
+    fn probe_reports_a_missing_device_without_streaming() {
+        let error = V4l2Camera::probe("/dev/openhello-no-such-camera").unwrap_err();
+        assert!(matches!(error, SensorError::NoDevice(_)));
     }
 }

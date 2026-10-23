@@ -1,0 +1,33 @@
+import { ActionButton, Brand, Column, Footer, Intro, LinkButton, MarkRow, Spacer } from "components.slint";
+import { T } from "texts.slint";
+
+export component ErrorPage inherits VerticalLayout {
+    in property <string> title;
+    in property <string> body;
+    in property <bool> busy;
+    callback retry();
+    callback delete-data();
+
+    Column {
+        MarkRow {
+            fill: Brand.negative;
+            troubled: true;
+        }
+        Intro {
+            title: root.title;
+            body: root.body;
+        }
+    }
+    Footer {
+        LinkButton {
+            text: T.delete-data;
+            clicked => { root.delete-data(); }
+        }
+        Spacer {}
+        ActionButton {
+            text: T.try-again;
+            enabled: !root.busy;
+            clicked => { root.retry(); }
+        }
+    }
+}
