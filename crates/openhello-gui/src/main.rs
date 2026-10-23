@@ -3,6 +3,7 @@ mod capture;
 mod demo;
 mod options;
 mod gate;
+mod pointer;
 mod stats;
 mod trace;
 mod view;
@@ -33,8 +34,8 @@ fn main() -> ExitCode {
     };
     if options.trace_input {
         trace::enable();
-        trace_pointer(&window);
     }
+    track_pointer(&window);
     let strings = Strings::new(Language::detect());
     view::init(&window, &strings);
     let mut backend = launch(&options, &window, strings);
@@ -104,15 +105,23 @@ fn busy_sender(window: &MainWindow, commands: &Sender<Command>, button: &'static
     }
 }
 
-fn trace_pointer(window: &MainWindow) {
-    let mut cursor = (0.0, 0.0);
+fn track_pointer(window: &MainWindow) {
     window.window().on_winit_window_event(move |_, event| {
         match event {
-            winit::event::WindowEvent::CursorMoved { position, .. } => cursor = (position.x, position.y),
-            winit::event::WindowEvent::CursorEntered { .. } => trace::log("pointer entered"),
-            winit::event::WindowEvent::CursorLeft { .. } => trace::log("pointer left"),
+            winit::event::WindowEvent::CursorMoved { position, .. } => pointer::with(|tracker| tracker.moved(position.x, position.y)),
+            winit::event::WindowEvent::CursorEntered { .. } => {
+                pointer::with(|tracker| tracker.entered());
+                trace::log("pointer entered");
+            }
+            winit::event::WindowEvent::CursorLeft { .. } => {
+                pointer::with(|tracker| tracker.left());
+                trace::log("pointer left");
+            }
             winit::event::WindowEvent::Focused(focused) => trace::log(format!("window focused={focused}")),
-            winit::event::WindowEvent::MouseInput { state, button, .. } => trace::log(format!("pointer {state:?} {button:?} at {:.0},{:.0}", cursor.0, cursor.1)),
+            winit::event::WindowEvent::MouseInput { state, button, .. } => {
+                let (x, y) = pointer::with(|tracker| tracker.physical());
+                trace::log(format!("pointer {state:?} {button:?} at {x:.0},{y:.0}"));
+            }
             _ => {}
         }
         EventResult::Propagate
