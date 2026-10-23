@@ -1,0 +1,16 @@
+import { Spinner } from "std-widgets.slint";
+import { Body, Column, Heading } from "components.slint";
+import { T } from "texts.slint";
+
+export component IdentityPage inherits Column {
+    Heading { text: T.identity-title; }
+    Body { text: T.identity-body; }
+    HorizontalLayout {
+        alignment: center;
+        Spinner {
+            indeterminate: true;
+            width: 40px;
+            height: 40px;
+        }
+    }
+}

@@ -1,0 +1,15 @@
+import { ActionButton, Body, ButtonRow, Column, Heading } from "components.slint";
+import { T } from "texts.slint";
+
+export component DonePage inherits Column {
+    callback finish();
+
+    Heading { text: T.done-title; }
+    Body { text: T.done-body; }
+    ButtonRow {
+        ActionButton {
+            text: T.close;
+            clicked => { root.finish(); }
+        }
+    }
+}

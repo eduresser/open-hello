@@ -2,17 +2,15 @@ use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use async_channel::Sender as EventSender;
-use openhello_gui_core::{
-    CaptureUpdate, ClientResult, EnrollClient, EnrollmentFlow, Language, ManageClient, Manager, PinError, RemoveOutcome, Status, Step, TestOutcome,
-};
+use openhello_gui_core::{ClientResult, EnrollClient, EnrollmentFlow, FailureCause, Language, ManageClient, Manager, RemoveOutcome, Step, TestOutcome};
+
+use crate::capture::CaptureView;
 
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
 const JOIN_POLL: Duration = Duration::from_millis(20);
 
 pub enum Command {
     Start,
-    SubmitPin { pin: String, confirmation: String },
     AcknowledgeRecovery,
     Retry,
     Cancel,
@@ -22,11 +20,14 @@ pub enum Command {
 }
 
 pub enum Event {
-    Step(Step),
-    Capture(CaptureUpdate),
-    RecoveryCode(String),
-    PinRejected(PinError),
-    Status(Status),
+    Welcome(Option<FailureCause>),
+    Identity,
+    CaptureStarted,
+    Capture(CaptureView),
+    Recovery(String),
+    Done,
+    Failed(FailureCause),
+    Manage,
     TestResult(bool),
 }
 
@@ -53,23 +54,23 @@ impl Backend {
     }
 }
 
-pub fn spawn<C, F>(factory: F, uid: u32, language: Language, events: EventSender<Event>) -> Backend
+pub fn spawn<C, F, E>(factory: F, uid: u32, language: Language, emit: E) -> Backend
 where
     C: EnrollClient + ManageClient + 'static,
     F: Fn() -> ClientResult<C> + Send + 'static,
+    E: Fn(Event) -> bool + Send + 'static,
 {
     let (commands, inbox) = mpsc::channel();
-    let thread = thread::spawn(move || run(&factory, uid, language, &events, &inbox));
+    let thread = thread::spawn(move || run(&factory, uid, language, &emit, &inbox));
     Backend { commands, thread: Some(thread) }
 }
 
-fn run<C: EnrollClient + ManageClient>(factory: &impl Fn() -> ClientResult<C>, uid: u32, language: Language, events: &EventSender<Event>, inbox: &Receiver<Command>) {
+fn run<C: EnrollClient + ManageClient>(factory: &impl Fn() -> ClientResult<C>, uid: u32, language: Language, emit: &impl Fn(Event) -> bool, inbox: &Receiver<Command>) {
     loop {
         match connect(factory, uid, language) {
-            Ok((flow, manager)) => return Worker { flow, manager, events, inbox, stopped: false, launch_failed: false }.serve(),
+            Ok((flow, manager)) => return Worker { flow, manager, emit, inbox, stopped: false, begun: false, face: false }.serve(),
             Err(error) => {
-                let _ = events.send_blocking(Event::Step(Step::Error(error.kind.into())));
-                if !wait_for_retry(inbox) {
+                if !emit(Event::Failed(error.kind.into())) || !wait_for_retry(inbox) {
                     return;
                 }
             }
@@ -91,16 +92,17 @@ fn wait_for_retry(inbox: &Receiver<Command>) -> bool {
     }
 }
 
-struct Worker<'a, C: EnrollClient + ManageClient> {
+struct Worker<'a, C: EnrollClient + ManageClient, E: Fn(Event) -> bool> {
     flow: EnrollmentFlow<C>,
     manager: Manager<C>,
-    events: &'a EventSender<Event>,
+    emit: &'a E,
     inbox: &'a Receiver<Command>,
     stopped: bool,
-    launch_failed: bool,
+    begun: bool,
+    face: bool,
 }
 
-impl<C: EnrollClient + ManageClient> Worker<'_, C> {
+impl<C: EnrollClient + ManageClient, E: Fn(Event) -> bool> Worker<'_, C, E> {
     fn serve(mut self) {
         self.launch();
         while !self.stopped {
@@ -114,20 +116,13 @@ impl<C: EnrollClient + ManageClient> Worker<'_, C> {
 
     fn handle(&mut self, command: Command) {
         match command {
-            Command::Start => {
-                self.flow.start();
-                self.drive();
-            }
-            Command::SubmitPin { pin, confirmation } => self.submit_pin(&pin, &confirmation),
+            Command::Start => self.start(),
             Command::AcknowledgeRecovery => {
                 self.flow.acknowledge_recovery_code();
                 self.emit_step();
             }
             Command::Retry => self.retry(),
-            Command::Cancel => {
-                self.flow.cancel();
-                self.emit_step();
-            }
+            Command::Cancel => self.cancel(),
             Command::Test => self.test(),
             Command::Remove => self.remove(),
             Command::Shutdown => self.stop(),
@@ -137,30 +132,55 @@ impl<C: EnrollClient + ManageClient> Worker<'_, C> {
     fn launch(&mut self) {
         match self.manager.status() {
             Ok(status) => {
-                self.launch_failed = false;
-                self.send(Event::Status(status));
+                self.face = status.face;
+                self.home();
             }
-            Err(error) => {
-                self.launch_failed = true;
-                self.send(Event::Step(Step::Error(error.kind.into())));
-            }
+            Err(error) => self.send(Event::Failed(error.kind.into())),
         }
     }
 
-    fn retry(&mut self) {
-        if self.launch_failed || !matches!(self.flow.step(), Step::Error(_)) {
-            self.launch();
+    fn home(&mut self) {
+        self.begun = false;
+        if self.face {
+            self.send(Event::Manage);
             return;
         }
-        self.flow.retry();
+        self.flow.start();
+        self.emit_step();
+    }
+
+    fn start(&mut self) {
+        self.flow.start();
+        if self.flow.blocked().is_some() {
+            self.begun = false;
+            self.emit_step();
+            return;
+        }
+        self.begun = true;
         self.drive();
     }
 
-    fn submit_pin(&mut self, pin: &str, confirmation: &str) {
-        match self.flow.submit_pin(pin, confirmation) {
-            Ok(()) => self.drive(),
-            Err(PinError::Failed) => self.emit_step(),
-            Err(rejected) => self.send(Event::PinRejected(rejected)),
+    fn cancel(&mut self) {
+        self.flow.cancel();
+        self.home();
+    }
+
+    fn retry(&mut self) {
+        if matches!(self.flow.step(), Step::Error(_)) {
+            self.flow.retry();
+            self.resume();
+        } else if self.flow.blocked().is_some() {
+            self.home();
+        } else {
+            self.launch();
+        }
+    }
+
+    fn resume(&mut self) {
+        if matches!(self.flow.step(), Step::Welcome | Step::Identity) {
+            self.home();
+        } else {
+            self.drive();
         }
     }
 
@@ -168,14 +188,17 @@ impl<C: EnrollClient + ManageClient> Worker<'_, C> {
         match self.manager.test() {
             TestOutcome::Recognized => self.send(Event::TestResult(true)),
             TestOutcome::NotRecognized => self.send(Event::TestResult(false)),
-            TestOutcome::Failed(error) => self.send(Event::Step(Step::Error(error.kind.into()))),
+            TestOutcome::Failed(error) => self.send(Event::Failed(error.kind.into())),
         }
     }
 
     fn remove(&mut self) {
         match self.manager.remove(true) {
-            RemoveOutcome::Removed(status) => self.send(Event::Status(status)),
-            RemoveOutcome::Failed(error) => self.send(Event::Step(Step::Error(error.kind.into()))),
+            RemoveOutcome::Removed(status) => {
+                self.face = status.face;
+                self.home();
+            }
+            RemoveOutcome::Failed(error) => self.send(Event::Failed(error.kind.into())),
             RemoveOutcome::NotConfirmed => {}
         }
     }
@@ -195,12 +218,13 @@ impl<C: EnrollClient + ManageClient> Worker<'_, C> {
     }
 
     fn capture(&mut self) -> bool {
+        let strings = *self.flow.strings();
         while self.flow.step() == Step::Capture {
             if self.interrupted() {
                 return false;
             }
             let Some(update) = self.flow.tick() else { break };
-            self.send(Event::Capture(update));
+            self.send(Event::Capture(CaptureView::new(update, &strings)));
         }
         self.flow.step() != Step::Capture
     }
@@ -208,8 +232,7 @@ impl<C: EnrollClient + ManageClient> Worker<'_, C> {
     fn interrupted(&mut self) -> bool {
         match self.inbox.try_recv() {
             Ok(Command::Cancel) => {
-                self.flow.cancel();
-                self.emit_step();
+                self.cancel();
                 true
             }
             Ok(Command::Shutdown) | Err(TryRecvError::Disconnected) => {
@@ -221,14 +244,26 @@ impl<C: EnrollClient + ManageClient> Worker<'_, C> {
     }
 
     fn emit_step(&mut self) {
-        if let Some(code) = self.flow.recovery_code().map(String::from) {
-            self.send(Event::RecoveryCode(code));
-        }
-        self.send(Event::Step(self.flow.step()));
+        let event = match self.flow.step() {
+            Step::Welcome => Event::Welcome(self.flow.blocked()),
+            Step::Identity if self.begun => Event::Identity,
+            Step::Identity => Event::Welcome(None),
+            Step::Capture => Event::CaptureStarted,
+            Step::RecoveryCode => {
+                self.face = true;
+                Event::Recovery(self.flow.recovery_code().map(String::from).unwrap_or_default())
+            }
+            Step::Done => {
+                self.face = true;
+                Event::Done
+            }
+            Step::Error(cause) => Event::Failed(cause),
+        };
+        self.send(event);
     }
 
     fn send(&mut self, event: Event) {
-        if self.events.send_blocking(event).is_err() {
+        if !(self.emit)(event) {
             self.stop();
         }
     }
@@ -236,5 +271,150 @@ impl<C: EnrollClient + ManageClient> Worker<'_, C> {
     fn stop(&mut self) {
         self.stopped = true;
         self.flow.cancel();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::AtomicBool;
+    use std::sync::mpsc::RecvTimeoutError;
+    use std::sync::Arc;
+
+    use crate::demo::DemoClient;
+    use crate::options::DemoMode;
+
+    use super::*;
+
+    const WAIT: Duration = Duration::from_secs(20);
+
+    struct Harness {
+        backend: Backend,
+        events: Receiver<Event>,
+    }
+
+    fn harness(mode: DemoMode) -> Harness {
+        let (sender, events) = mpsc::channel();
+        let face = Arc::new(AtomicBool::new(mode.enrolled));
+        let factory = move || Ok(DemoClient::paced(mode, face.clone(), Duration::ZERO));
+        let emit = move |event| sender.send(event).is_ok();
+        Harness { backend: spawn(factory, 1000, Language::English, emit), events }
+    }
+
+    impl Harness {
+        fn send(&self, command: Command) {
+            self.backend.sender().send(command).expect("the worker is alive");
+        }
+
+        fn next(&self) -> Result<Event, RecvTimeoutError> {
+            self.events.recv_timeout(WAIT)
+        }
+
+        fn until(&self, done: impl Fn(&Event) -> bool) -> Vec<Event> {
+            let mut seen = Vec::new();
+            loop {
+                let event = self.next().expect("an event arrives in time");
+                let last = done(&event);
+                seen.push(event);
+                if last {
+                    return seen;
+                }
+            }
+        }
+    }
+
+    fn name(event: &Event) -> &'static str {
+        match event {
+            Event::Welcome(None) => "welcome",
+            Event::Welcome(Some(_)) => "blocked",
+            Event::Identity => "identity",
+            Event::CaptureStarted => "capture",
+            Event::Capture(_) => "frame",
+            Event::Recovery(_) => "recovery",
+            Event::Done => "done",
+            Event::Failed(_) => "failed",
+            Event::Manage => "manage",
+            Event::TestResult(true) => "recognized",
+            Event::TestResult(false) => "not-recognized",
+        }
+    }
+
+    fn names(events: &[Event]) -> Vec<&'static str> {
+        let mut names: Vec<&str> = events.iter().map(name).collect();
+        names.dedup();
+        names
+    }
+
+    // @spec:AC-058
+    #[test]
+    fn the_worker_walks_welcome_identity_capture_recovery_code_and_done() {
+        let mut harness = harness(DemoMode::default());
+        let mut seen = harness.until(|event| matches!(event, Event::Welcome(None)));
+        harness.send(Command::Start);
+        seen.extend(harness.until(|event| matches!(event, Event::Recovery(_))));
+        harness.send(Command::AcknowledgeRecovery);
+        seen.extend(harness.until(|event| matches!(event, Event::Done)));
+        harness.backend.shutdown();
+        assert_eq!(names(&seen), ["welcome", "identity", "capture", "frame", "recovery", "done"]);
+    }
+
+    // @spec:AC-062
+    #[test]
+    fn cancel_during_capture_stops_the_frames_and_returns_to_welcome() {
+        let mut harness = harness(DemoMode { hold: true, ..DemoMode::default() });
+        harness.send(Command::Start);
+        harness.until(|event| matches!(event, Event::Capture(_)));
+        harness.send(Command::Cancel);
+        let after = harness.until(|event| matches!(event, Event::Welcome(_)));
+        harness.backend.shutdown();
+        assert!(matches!(after.last(), Some(Event::Welcome(None))));
+        assert!(harness.events.try_recv().is_err());
+    }
+
+    // @spec:AC-070
+    #[test]
+    fn a_blocked_computer_shows_the_cause_and_start_creates_no_capture() {
+        let mut harness = harness(DemoMode { blocked: true, ..DemoMode::default() });
+        let first = harness.until(|event| matches!(event, Event::Welcome(_)));
+        harness.send(Command::Start);
+        let second = harness.until(|event| matches!(event, Event::Welcome(_)));
+        harness.send(Command::Retry);
+        let third = harness.until(|event| matches!(event, Event::Welcome(_)));
+        harness.backend.shutdown();
+        for events in [first, second, third] {
+            assert_eq!(names(&events), ["blocked"]);
+        }
+        assert!(harness.events.try_recv().is_err());
+    }
+
+    // @spec:AC-065
+    #[test]
+    fn test_reports_recognized_for_an_enrolled_user() {
+        let mut harness = harness(DemoMode { enrolled: true, ..DemoMode::default() });
+        assert_eq!(names(&harness.until(|event| matches!(event, Event::Manage))), ["manage"]);
+        harness.send(Command::Test);
+        let result = harness.until(|event| matches!(event, Event::TestResult(_)));
+        harness.backend.shutdown();
+        assert_eq!(names(&result), ["recognized"]);
+    }
+
+    // @spec:AC-066
+    #[test]
+    fn remove_erases_the_face_and_returns_to_the_not_set_up_welcome() {
+        let mut harness = harness(DemoMode { enrolled: true, ..DemoMode::default() });
+        harness.until(|event| matches!(event, Event::Manage));
+        harness.send(Command::Remove);
+        let after = harness.until(|event| matches!(event, Event::Welcome(_)));
+        harness.backend.shutdown();
+        assert_eq!(names(&after), ["welcome"]);
+    }
+
+    #[test]
+    fn a_status_that_cannot_be_read_is_an_error_and_try_again_asks_again() {
+        let mut harness = harness(DemoMode { fail: true, ..DemoMode::default() });
+        let first = harness.until(|event| matches!(event, Event::Failed(_)));
+        harness.send(Command::Retry);
+        let second = harness.until(|event| matches!(event, Event::Failed(_)));
+        harness.backend.shutdown();
+        assert_eq!((names(&first), names(&second)), (vec!["failed"], vec!["failed"]));
     }
 }

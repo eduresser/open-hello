@@ -1,0 +1,91 @@
+import { Palette } from "std-widgets.slint";
+
+export global Brand {
+    out property <color> accent: #1f6feb;
+    out property <color> accepted: #3fb950;
+    out property <color> danger: #d1242f;
+}
+
+export component Heading inherits Text {
+    font-size: 26px;
+    font-weight: 700;
+    color: Palette.foreground;
+    horizontal-alignment: center;
+    wrap: word-wrap;
+}
+
+export component Body inherits Text {
+    font-size: 15px;
+    color: Palette.foreground.with-alpha(0.78);
+    horizontal-alignment: center;
+    wrap: word-wrap;
+}
+
+export component Column inherits Rectangle {
+    in property <length> column-width: 480px;
+    VerticalLayout {
+        alignment: center;
+        padding: 32px;
+        spacing: 16px;
+        HorizontalLayout {
+            alignment: center;
+            VerticalLayout {
+                width: min(root.column-width, root.width - 64px);
+                spacing: 16px;
+                @children
+            }
+        }
+    }
+}
+
+export component ActionButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <color> tone: Brand.accent;
+    callback clicked();
+
+    preferred-width: max(140px, label.preferred-width + 40px);
+    height: 40px;
+    border-radius: 6px;
+    border-width: scope.has-focus ? 2px : 0px;
+    border-color: Palette.foreground;
+    background: !root.enabled ? Palette.foreground.with-alpha(0.12) : touch.pressed ? root.tone.darker(0.2) : touch.has-hover ? root.tone.brighter(0.1) : root.tone;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        if (root.enabled) {
+            root.clicked();
+        }
+    }
+
+    label := Text {
+        text: root.text;
+        color: root.enabled ? #ffffff : Palette.foreground.with-alpha(0.4);
+        font-size: 15px;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+
+    scope := FocusScope {
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}
+
+export component ButtonRow inherits HorizontalLayout {
+    alignment: center;
+    spacing: 12px;
+}

@@ -1,0 +1,41 @@
+import { Palette } from "std-widgets.slint";
+import { ActionButton, Body, ButtonRow, Column, Heading } from "components.slint";
+import { T } from "texts.slint";
+
+export component RecoveryPage inherits Column {
+    in property <string> code;
+    callback acknowledge();
+
+    Heading { text: T.recovery-title; }
+    Body { text: T.recovery-body; }
+    Rectangle {
+        height: 64px;
+        border-radius: 10px;
+        background: Palette.control-background;
+        field := TextInput {
+            x: 12px;
+            width: parent.width - 24px;
+            read-only: true;
+            single-line: true;
+            text: root.code;
+            font-family: "monospace";
+            font-size: 24px;
+            font-weight: 700;
+            color: Palette.foreground;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            accessible-label: T.recovery-title;
+        }
+    }
+    ButtonRow {
+        ActionButton {
+            text: T.acknowledge;
+            clicked => { root.acknowledge(); }
+        }
+    }
+
+    init => {
+        field.focus();
+        field.select-all();
+    }
+}

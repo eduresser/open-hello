@@ -39,10 +39,10 @@
 
 ## T-065 — GTK 4 / libadwaita shell [done]
 - Refs: AC-058, AC-059, AC-062
-- Files: crates/openhello-gui/Cargo.toml, crates/openhello-gui/src/main.rs, crates/openhello-gui/src/window.rs, crates/openhello-gui/src/capture_view.rs, Cargo.toml
+- Files: crates/openhello-gui/Cargo.toml, crates/openhello-gui/src/main.rs, Cargo.toml
 - Model: claude-sonnet-5
 - Effort: high
-- Notes: depends on T-064. Excluded from `default-members` so `cargo test` needs no GTK; oval guide and progress ring drawn over the preview.
+- Notes: superseded by T-069 (GTK shell removed; see git history f68e6a3). Was excluded from `default-members` so `cargo test` needs no GTK; oval guide and progress ring drawn over the preview.
 
 ## T-066 — Desktop entry and installer step [pending]
 
@@ -66,10 +66,9 @@
 - Effort: high
 - Notes: depends on T-067. A readiness check the window runs before the welcome screen enables Get started; it reports the typed causes of T-061 without turning on the camera.
 
-## T-069 — Slint shell replaces the GTK shell [pending]
-
+## T-069 — Slint shell replaces the GTK shell [done]
 - Refs: AC-058, AC-059, AC-062, AC-065, AC-066, AC-070, ASM-020
-- Files: crates/openhello-gui/Cargo.toml, crates/openhello-gui/build.rs, crates/openhello-gui/src/main.rs, Cargo.toml
+- Files: crates/openhello-gui/Cargo.toml, crates/openhello-gui/build.rs, crates/openhello-gui/LICENSE, crates/openhello-gui/src/main.rs, crates/openhello-gui/src/backend.rs, crates/openhello-gui/src/capture.rs, crates/openhello-gui/src/demo.rs, crates/openhello-gui/src/options.rs, crates/openhello-gui/src/stats.rs, crates/openhello-gui/src/view.rs, crates/openhello-gui/ui/app.slint, crates/openhello-gui/ui/components.slint, crates/openhello-gui/ui/texts.slint, crates/openhello-gui/ui/welcome.slint, crates/openhello-gui/ui/identity.slint, crates/openhello-gui/ui/capture.slint, crates/openhello-gui/ui/recovery.slint, crates/openhello-gui/ui/done.slint, crates/openhello-gui/ui/error.slint, crates/openhello-gui/ui/manage.slint, Cargo.toml
 - Model: claude-sonnet-5
 - Effort: high
 - Notes: depends on T-068. Built from the Slint prototype; the GTK sources are removed; the crate is GPL-3.0-only; T-065 is marked superseded.
