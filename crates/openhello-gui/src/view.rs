@@ -2,8 +2,9 @@ use openhello_gui_core::{FailureCause, Strings, TestOutcome, Text};
 use slint::{ComponentHandle, Image, Rgb8Pixel, SharedPixelBuffer, SharedString};
 
 use crate::backend::Event;
+use crate::gate;
 use crate::capture::CaptureView;
-use crate::{MainWindow, Page, T};
+use crate::{trace, MainWindow, Page, T};
 
 pub fn init(window: &MainWindow, strings: &Strings) {
     let texts = window.global::<T>();
@@ -30,6 +31,12 @@ pub fn init(window: &MainWindow, strings: &Strings) {
 }
 
 pub fn apply(window: &MainWindow, strings: &Strings, event: Event) {
+    let name = event.name();
+    handle(window, strings, event);
+    trace::log(format!("ui applied {name}, page {:?}", window.get_page()));
+}
+
+fn handle(window: &MainWindow, strings: &Strings, event: Event) {
     match event {
         Event::Welcome { blocked } => show_welcome(window, strings, blocked),
         Event::Identity => show(window, Page::Identity),
@@ -44,8 +51,7 @@ pub fn apply(window: &MainWindow, strings: &Strings, event: Event) {
 
 fn show(window: &MainWindow, page: Page) {
     window.set_page(page);
-    window.set_busy(false);
-    window.set_testing(false);
+    gate::settle(window);
     window.set_test_result(SharedString::new());
     window.set_confirming(false);
 }

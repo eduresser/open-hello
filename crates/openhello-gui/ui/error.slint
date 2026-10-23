@@ -4,6 +4,7 @@ import { T } from "texts.slint";
 export component ErrorPage inherits Column {
     in property <string> title;
     in property <string> body;
+    in property <bool> busy;
     callback retry();
     callback delete-data();
 
@@ -12,6 +13,7 @@ export component ErrorPage inherits Column {
     ButtonRow {
         ActionButton {
             text: T.try-again;
+            enabled: !root.busy;
             clicked => { root.retry(); }
         }
     }

@@ -121,3 +121,10 @@
 - Model: claude-sonnet-5
 - Effort: high
 - Notes: VM kde-neon 2026-10-23: right after a window enrollment, Test (`Verify`) failed 3 of 3 for about 40 s with "camera keeps delivering incomplete frames" (kernel: xhci short packet), then recovered alone; cause not confirmed. Diagnostics: the error now carries the count and the last bytesused/flags, and the sensor plugin logs `camera-open`, `camera-open-failed` and `camera-release` lines (reason, since_release_ms, open_ms, good_frames); the daemon logs `sensor-release reason=`. Mitigation: only the incomplete-frames start failure reopens the session, up to 2 times with 500 ms and 1500 ms pauses (injectable); everything else fails at once.
+
+## T-077 — First click handling and input trace [done]
+- Refs: AC-076, AC-058, AC-062
+- Files: crates/openhello-gui/Cargo.toml, crates/openhello-gui/src/main.rs, crates/openhello-gui/src/gate.rs, crates/openhello-gui/src/trace.rs, crates/openhello-gui/src/options.rs, crates/openhello-gui/src/view.rs, crates/openhello-gui/src/backend.rs, crates/openhello-gui/ui/app.slint, crates/openhello-gui/ui/welcome.slint, crates/openhello-gui/ui/error.slint, crates/openhello-gui/ui/capture.slint, README.md
+- Model: claude-sonnet-5
+- Effort: high
+- Notes: owner report 2026-10-23, KDE Plasma Wayland: the first click on Set up, Cancel and Test sometimes does nothing, unpredictable. Slint 1.18.1 and winit 0.30.13 do not drop a press on an unfocused window (the press uses the last CursorMoved position and Wayland sends one on enter), so no focus workaround is added. Set up, Try again and Cancel now share the busy guard of the other buttons (immediate disabled feedback, repeats ignored); `--trace-input` (feature `unstable-winit-030`, API only) prints the timeline to stderr. Real behavior depends on the compositor and is confirmed only on the VM.

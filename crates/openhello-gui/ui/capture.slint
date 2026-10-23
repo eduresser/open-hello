@@ -84,6 +84,7 @@ export component CapturePage inherits Rectangle {
     in property <string> guidance;
     in property <float> progress;
     in property <bool> accepted;
+    in property <bool> busy;
     callback cancel();
 
     VerticalLayout {
@@ -116,6 +117,7 @@ export component CapturePage inherits Rectangle {
             alignment: center;
             Button {
                 text: T.cancel;
+                enabled: !root.busy;
                 clicked => { root.cancel(); }
             }
         }

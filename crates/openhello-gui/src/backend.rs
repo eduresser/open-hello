@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use openhello_gui_core::{ClientResult, EnrollClient, EnrollmentFlow, FailureCause, Language, ManageClient, Manager, RemoveOutcome, Step, TestOutcome};
 
 use crate::capture::CaptureView;
+use crate::trace;
 
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
 const JOIN_POLL: Duration = Duration::from_millis(20);
@@ -18,6 +19,19 @@ pub enum Command {
     Shutdown,
 }
 
+impl Command {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Command::Start => "start",
+            Command::Retry => "retry",
+            Command::Cancel => "cancel",
+            Command::Test => "test",
+            Command::Remove => "remove",
+            Command::Shutdown => "shutdown",
+        }
+    }
+}
+
 pub enum Event {
     Welcome { blocked: Option<FailureCause> },
     Identity,
@@ -27,6 +41,25 @@ pub enum Event {
     Failed(FailureCause),
     Manage { blocked: Option<FailureCause> },
     TestResult(TestOutcome),
+}
+
+impl Event {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Event::Welcome { blocked: None } => "welcome",
+            Event::Welcome { blocked: Some(_) } => "blocked",
+            Event::Identity => "identity",
+            Event::CaptureStarted => "capture",
+            Event::Capture(_) => "capture-frame",
+            Event::Done => "done",
+            Event::Failed(_) => "failed",
+            Event::Manage { blocked: None } => "manage",
+            Event::Manage { blocked: Some(_) } => "manage-blocked",
+            Event::TestResult(TestOutcome::Recognized) => "recognized",
+            Event::TestResult(TestOutcome::NotRecognized) => "not-recognized",
+            Event::TestResult(TestOutcome::Failed(_)) => "test-failed",
+        }
+    }
 }
 
 pub struct Backend {
@@ -113,6 +146,13 @@ impl<C: EnrollClient + ManageClient, E: Fn(Event) -> bool> Worker<'_, C, E> {
     }
 
     fn handle(&mut self, command: Command) {
+        let name = command.name();
+        trace::log(format!("worker began {name}"));
+        self.dispatch(command);
+        trace::log(format!("worker finished {name}"));
+    }
+
+    fn dispatch(&mut self, command: Command) {
         match command {
             Command::Start => self.start(),
             Command::Retry => self.retry(),
@@ -229,6 +269,7 @@ impl<C: EnrollClient + ManageClient, E: Fn(Event) -> bool> Worker<'_, C, E> {
     fn interrupted(&mut self) -> bool {
         match self.inbox.try_recv() {
             Ok(Command::Cancel) => {
+                trace::log("worker took cancel during capture");
                 self.cancel();
                 true
             }
@@ -236,7 +277,11 @@ impl<C: EnrollClient + ManageClient, E: Fn(Event) -> bool> Worker<'_, C, E> {
                 self.stop();
                 true
             }
-            Ok(_) | Err(TryRecvError::Empty) => false,
+            Ok(other) => {
+                trace::log(format!("worker dropped {} during capture", other.name()));
+                false
+            }
+            Err(TryRecvError::Empty) => false,
         }
     }
 
@@ -260,6 +305,7 @@ impl<C: EnrollClient + ManageClient, E: Fn(Event) -> bool> Worker<'_, C, E> {
     }
 
     fn send(&mut self, event: Event) {
+        trace::log(format!("worker emits {}", event.name()));
         if !(self.emit)(event) {
             self.stop();
         }
@@ -380,20 +426,7 @@ mod tests {
     }
 
     fn name(event: &Event) -> &'static str {
-        match event {
-            Event::Welcome { blocked: None } => "welcome",
-            Event::Welcome { blocked: Some(_) } => "blocked",
-            Event::Identity => "identity",
-            Event::CaptureStarted => "capture",
-            Event::Capture(_) => "frame",
-            Event::Done => "done",
-            Event::Failed(_) => "failed",
-            Event::Manage { blocked: None } => "manage",
-            Event::Manage { blocked: Some(_) } => "manage-blocked",
-            Event::TestResult(TestOutcome::Recognized) => "recognized",
-            Event::TestResult(TestOutcome::NotRecognized) => "not-recognized",
-            Event::TestResult(TestOutcome::Failed(_)) => "test-failed",
-        }
+        event.name()
     }
 
     fn names(events: &[Event]) -> Vec<&'static str> {
@@ -410,7 +443,7 @@ mod tests {
         harness.send(Command::Start);
         seen.extend(harness.until(|event| matches!(event, Event::Done)));
         harness.backend.shutdown();
-        assert_eq!(names(&seen), ["welcome", "identity", "capture", "frame", "done"]);
+        assert_eq!(names(&seen), ["welcome", "identity", "capture", "capture-frame", "done"]);
     }
 
     // @spec:AC-062
@@ -519,7 +552,7 @@ mod tests {
         harness.send(Command::Start);
         let seen = harness.until(|event| matches!(event, Event::Done));
         harness.backend.shutdown();
-        assert_eq!(names(&seen), ["identity", "capture", "frame", "done"]);
+        assert_eq!(names(&seen), ["identity", "capture", "capture-frame", "done"]);
     }
 
     // @spec:AC-071
@@ -581,6 +614,6 @@ mod tests {
         harness.send(Command::Start);
         let again = harness.until(|event| matches!(event, Event::Done));
         harness.backend.shutdown();
-        assert_eq!(names(&again), ["identity", "capture", "frame", "done"]);
+        assert_eq!(names(&again), ["identity", "capture", "capture-frame", "done"]);
     }
 }

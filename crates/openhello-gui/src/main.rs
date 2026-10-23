@@ -2,7 +2,9 @@ mod backend;
 mod capture;
 mod demo;
 mod options;
+mod gate;
 mod stats;
+mod trace;
 mod view;
 
 use std::process::ExitCode;
@@ -12,6 +14,7 @@ use std::sync::Arc;
 
 use openhello_cli::Bus;
 use openhello_gui_core::{DaemonClient, Language, Strings};
+use slint::winit_030::{winit, EventResult, WinitWindowAccessor};
 use slint::ComponentHandle;
 
 use backend::{Backend, Command};
@@ -28,6 +31,10 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if options.trace_input {
+        trace::enable();
+        trace_pointer(&window);
+    }
     let strings = Strings::new(Language::detect());
     view::init(&window, &strings);
     let mut backend = launch(&options, &window, strings);
@@ -61,30 +68,53 @@ fn demo_factory(mode: DemoMode) -> impl Fn() -> Result<demo::DemoClient, openhel
 }
 
 fn wire(window: &MainWindow, commands: &Sender<Command>) {
-    window.on_get_started(sender(commands, || Command::Start));
-    window.on_retry(sender(commands, || Command::Retry));
-    window.on_cancel(sender(commands, || Command::Cancel));
-    window.on_set_up_again(busy_sender(window, commands, false, || Command::Start));
-    window.on_test(busy_sender(window, commands, true, || Command::Test));
-    window.on_delete(busy_sender(window, commands, false, || Command::Remove));
+    window.on_get_started(busy_sender(window, commands, "set up", false, || Command::Start));
+    window.on_retry(busy_sender(window, commands, "try again", false, || Command::Retry));
+    window.on_cancel(busy_sender(window, commands, "cancel", false, || Command::Cancel));
+    window.on_set_up_again(busy_sender(window, commands, "set up again", false, || Command::Start));
+    window.on_test(busy_sender(window, commands, "test", true, || Command::Test));
+    window.on_delete(busy_sender(window, commands, "delete", false, || Command::Remove));
 }
 
-fn sender(commands: &Sender<Command>, command: fn() -> Command) -> impl Fn() + 'static {
-    let commands = commands.clone();
-    move || {
-        let _ = commands.send(command());
+impl gate::Flags for MainWindow {
+    fn busy(&self) -> bool {
+        self.get_busy()
+    }
+
+    fn set_busy(&self, busy: bool) {
+        MainWindow::set_busy(self, busy);
+    }
+
+    fn set_testing(&self, testing: bool) {
+        MainWindow::set_testing(self, testing);
     }
 }
 
-fn busy_sender(window: &MainWindow, commands: &Sender<Command>, testing: bool, command: fn() -> Command) -> impl Fn() + 'static {
-    let (weak, send) = (window.as_weak(), sender(commands, command));
+fn busy_sender(window: &MainWindow, commands: &Sender<Command>, button: &'static str, testing: bool, command: fn() -> Command) -> impl Fn() + 'static {
+    let (weak, commands) = (window.as_weak(), commands.clone());
     move || {
         let Some(window) = weak.upgrade() else { return };
-        if window.get_busy() {
+        if !gate::begin(&window, testing) {
+            trace::log(format!("clicked {button}, ignored while busy"));
             return;
         }
-        window.set_busy(true);
-        window.set_testing(testing);
-        send();
+        let command = command();
+        trace::log(format!("clicked {button}, sending {}", command.name()));
+        let _ = commands.send(command);
     }
+}
+
+fn trace_pointer(window: &MainWindow) {
+    let mut cursor = (0.0, 0.0);
+    window.window().on_winit_window_event(move |_, event| {
+        match event {
+            winit::event::WindowEvent::CursorMoved { position, .. } => cursor = (position.x, position.y),
+            winit::event::WindowEvent::CursorEntered { .. } => trace::log("pointer entered"),
+            winit::event::WindowEvent::CursorLeft { .. } => trace::log("pointer left"),
+            winit::event::WindowEvent::Focused(focused) => trace::log(format!("window focused={focused}")),
+            winit::event::WindowEvent::MouseInput { state, button, .. } => trace::log(format!("pointer {state:?} {button:?} at {:.0},{:.0}", cursor.0, cursor.1)),
+            _ => {}
+        }
+        EventResult::Propagate
+    });
 }

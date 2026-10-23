@@ -103,6 +103,12 @@ As a laptop owner, I want to test and delete my face from the same app, so that 
 - **When** the result is shown
 - **Then** the main screen shows a short sentence at its top ("It recognized you.", "Your face was not recognized. Test again or set it up again." or "The test could not run: " followed by the cause in plain words), no full-screen error is shown, and Test and Set up again stay available; Set up again goes straight to the identity check and replaces the existing data
 
+#### AC-076 — The first click on a button works even when the window had no focus
+
+- **Given** the window was not focused (or the click came while the worker was still busy with the previous step)
+- **When** the user clicks a button
+- **Then** the click is handled the first time: the button is disabled at once as feedback, a repeated click on it is ignored until the next screen is shown, and `--trace-input` prints each pointer event, click, worker command and screen change with its time and no frame data (principle P-010)
+
 #### AC-066 — Deleting the face asks for confirmation and reauthentication
 
 - **Given** a user with a face set up
