@@ -50,7 +50,7 @@
 - Files: packaging/openhello.desktop, scripts/install.sh
 - Model: claude-sonnet-5
 - Effort: low
-- Notes: depends on T-069. Settings category entry; the installer builds the window with cargo, and if that build fails it warns and continues.
+- Notes: depends on T-069. Settings category entry; the installer builds the window with cargo when `pkg-config` finds fontconfig and freetype2; otherwise it skips the window and names the packages (fontconfig-devel and freetype2-devel on openSUSE/Fedora, libfontconfig-dev and libfreetype-dev on Debian/Ubuntu, fontconfig and freetype2 on Arch).
 
 ## T-067 — Remove the PIN step from the wizard [done]
 - Refs: AC-058, AC-060, ASM-024
