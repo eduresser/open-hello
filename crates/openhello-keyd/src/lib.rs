@@ -12,7 +12,9 @@ mod token_socket;
 mod tpm;
 mod unlock_socket;
 
-pub use protector::{LockoutPolicy, Protectors, RecoveryCode};
+pub use protector::{
+    parse_da_state, DaState, LockoutOutcome, LockoutPolicy, Protectors, RecoveryCode,
+};
 pub use provision::{KeyAttribute, KeyInfo, Keyd, Provisioned, TpmAttributes};
 pub use ticket_socket::{
     TicketSocket, TicketSocketConfig, OP_TICKET, OP_TICKET_KEY, STATUS_ACCEPTED, STATUS_REFUSED,

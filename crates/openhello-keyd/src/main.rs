@@ -8,7 +8,10 @@ use openhello_keyd::dbus_service::{
     Authorizer, RootOnlyAuthorizer, Service, BUS_NAME, OBJECT_PATH,
 };
 use openhello_keyd::polkit::{DbusPolkit, PolkitAuthorizer};
-use openhello_keyd::{LockoutPolicy, Protectors, TicketSocket, TokenSocket, UnlockSocket};
+use openhello_keyd::logging::{log, Level, Value};
+use openhello_keyd::{
+    LockoutOutcome, LockoutPolicy, Protectors, TicketSocket, TokenSocket, UnlockSocket,
+};
 
 const STOP_POLL: Duration = Duration::from_millis(200);
 
@@ -21,9 +24,21 @@ extern "C" fn request_stop(_: libc::c_int) {
 fn run(config: DaemonConfig) -> Result<(), String> {
     openhello_keyd::logging::set_level(config.log_level);
     let protectors = Arc::new(Protectors::new(config.keyd).map_err(|e| e.to_string())?);
-    protectors
-        .apply_lockout_policy(&LockoutPolicy::RECOMMENDED)
+    let outcome = protectors
+        .ensure_lockout_policy(&LockoutPolicy::RECOMMENDED)
         .map_err(|e| format!("cannot apply the TPM lockout policy: {e}"))?;
+    if let LockoutOutcome::KeptExisting(state) = outcome {
+        log(
+            Level::Warn,
+            "lockout-policy-kept",
+            &[
+                ("reason", Value::Label("lockoutAuth is owned by another system")),
+                ("max_tries", Value::Count(state.max_tries.into())),
+                ("recovery_time_s", Value::Count(state.recovery_time_s.into())),
+                ("lockout_recovery_time_s", Value::Count(state.lockout_recovery_time_s.into())),
+            ],
+        );
+    }
     protectors.keyd().backfill_auth_keys();
     let _ticket_socket =
         TicketSocket::bind(protectors.clone(), config.ticket).map_err(|e| e.to_string())?;
