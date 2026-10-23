@@ -52,8 +52,7 @@
 - Effort: low
 - Notes: depends on T-069. Settings category entry; the installer builds the window with cargo, and if that build fails it warns and continues.
 
-## T-067 — Remove the PIN step from the wizard [pending]
-
+## T-067 — Remove the PIN step from the wizard [done]
 - Refs: AC-058, AC-060, ASM-024
 - Files: crates/openhello-gui-core/src/wizard.rs, crates/openhello-gui-core/src/strings.rs, crates/openhello-gui-core/src/client.rs, crates/openhello-gui-core/tests/wizard.rs, crates/openhello-gui-core/tests/strings.rs, crates/openhello-gui-core/tests/common/mod.rs
 - Model: claude-sonnet-5

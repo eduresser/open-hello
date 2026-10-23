@@ -63,7 +63,7 @@ fn the_wizard_wording_says_openhello_and_has_no_typo() {
         .into_iter()
         .flat_map(|language| {
             let strings = Strings::new(language);
-            [Text::WelcomeTitle, Text::DoneBody, Text::NoCameraBody, Text::PinBody].map(|text| strings.get(text))
+            [Text::WelcomeTitle, Text::DoneBody, Text::NoCameraBody, Text::IdentityBody].map(|text| strings.get(text))
         })
         .collect();
     assert!(all.iter().all(|text| !text.contains("Windows Hello")));

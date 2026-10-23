@@ -9,7 +9,6 @@ pub struct Calls {
     pub discards: u32,
     pub commits: u32,
     pub provisions: u32,
-    pub pins: Vec<String>,
     pub events: Vec<&'static str>,
 }
 
@@ -28,7 +27,7 @@ pub fn fake(status: Status, progress: Vec<ClientResult<Progress>>) -> (FakeClien
 }
 
 pub fn fresh() -> Status {
-    Status { face: false, key: false, pin: false }
+    Status { face: false, key: false }
 }
 
 pub fn step(verdict: &str, state: &str, filled: u32) -> ClientResult<Progress> {
@@ -70,13 +69,6 @@ impl EnrollClient for FakeClient {
 
     fn enroll_discard(&mut self, _handle: &str) -> ClientResult<()> {
         self.calls.borrow_mut().discards += 1;
-        Ok(())
-    }
-
-    fn set_pin(&mut self, _uid: u32, pin: &str) -> ClientResult<()> {
-        let mut calls = self.calls.borrow_mut();
-        calls.pins.push(pin.into());
-        calls.events.push("pin");
         Ok(())
     }
 
