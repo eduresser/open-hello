@@ -89,3 +89,39 @@ export component ButtonRow inherits HorizontalLayout {
     alignment: center;
     spacing: 12px;
 }
+
+export component LinkButton inherits Rectangle {
+    in property <string> text;
+    callback clicked();
+
+    preferred-width: label.preferred-width + 16px;
+    height: 32px;
+    border-radius: 4px;
+    border-width: scope.has-focus ? 2px : 0px;
+    border-color: Palette.foreground;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { root.clicked(); }
+
+    label := Text {
+        text: root.text;
+        color: touch.has-hover ? Brand.danger : Palette.foreground.with-alpha(0.7);
+        font-size: 14px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    scope := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}

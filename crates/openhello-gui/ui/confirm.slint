@@ -1,0 +1,67 @@
+import { Button, Palette } from "std-widgets.slint";
+import { ActionButton, Brand, ButtonRow } from "components.slint";
+import { T } from "texts.slint";
+
+export component ConfirmRemoval inherits Rectangle {
+    callback confirmed();
+    callback dismissed();
+
+    background: #000000a0;
+
+    TouchArea {}
+
+    scope := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.dismissed();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    HorizontalLayout {
+        alignment: center;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: min(440px, root.width - 48px);
+                background: Palette.background;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: Palette.foreground.with-alpha(0.2);
+                VerticalLayout {
+                    padding: 24px;
+                    spacing: 16px;
+                    Text {
+                        text: T.remove-confirm-title;
+                        font-size: 20px;
+                        font-weight: 700;
+                        color: Palette.foreground;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: T.remove-confirm-body;
+                        font-size: 15px;
+                        color: Palette.foreground.with-alpha(0.78);
+                        wrap: word-wrap;
+                    }
+                    ButtonRow {
+                        alignment: end;
+                        Button {
+                            text: T.cancel;
+                            clicked => { root.dismissed(); }
+                        }
+                        ActionButton {
+                            text: T.remove;
+                            tone: Brand.danger;
+                            clicked => { root.confirmed(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    init => { scope.focus(); }
+}

@@ -24,6 +24,7 @@ pub fn init(window: &MainWindow, strings: &Strings) {
     texts.set_test(get(Text::TestFace));
     texts.set_testing(get(Text::Testing));
     texts.set_remove(get(Text::RemoveFace));
+    texts.set_remove_data(get(Text::RemoveFaceData));
     texts.set_remove_confirm_title(get(Text::RemoveConfirmTitle));
     texts.set_remove_confirm_body(get(Text::RemoveConfirmBody));
     texts.set_set_up_again(get(Text::SetUpAgain));
@@ -31,7 +32,7 @@ pub fn init(window: &MainWindow, strings: &Strings) {
 
 pub fn apply(window: &MainWindow, strings: &Strings, event: Event) {
     match event {
-        Event::Welcome(cause) => show_welcome(window, strings, cause),
+        Event::Welcome { blocked, removable } => show_welcome(window, strings, blocked, removable),
         Event::Identity => show(window, Page::Identity),
         Event::CaptureStarted => show_capture_start(window),
         Event::Capture(view) => show_capture(window, view),
@@ -50,7 +51,8 @@ fn show(window: &MainWindow, page: Page) {
     window.set_confirming(false);
 }
 
-fn show_welcome(window: &MainWindow, strings: &Strings, cause: Option<FailureCause>) {
+fn show_welcome(window: &MainWindow, strings: &Strings, cause: Option<FailureCause>, removable: bool) {
+    window.set_removable(removable);
     window.set_blocked(cause.is_some());
     if let Some(cause) = cause {
         window.set_blocked_title(strings.blocked_title().into());

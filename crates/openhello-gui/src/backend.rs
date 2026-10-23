@@ -19,7 +19,7 @@ pub enum Command {
 }
 
 pub enum Event {
-    Welcome(Option<FailureCause>),
+    Welcome { blocked: Option<FailureCause>, removable: bool },
     Identity,
     CaptureStarted,
     Capture(CaptureView),
@@ -83,7 +83,7 @@ fn connect<C: EnrollClient + ManageClient>(factory: &impl Fn() -> ClientResult<C
 fn wait_for_retry(inbox: &Receiver<Command>) -> bool {
     loop {
         match inbox.recv() {
-            Ok(Command::Retry) => return true,
+            Ok(Command::Retry | Command::Remove) => return true,
             Ok(Command::Shutdown) | Err(_) => return false,
             Ok(_) => {}
         }
@@ -126,11 +126,16 @@ impl<C: EnrollClient + ManageClient, E: Fn(Event) -> bool> Worker<'_, C, E> {
     fn launch(&mut self) {
         match self.manager.status() {
             Ok(status) => {
-                self.face = status.face;
+                self.set_face(status.face);
                 self.home();
             }
             Err(error) => self.send(Event::Failed(error.kind.into())),
         }
+    }
+
+    fn set_face(&mut self, face: bool) {
+        self.face = face;
+        self.flow.set_face(face);
     }
 
     fn home(&mut self) {
@@ -189,7 +194,8 @@ impl<C: EnrollClient + ManageClient, E: Fn(Event) -> bool> Worker<'_, C, E> {
     fn remove(&mut self) {
         match self.manager.remove(true) {
             RemoveOutcome::Removed(status) => {
-                self.face = status.face;
+                self.flow.reset_after_removal();
+                self.set_face(status.face);
                 self.home();
             }
             RemoveOutcome::Failed(error) => self.send(Event::Failed(error.kind.into())),
@@ -239,17 +245,21 @@ impl<C: EnrollClient + ManageClient, E: Fn(Event) -> bool> Worker<'_, C, E> {
 
     fn emit_step(&mut self) {
         let event = match self.flow.step() {
-            Step::Welcome => Event::Welcome(self.flow.blocked()),
+            Step::Welcome => self.welcome(self.flow.blocked()),
             Step::Identity if self.begun => Event::Identity,
-            Step::Identity => Event::Welcome(None),
+            Step::Identity => self.welcome(None),
             Step::Capture => Event::CaptureStarted,
             Step::Done => {
-                self.face = true;
+                self.set_face(true);
                 Event::Done
             }
             Step::Error(cause) => Event::Failed(cause),
         };
         self.send(event);
+    }
+
+    fn welcome(&self, blocked: Option<FailureCause>) -> Event {
+        Event::Welcome { blocked, removable: self.flow.removal_offered() }
     }
 
     fn send(&mut self, event: Event) {
@@ -269,6 +279,8 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::sync::mpsc::RecvTimeoutError;
     use std::sync::Arc;
+
+    use openhello_gui_core::{ClientError, ClientErrorKind, Frame, Progress, Status};
 
     use crate::demo::DemoClient;
     use crate::options::DemoMode;
@@ -312,10 +324,70 @@ mod tests {
         }
     }
 
+    struct RefusedCamera(DemoClient);
+
+    impl EnrollClient for RefusedCamera {
+        fn check_ready(&mut self) -> ClientResult<()> {
+            self.0.check_ready()
+        }
+
+        fn status(&mut self, uid: u32) -> ClientResult<Status> {
+            EnrollClient::status(&mut self.0, uid)
+        }
+
+        fn enroll_begin(&mut self, _uid: u32) -> ClientResult<String> {
+            Err(ClientError::new(ClientErrorKind::CameraBusy, "demo"))
+        }
+
+        fn enroll_capture(&mut self, handle: &str) -> ClientResult<Progress> {
+            self.0.enroll_capture(handle)
+        }
+
+        fn enroll_frame(&mut self, handle: &str) -> ClientResult<Frame> {
+            self.0.enroll_frame(handle)
+        }
+
+        fn enroll_commit(&mut self, handle: &str) -> ClientResult<()> {
+            self.0.enroll_commit(handle)
+        }
+
+        fn enroll_discard(&mut self, handle: &str) -> ClientResult<()> {
+            self.0.enroll_discard(handle)
+        }
+
+        fn provision(&mut self, uid: u32) -> ClientResult<String> {
+            self.0.provision(uid)
+        }
+    }
+
+    impl ManageClient for RefusedCamera {
+        fn status(&mut self, uid: u32) -> ClientResult<Status> {
+            ManageClient::status(&mut self.0, uid)
+        }
+
+        fn verify(&mut self, uid: u32) -> ClientResult<bool> {
+            self.0.verify(uid)
+        }
+
+        fn purge(&mut self, uid: u32) -> ClientResult<()> {
+            self.0.purge(uid)
+        }
+    }
+
+    fn refused_camera_harness() -> Harness {
+        let (sender, events) = mpsc::channel();
+        let face = Arc::new(AtomicBool::new(false));
+        let factory = move || Ok(RefusedCamera(DemoClient::paced(DemoMode::default(), face.clone(), Duration::ZERO)));
+        let emit = move |event| sender.send(event).is_ok();
+        Harness { backend: spawn(factory, 1000, Language::English, emit), events }
+    }
+
     fn name(event: &Event) -> &'static str {
         match event {
-            Event::Welcome(None) => "welcome",
-            Event::Welcome(Some(_)) => "blocked",
+            Event::Welcome { blocked: None, removable: false } => "welcome",
+            Event::Welcome { blocked: None, removable: true } => "welcome-removable",
+            Event::Welcome { blocked: Some(_), removable: false } => "blocked",
+            Event::Welcome { blocked: Some(_), removable: true } => "blocked-removable",
             Event::Identity => "identity",
             Event::CaptureStarted => "capture",
             Event::Capture(_) => "frame",
@@ -337,7 +409,7 @@ mod tests {
     #[test]
     fn the_worker_walks_welcome_identity_capture_and_done() {
         let mut harness = harness(DemoMode::default());
-        let mut seen = harness.until(|event| matches!(event, Event::Welcome(None)));
+        let mut seen = harness.until(|event| matches!(event, Event::Welcome { blocked: None, .. }));
         harness.send(Command::Start);
         seen.extend(harness.until(|event| matches!(event, Event::Done)));
         harness.backend.shutdown();
@@ -351,9 +423,9 @@ mod tests {
         harness.send(Command::Start);
         harness.until(|event| matches!(event, Event::Capture(_)));
         harness.send(Command::Cancel);
-        let after = harness.until(|event| matches!(event, Event::Welcome(_)));
+        let after = harness.until(|event| matches!(event, Event::Welcome { .. }));
         harness.backend.shutdown();
-        assert!(matches!(after.last(), Some(Event::Welcome(None))));
+        assert!(matches!(after.last(), Some(Event::Welcome { blocked: None, .. })));
         assert!(harness.events.try_recv().is_err());
     }
 
@@ -361,11 +433,11 @@ mod tests {
     #[test]
     fn a_blocked_computer_shows_the_cause_and_start_creates_no_capture() {
         let mut harness = harness(DemoMode { blocked: true, ..DemoMode::default() });
-        let first = harness.until(|event| matches!(event, Event::Welcome(_)));
+        let first = harness.until(|event| matches!(event, Event::Welcome { .. }));
         harness.send(Command::Start);
-        let second = harness.until(|event| matches!(event, Event::Welcome(_)));
+        let second = harness.until(|event| matches!(event, Event::Welcome { .. }));
         harness.send(Command::Retry);
-        let third = harness.until(|event| matches!(event, Event::Welcome(_)));
+        let third = harness.until(|event| matches!(event, Event::Welcome { .. }));
         harness.backend.shutdown();
         for events in [first, second, third] {
             assert_eq!(names(&events), ["blocked"]);
@@ -390,7 +462,7 @@ mod tests {
         let mut harness = harness(DemoMode { enrolled: true, ..DemoMode::default() });
         harness.until(|event| matches!(event, Event::Manage));
         harness.send(Command::Remove);
-        let after = harness.until(|event| matches!(event, Event::Welcome(_)));
+        let after = harness.until(|event| matches!(event, Event::Welcome { .. }));
         harness.backend.shutdown();
         assert_eq!(names(&after), ["welcome"]);
     }
@@ -403,5 +475,45 @@ mod tests {
         let second = harness.until(|event| matches!(event, Event::Failed(_)));
         harness.backend.shutdown();
         assert_eq!((names(&first), names(&second)), (vec!["failed"], vec!["failed"]));
+    }
+
+    // @spec:AC-066
+    // @spec:AC-071
+    #[test]
+    fn removal_from_an_error_screen_returns_to_the_welcome_with_the_face_not_set_up() {
+        let mut harness = refused_camera_harness();
+        harness.until(|event| matches!(event, Event::Welcome { .. }));
+        harness.send(Command::Start);
+        let failed = harness.until(|event| matches!(event, Event::Failed(_)));
+        harness.send(Command::Remove);
+        let after = harness.until(|event| matches!(event, Event::Welcome { .. }));
+        harness.backend.shutdown();
+        assert_eq!(names(&failed), ["identity", "failed"]);
+        assert_eq!(names(&after), ["welcome"]);
+    }
+
+    // @spec:AC-071
+    #[test]
+    fn a_blocked_welcome_reached_through_set_up_again_offers_removal_until_it_is_done() {
+        let mut harness = harness(DemoMode { enrolled: true, blocked: true, ..DemoMode::default() });
+        harness.until(|event| matches!(event, Event::Manage));
+        harness.send(Command::Start);
+        let blocked = harness.until(|event| matches!(event, Event::Welcome { .. }));
+        harness.send(Command::Remove);
+        let after = harness.until(|event| matches!(event, Event::Welcome { .. }));
+        harness.backend.shutdown();
+        assert_eq!(names(&blocked), ["blocked-removable"]);
+        assert_eq!(names(&after), ["blocked"]);
+    }
+
+    // @spec:AC-071
+    #[test]
+    fn a_status_that_cannot_be_read_shows_an_error_and_a_removal_that_cannot_finish_stays_there() {
+        let mut harness = harness(DemoMode { fail: true, ..DemoMode::default() });
+        harness.until(|event| matches!(event, Event::Failed(_)));
+        harness.send(Command::Remove);
+        let after = harness.until(|event| matches!(event, Event::Failed(_)));
+        harness.backend.shutdown();
+        assert_eq!(names(&after), ["failed"]);
     }
 }

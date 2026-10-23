@@ -170,11 +170,12 @@ pub struct EnrollmentFlow<C: EnrollClient> {
     session: Option<String>,
     committed: bool,
     blocked: Option<FailureCause>,
+    face: bool,
 }
 
 impl<C: EnrollClient> EnrollmentFlow<C> {
     pub fn new(client: C, uid: u32, language: Language) -> Self {
-        Self { client, uid, strings: Strings::new(language), wizard: Wizard::new(), session: None, committed: false, blocked: None }
+        Self { client, uid, strings: Strings::new(language), wizard: Wizard::new(), session: None, committed: false, blocked: None, face: false }
     }
 
     pub fn step(&self) -> Step {
@@ -187,6 +188,27 @@ impl<C: EnrollClient> EnrollmentFlow<C> {
 
     pub fn blocked(&self) -> Option<FailureCause> {
         self.blocked
+    }
+
+    pub fn face_enrolled(&self) -> bool {
+        self.face
+    }
+
+    pub fn set_face(&mut self, face: bool) {
+        self.face = face;
+    }
+
+    pub fn removal_offered(&self) -> bool {
+        match self.step() {
+            Step::Welcome => self.face,
+            Step::Error(_) => true,
+            Step::Identity | Step::Capture | Step::Done => false,
+        }
+    }
+
+    pub fn reset_after_removal(&mut self) {
+        self.restart();
+        self.face = false;
     }
 
     pub fn start(&mut self) {
@@ -202,6 +224,7 @@ impl<C: EnrollClient> EnrollmentFlow<C> {
     fn read_status(&mut self) {
         match self.client.status(self.uid) {
             Ok(status) => {
+                self.face = status.face;
                 self.wizard.set_plan(Plan { key: !status.key });
                 self.wizard.advance();
             }

@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
 
-use openhello_gui_core::{ClientError, ClientErrorKind, ClientResult, EnrollClient, Frame, Progress, Status};
+use openhello_gui_core::{ClientError, ClientErrorKind, ClientResult, EnrollClient, Frame, ManageClient, Progress, Status};
 
 pub const RECOVERY_CODE: &str = "RC-7Q2M-4KXD-91";
 
@@ -14,6 +14,9 @@ pub struct Calls {
     pub begins: u32,
     pub ready_error: Option<ClientErrorKind>,
     pub status_error: bool,
+    pub purges: u32,
+    pub purge_error: Option<ClientErrorKind>,
+    pub purged: bool,
     pub events: Vec<&'static str>,
 }
 
@@ -29,6 +32,10 @@ pub fn fake(status: Status, progress: Vec<ClientResult<Progress>>) -> (FakeClien
     let calls = Rc::new(RefCell::new(Calls::default()));
     let client = FakeClient { calls: calls.clone(), status, progress: progress.into(), begin_error: None, provision_failures: 0 };
     (client, calls)
+}
+
+pub fn sibling(calls: &Rc<RefCell<Calls>>, status: Status) -> FakeClient {
+    FakeClient { calls: calls.clone(), status, progress: VecDeque::new(), begin_error: None, provision_failures: 0 }
 }
 
 pub fn fresh() -> Status {
@@ -58,6 +65,9 @@ impl EnrollClient for FakeClient {
         calls.events.push("status");
         if calls.status_error {
             return Err(ClientError::new(ClientErrorKind::AuthDenied, "keyd unreachable"));
+        }
+        if calls.purged {
+            return Ok(fresh());
         }
         Ok(self.status)
     }
@@ -102,5 +112,28 @@ impl EnrollClient for FakeClient {
             return Err(ClientError::new(ClientErrorKind::Other, "detail"));
         }
         Ok(RECOVERY_CODE.into())
+    }
+}
+
+impl ManageClient for FakeClient {
+    fn status(&mut self, uid: u32) -> ClientResult<Status> {
+        EnrollClient::status(self, uid)
+    }
+
+    fn verify(&mut self, _uid: u32) -> ClientResult<bool> {
+        Ok(true)
+    }
+
+    fn purge(&mut self, _uid: u32) -> ClientResult<()> {
+        let mut calls = self.calls.borrow_mut();
+        calls.purges += 1;
+        calls.events.push("purge");
+        match calls.purge_error {
+            Some(kind) => Err(ClientError::new(kind, "detail")),
+            None => {
+                calls.purged = true;
+                Ok(())
+            }
+        }
     }
 }

@@ -63,13 +63,14 @@ pub enum Text {
     Recognized,
     NotRecognized,
     RemoveFace,
+    RemoveFaceData,
     RemoveConfirmTitle,
     RemoveConfirmBody,
     SetUpAgain,
 }
 
 impl Text {
-    pub const ALL: [Text; 53] = [
+    pub const ALL: [Text; 54] = [
         Text::WelcomeTitle,
         Text::WelcomeBody,
         Text::BlockedTitle,
@@ -120,6 +121,7 @@ impl Text {
         Text::Recognized,
         Text::NotRecognized,
         Text::RemoveFace,
+        Text::RemoveFaceData,
         Text::RemoveConfirmTitle,
         Text::RemoveConfirmBody,
         Text::SetUpAgain,
@@ -177,6 +179,7 @@ impl Text {
             Text::Recognized => "Recognized",
             Text::NotRecognized => "Not recognized",
             Text::RemoveFace => "Remove",
+            Text::RemoveFaceData => "Remove face data",
             Text::RemoveConfirmTitle => "Remove face recognition?",
             Text::RemoveConfirmBody => "This erases your face data and your login key. You will use your password until you set it up again.",
             Text::SetUpAgain => "Set up again",

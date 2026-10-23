@@ -1,7 +1,7 @@
 mod common;
 
 use common::{error, fake, fresh, step, Calls, RECOVERY_CODE};
-use openhello_gui_core::{ClientErrorKind, EnrollmentFlow, FailureCause, Frame, Language, Status, Step, Text};
+use openhello_gui_core::{ClientErrorKind, EnrollmentFlow, FailureCause, Frame, Language, Manager, RemoveOutcome, Status, Step, Text};
 
 fn open(status: Status, progress: Vec<openhello_gui_core::ClientResult<openhello_gui_core::Progress>>) -> (EnrollmentFlow<common::FakeClient>, std::rc::Rc<std::cell::RefCell<Calls>>) {
     let (client, calls) = fake(status, progress);
@@ -255,4 +255,104 @@ fn retry_rechecks_and_unblocks_once_the_cause_is_fixed() {
     assert_eq!(flow.blocked(), None);
     assert_eq!(flow.step(), Step::Identity);
     assert_eq!(calls.borrow().begins, 0);
+}
+
+fn blocked_welcome(face: bool) -> (EnrollmentFlow<common::FakeClient>, std::rc::Rc<std::cell::RefCell<Calls>>) {
+    let (mut flow, calls) = open(Status { face, key: face }, vec![]);
+    calls.borrow_mut().ready_error = Some(ClientErrorKind::CameraBusy);
+    flow.start();
+    flow.set_face(face);
+    (flow, calls)
+}
+
+fn failed_enrollment() -> (EnrollmentFlow<common::FakeClient>, Manager<common::FakeClient>, std::rc::Rc<std::cell::RefCell<Calls>>) {
+    let (mut client, calls) = fake(Status { face: true, key: true }, vec![]);
+    client.begin_error = Some(ClientErrorKind::CameraBusy);
+    let manager = Manager::new(common::sibling(&calls, Status { face: true, key: true }), 1000);
+    let mut flow = EnrollmentFlow::new(client, 1000, Language::English);
+    reach_capture(&mut flow);
+    (flow, manager, calls)
+}
+
+// @spec:AC-071
+#[test]
+fn the_welcome_screen_offers_removal_only_when_the_status_says_a_face_is_set_up() {
+    let (flow, _) = blocked_welcome(true);
+    assert_eq!((flow.step(), flow.face_enrolled(), flow.removal_offered()), (Step::Welcome, true, true));
+    let (flow, _) = blocked_welcome(false);
+    assert_eq!((flow.step(), flow.face_enrolled(), flow.removal_offered()), (Step::Welcome, false, false));
+}
+
+// @spec:AC-071
+#[test]
+fn the_status_read_while_starting_decides_whether_removal_is_offered() {
+    let (mut flow, _) = open(Status { face: true, key: true }, vec![]);
+    flow.start();
+    assert!(flow.face_enrolled());
+    assert!(!flow.removal_offered());
+}
+
+// @spec:AC-071
+#[test]
+fn removal_is_not_offered_during_identity_or_capture() {
+    let (mut flow, _) = open(Status { face: true, key: true }, vec![]);
+    flow.start();
+    assert_eq!(flow.step(), Step::Identity);
+    assert!(!flow.removal_offered());
+    flow.confirm_identity();
+    assert_eq!(flow.step(), Step::Capture);
+    assert!(!flow.removal_offered());
+}
+
+// @spec:AC-071
+#[test]
+fn every_error_screen_offers_removal_even_without_a_face() {
+    for kind in [ClientErrorKind::CameraBusy, ClientErrorKind::SensorStuck, ClientErrorKind::NoCamera, ClientErrorKind::TpmUnavailable, ClientErrorKind::AuthDenied, ClientErrorKind::Other] {
+        let (mut client, _) = fake(fresh(), vec![]);
+        client.begin_error = Some(kind);
+        let mut flow = EnrollmentFlow::new(client, 1000, Language::English);
+        reach_capture(&mut flow);
+        assert!(matches!(flow.step(), Step::Error(_)));
+        assert!(!flow.face_enrolled());
+        assert!(flow.removal_offered());
+    }
+    let (mut flow, _) = open(fresh(), vec![error(ClientErrorKind::CameraBusy)]);
+    reach_capture(&mut flow);
+    flow.tick();
+    assert!(flow.removal_offered());
+}
+
+// @spec:AC-066
+// @spec:AC-071
+#[test]
+fn a_confirmed_removal_from_an_error_screen_purges_once_and_restarts_with_the_face_not_set_up() {
+    let (mut flow, mut manager, calls) = failed_enrollment();
+    assert_eq!(flow.step(), Step::Error(FailureCause::CameraBusy));
+    assert!(flow.removal_offered());
+    let RemoveOutcome::Removed(status) = manager.remove(true) else { panic!("expected Removed") };
+    assert!(!status.face);
+    flow.reset_after_removal();
+    flow.start();
+    assert_eq!((flow.step(), flow.face_enrolled(), flow.removal_offered()), (Step::Identity, false, false));
+    assert_eq!(calls.borrow().purges, 1);
+    assert_eq!(calls.borrow().events.last(), Some(&"status"));
+}
+
+// @spec:AC-071
+#[test]
+fn a_removal_that_is_not_confirmed_never_purges_and_the_error_screen_keeps_the_link() {
+    let (flow, mut manager, calls) = failed_enrollment();
+    assert_eq!(manager.remove(false), RemoveOutcome::NotConfirmed);
+    assert_eq!(calls.borrow().purges, 0);
+    assert!(flow.removal_offered());
+}
+
+// @spec:AC-071
+#[test]
+fn a_failed_purge_is_reported_and_the_error_screen_still_offers_removal() {
+    let (flow, mut manager, calls) = failed_enrollment();
+    calls.borrow_mut().purge_error = Some(ClientErrorKind::AuthDenied);
+    assert!(matches!(manager.remove(true), RemoveOutcome::Failed(error) if error.kind == ClientErrorKind::AuthDenied));
+    assert_eq!(calls.borrow().purges, 1);
+    assert!(flow.removal_offered());
 }
