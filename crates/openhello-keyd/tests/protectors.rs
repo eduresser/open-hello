@@ -7,8 +7,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use openhello_keyd::{
-    KeyInfo, Keyd, KeydError, LockoutPolicy, Protectors, Secret, TicketSocket, TicketSocketConfig,
-    OP_TICKET, OP_TICKET_KEY, STATUS_ACCEPTED, STATUS_REFUSED,
+    parse_da_state, DaState, KeyInfo, Keyd, KeydError, LockoutOutcome, LockoutPolicy, Protectors,
+    Secret, TicketSocket, TicketSocketConfig, OP_TICKET, OP_TICKET_KEY, STATUS_ACCEPTED,
+    STATUS_REFUSED,
 };
 use openhello_ticket::{Issuer, TicketError, TicketKey, TICKET_LEN};
 use p256::ecdsa::signature::hazmat::PrehashVerifier;
@@ -428,4 +429,116 @@ fn the_socket_hands_out_the_ticket_key_and_accepts_only_valid_tickets() {
     let path = socket.path().to_path_buf();
     drop(socket);
     assert!(!path.exists());
+}
+
+const DUAL_BOOT_GETCAP: &str = "  ownerAuthSet:              0
+  endorsementAuthSet:        0
+  lockoutAuthSet:            1
+  inLockout:                 0
+TPM2_PT_LOCKOUT_COUNTER: 0x0
+TPM2_PT_MAX_AUTH_FAIL: 0x20
+TPM2_PT_LOCKOUT_INTERVAL: 0x1C20
+TPM2_PT_LOCKOUT_RECOVERY: 0x15180
+";
+const FOREIGN_LOCKOUT_AUTH: &str = "windows-owned";
+
+// @spec:AC-026
+#[test]
+fn dictionary_attack_state_is_read_from_tpm2_getcap() {
+    assert_eq!(
+        parse_da_state(DUAL_BOOT_GETCAP),
+        Some(DaState {
+            lockout_auth_set: true,
+            max_tries: 32,
+            recovery_time_s: 7200,
+            lockout_recovery_time_s: 86_400,
+        })
+    );
+    assert_eq!(parse_da_state(&DUAL_BOOT_GETCAP.replace("lockoutAuthSet:            1", "lockoutAuthSet: 0")).map(|s| s.lockout_auth_set), Some(false));
+    assert_eq!(parse_da_state(&DUAL_BOOT_GETCAP.replace("TPM2_PT_LOCKOUT_INTERVAL: 0x1C20\n", "")), None);
+    assert_eq!(parse_da_state(&DUAL_BOOT_GETCAP.replace("lockoutAuthSet:            1", "lockoutAuthSet: yes")), None);
+    assert_eq!(parse_da_state(""), None);
+}
+
+struct ForeignLockoutAuth<'a>(&'a Rig, &'a Protectors);
+
+impl<'a> ForeignLockoutAuth<'a> {
+    fn take(rig: &'a Rig, protectors: &'a Protectors, before: &LockoutPolicy) -> Self {
+        protectors.apply_lockout_policy(before).unwrap();
+        let out = rig.tpm2("tpm2_changeauth", &["-c", "lockout", FOREIGN_LOCKOUT_AUTH]);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        ForeignLockoutAuth(rig, protectors)
+    }
+}
+
+impl Drop for ForeignLockoutAuth<'_> {
+    fn drop(&mut self) {
+        let _ = self.0.tpm2("tpm2_changeauth", &["-c", "lockout", "-p", FOREIGN_LOCKOUT_AUTH]);
+        let _ = self.1.apply_lockout_policy(&LockoutPolicy {
+            max_tries: 50,
+            recovery_time_s: 3600,
+            lockout_recovery_time_s: 3600,
+        });
+        let _ = self.0.tpm2("tpm2_dictionarylockout", &["--clear-lockout"]);
+    }
+}
+
+// @spec:AC-026
+#[test]
+fn without_a_foreign_owner_the_recommended_policy_is_applied() {
+    let rig = rig();
+    let protectors = protectors(&rig);
+    let _restore = PolicyGuard(&rig, &protectors);
+    assert_eq!(
+        protectors.ensure_lockout_policy(&LockoutPolicy::RECOMMENDED).unwrap(),
+        LockoutOutcome::Applied
+    );
+    let state = protectors.read_da_state().unwrap();
+    assert!(!state.lockout_auth_set);
+    assert_eq!(
+        (state.max_tries, state.recovery_time_s, state.lockout_recovery_time_s),
+        (10, 600, 86_400)
+    );
+}
+
+// @spec:AC-026
+#[test]
+fn a_lockout_owned_by_another_system_is_kept_untouched_without_a_failed_attempt() {
+    let rig = rig();
+    let protectors = protectors(&rig);
+    let windows = LockoutPolicy {
+        max_tries: 32,
+        recovery_time_s: 7200,
+        lockout_recovery_time_s: 86_400,
+    };
+    let _owned = ForeignLockoutAuth::take(&rig, &protectors, &windows);
+    let outcome = protectors.ensure_lockout_policy(&LockoutPolicy::RECOMMENDED).unwrap();
+    assert_eq!(
+        outcome,
+        LockoutOutcome::KeptExisting(DaState {
+            lockout_auth_set: true,
+            max_tries: 32,
+            recovery_time_s: 7200,
+            lockout_recovery_time_s: 86_400,
+        })
+    );
+    let probe = rig.tpm2("tpm2_dictionarylockout", &["--clear-lockout", "-p", FOREIGN_LOCKOUT_AUTH]);
+    assert!(probe.status.success(), "the lockout hierarchy must not be locked: {}", String::from_utf8_lossy(&probe.stderr));
+}
+
+// @spec:AC-026
+#[test]
+fn a_foreign_owner_with_dictionary_attack_protection_disabled_is_refused() {
+    let rig = rig();
+    let protectors = protectors(&rig);
+    let disabled = LockoutPolicy {
+        max_tries: 32,
+        recovery_time_s: 0,
+        lockout_recovery_time_s: 86_400,
+    };
+    let _owned = ForeignLockoutAuth::take(&rig, &protectors, &disabled);
+    assert!(matches!(
+        protectors.ensure_lockout_policy(&LockoutPolicy::RECOMMENDED),
+        Err(KeydError::Tpm)
+    ));
 }

@@ -42,6 +42,40 @@ impl LockoutPolicy {
     };
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DaState {
+    pub lockout_auth_set: bool,
+    pub max_tries: u32,
+    pub recovery_time_s: u32,
+    pub lockout_recovery_time_s: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LockoutOutcome {
+    Applied,
+    KeptExisting(DaState),
+}
+
+pub fn parse_da_state(getcap: &str) -> Option<DaState> {
+    let field = |name: &str| {
+        getcap
+            .lines()
+            .find_map(|l| l.trim().strip_prefix(name)?.trim().strip_prefix(':'))
+            .map(str::trim)
+    };
+    let hex = |name: &str| u32::from_str_radix(field(name)?.trim_start_matches("0x"), 16).ok();
+    Some(DaState {
+        lockout_auth_set: match field("lockoutAuthSet")? {
+            "1" => true,
+            "0" => false,
+            _ => return None,
+        },
+        max_tries: hex("TPM2_PT_MAX_AUTH_FAIL")?,
+        recovery_time_s: hex("TPM2_PT_LOCKOUT_INTERVAL")?,
+        lockout_recovery_time_s: hex("TPM2_PT_LOCKOUT_RECOVERY")?,
+    })
+}
+
 pub struct RecoveryCode(Zeroizing<String>);
 
 impl RecoveryCode {
@@ -222,6 +256,45 @@ impl Protectors {
         _material: &[u8],
     ) -> Result<Secret, KeydError> {
         Err(KeydError::Refused)
+    }
+
+    pub fn read_da_state(&self) -> Result<DaState, KeydError> {
+        let run = run_tool(
+            &self.config,
+            "tpm2_getcap",
+            &["properties-variable".into()],
+            &[],
+            None,
+        )?;
+        let text = String::from_utf8_lossy(&run.stdout);
+        match parse_da_state(&text) {
+            Some(state) if run.success => Ok(state),
+            _ => Err(failure(
+                "reading the dictionary-attack state",
+                &run.last_error(),
+                &[],
+            )),
+        }
+    }
+
+    // Another OS (e.g. Windows) may own lockoutAuth; trying it with an empty value would lock the lockout hierarchy for a day.
+    pub fn ensure_lockout_policy(
+        &self,
+        policy: &LockoutPolicy,
+    ) -> Result<LockoutOutcome, KeydError> {
+        let state = self.read_da_state()?;
+        if !state.lockout_auth_set {
+            self.apply_lockout_policy(policy)?;
+            return Ok(LockoutOutcome::Applied);
+        }
+        if state.recovery_time_s == 0 {
+            return Err(failure(
+                "keeping the TPM lockout policy owned by another system",
+                "dictionary-attack protection is disabled (lockout interval 0)",
+                &[],
+            ));
+        }
+        Ok(LockoutOutcome::KeptExisting(state))
     }
 
     pub fn apply_lockout_policy(&self, policy: &LockoutPolicy) -> Result<(), KeydError> {
