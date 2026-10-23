@@ -132,12 +132,12 @@ As a laptop owner on any Linux distribution and desktop, I want `sudo` and the l
 As a laptop owner, I want a one-time recovery code, so that I can regain use of my key if the face and PIN
 both stop working.
 
-#### AC-031 — A recovery code is shown once at provisioning and unlocks the key
+#### AC-031 — A recovery code is returned once at provisioning and unlocks the key
 
 - **Given** a freshly provisioned user
 - **When** provisioning completes
-- **Then** a recovery code is returned exactly once, is never stored in plaintext, and logging in with it
-  unlocks the key
+- **Then** the key service returns a recovery code exactly once, never stores it in plaintext, and logging in with it
+  unlocks the key; the clients (`openhello-cli` and the enrollment window) discard it and never show or print it (enrollment-ui, product owner decision 2026-10-23)
 
 #### AC-032 — Using the recovery code invalidates it
 

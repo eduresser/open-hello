@@ -60,13 +60,6 @@ impl KeyClient for KeydClient {
             .map_err(|e| describe("Provision", e))
     }
 
-    fn set_pin(&mut self, uid: u32, pin: &str) -> Result<(), String> {
-        self.proxy()?
-            .call::<_, _, bool>("SetPin", &(uid, pin))
-            .map(|_| ())
-            .map_err(|e| describe("SetPin", e))
-    }
-
     fn key_status(&mut self, uid: u32) -> Result<KeyStatus, String> {
         let (key, pin): (bool, bool) = self
             .proxy()?

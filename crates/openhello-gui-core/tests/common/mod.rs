@@ -4,6 +4,8 @@ use std::rc::Rc;
 
 use openhello_gui_core::{ClientError, ClientErrorKind, ClientResult, EnrollClient, Frame, Progress, Status};
 
+pub const RECOVERY_CODE: &str = "RC-7Q2M-4KXD-91";
+
 #[derive(Default)]
 pub struct Calls {
     pub discards: u32,
@@ -99,6 +101,6 @@ impl EnrollClient for FakeClient {
             self.provision_failures -= 1;
             return Err(ClientError::new(ClientErrorKind::Other, "detail"));
         }
-        Ok("RECOVERY-CODE".into())
+        Ok(RECOVERY_CODE.into())
     }
 }

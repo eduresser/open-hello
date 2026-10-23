@@ -67,7 +67,7 @@
 
 ## T-069 — Slint shell replaces the GTK shell [done]
 - Refs: AC-058, AC-059, AC-062, AC-065, AC-066, AC-070, ASM-020
-- Files: crates/openhello-gui/Cargo.toml, crates/openhello-gui/build.rs, crates/openhello-gui/LICENSE, crates/openhello-gui/src/main.rs, crates/openhello-gui/src/backend.rs, crates/openhello-gui/src/capture.rs, crates/openhello-gui/src/demo.rs, crates/openhello-gui/src/options.rs, crates/openhello-gui/src/stats.rs, crates/openhello-gui/src/view.rs, crates/openhello-gui/ui/app.slint, crates/openhello-gui/ui/components.slint, crates/openhello-gui/ui/texts.slint, crates/openhello-gui/ui/welcome.slint, crates/openhello-gui/ui/identity.slint, crates/openhello-gui/ui/capture.slint, crates/openhello-gui/ui/recovery.slint, crates/openhello-gui/ui/done.slint, crates/openhello-gui/ui/error.slint, crates/openhello-gui/ui/manage.slint, Cargo.toml
+- Files: crates/openhello-gui/Cargo.toml, crates/openhello-gui/build.rs, crates/openhello-gui/LICENSE, crates/openhello-gui/src/main.rs, crates/openhello-gui/src/backend.rs, crates/openhello-gui/src/capture.rs, crates/openhello-gui/src/demo.rs, crates/openhello-gui/src/options.rs, crates/openhello-gui/src/stats.rs, crates/openhello-gui/src/view.rs, crates/openhello-gui/ui/app.slint, crates/openhello-gui/ui/components.slint, crates/openhello-gui/ui/texts.slint, crates/openhello-gui/ui/welcome.slint, crates/openhello-gui/ui/identity.slint, crates/openhello-gui/ui/capture.slint, crates/openhello-gui/ui/done.slint, crates/openhello-gui/ui/error.slint, crates/openhello-gui/ui/manage.slint, Cargo.toml
 - Model: claude-sonnet-5
 - Effort: high
 - Notes: depends on T-068. Built from the Slint prototype; the GTK sources are removed; the crate is GPL-3.0-only; T-065 is marked superseded.
@@ -93,3 +93,10 @@
 - Model: claude-sonnet-5
 - Effort: medium
 - Notes: depends on T-071. Ideal face height 62% (range 49%-75%), window oval about 62% of the preview, capture window 30 seconds; the user never sees a sample count (the ring in the window, a percentage in the CLI); no distances in centimeters in user sentences.
+
+## T-073 — No PIN and no recovery code in the window or the CLI [done]
+- Refs: AC-058, AC-031, ASM-024
+- Files: crates/openhello-gui-core/src/wizard.rs, crates/openhello-gui-core/src/strings.rs, crates/openhello-gui-core/tests/wizard.rs, crates/openhello-gui-core/tests/common/mod.rs, crates/openhello-gui/src/backend.rs, crates/openhello-gui/src/view.rs, crates/openhello-gui/src/demo.rs, crates/openhello-gui/src/main.rs, crates/openhello-gui/ui/app.slint, crates/openhello-gui/ui/texts.slint, crates/openhello-cli/src/lib.rs, crates/openhello-cli/src/keyd_client.rs, crates/openhello-cli/src/main.rs, crates/openhello-cli/tests/provisioning_flow.rs, crates/openhello-cli/tests/end_to_end.rs, README.md
+- Model: claude-sonnet-5
+- Effort: high
+- Notes: depends on T-072. Product owner decision 2026-10-23: the order is welcome, identity, capture, done; the key is provisioned right after the commit only when it does not exist, and the returned recovery code is discarded at once; the CLI has no `set-pin` and `enroll` and `provision` print no code; exit code 4 stays for a provisioning failure; `ui/recovery.slint` and the CLI `terminal.rs` are deleted (T-069 no longer lists the screen). The key service keeps the PIN and recovery protectors in its D-Bus API.

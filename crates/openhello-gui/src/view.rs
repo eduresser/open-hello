@@ -18,9 +18,6 @@ pub fn init(window: &MainWindow, strings: &Strings) {
     texts.set_identity_title(get(Text::IdentityTitle));
     texts.set_identity_body(get(Text::IdentityBody));
     texts.set_capture_title(get(Text::CaptureTitle));
-    texts.set_recovery_title(get(Text::RecoveryTitle));
-    texts.set_recovery_body(get(Text::RecoveryBody));
-    texts.set_acknowledge(get(Text::Done));
     texts.set_done_title(get(Text::DoneTitle));
     texts.set_done_body(get(Text::DoneBody));
     texts.set_manage_body(get(Text::ManageBody));
@@ -38,10 +35,6 @@ pub fn apply(window: &MainWindow, strings: &Strings, event: Event) {
         Event::Identity => show(window, Page::Identity),
         Event::CaptureStarted => show_capture_start(window),
         Event::Capture(view) => show_capture(window, view),
-        Event::Recovery(code) => {
-            show(window, Page::Recovery);
-            window.set_recovery_code(code.into());
-        }
         Event::Done => show(window, Page::Done),
         Event::Failed(cause) => show_failure(window, strings, cause),
         Event::Manage => show(window, Page::Manage),
@@ -51,7 +44,6 @@ pub fn apply(window: &MainWindow, strings: &Strings, event: Event) {
 
 fn show(window: &MainWindow, page: Page) {
     window.set_page(page);
-    window.set_recovery_code(SharedString::new());
     window.set_busy(false);
     window.set_testing(false);
     window.set_test_result(SharedString::new());

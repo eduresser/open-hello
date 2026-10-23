@@ -94,7 +94,6 @@ pub enum Step {
     Welcome,
     Identity,
     Capture,
-    RecoveryCode,
     Done,
     Error(FailureCause),
 }
@@ -149,8 +148,7 @@ impl Wizard {
         self.step = match self.step {
             Step::Welcome => Step::Identity,
             Step::Identity => Step::Capture,
-            Step::Capture if self.plan.key => Step::RecoveryCode,
-            Step::Capture | Step::RecoveryCode => Step::Done,
+            Step::Capture => Step::Done,
             other => other,
         };
     }
@@ -171,13 +169,12 @@ pub struct EnrollmentFlow<C: EnrollClient> {
     wizard: Wizard,
     session: Option<String>,
     committed: bool,
-    recovery_code: Option<String>,
     blocked: Option<FailureCause>,
 }
 
 impl<C: EnrollClient> EnrollmentFlow<C> {
     pub fn new(client: C, uid: u32, language: Language) -> Self {
-        Self { client, uid, strings: Strings::new(language), wizard: Wizard::new(), session: None, committed: false, recovery_code: None, blocked: None }
+        Self { client, uid, strings: Strings::new(language), wizard: Wizard::new(), session: None, committed: false, blocked: None }
     }
 
     pub fn step(&self) -> Step {
@@ -186,10 +183,6 @@ impl<C: EnrollClient> EnrollmentFlow<C> {
 
     pub fn strings(&self) -> &Strings {
         &self.strings
-    }
-
-    pub fn recovery_code(&self) -> Option<&str> {
-        self.recovery_code.as_deref()
     }
 
     pub fn blocked(&self) -> Option<FailureCause> {
@@ -250,13 +243,6 @@ impl<C: EnrollClient> EnrollmentFlow<C> {
         Some(self.update(progress, frame))
     }
 
-    pub fn acknowledge_recovery_code(&mut self) {
-        if self.step() == Step::RecoveryCode {
-            self.recovery_code = None;
-            self.wizard.advance();
-        }
-    }
-
     pub fn retry(&mut self) {
         match self.step() {
             Step::Error(FailureCause::KeyFailed) if self.committed => self.provision(Step::Capture),
@@ -268,7 +254,7 @@ impl<C: EnrollClient> EnrollmentFlow<C> {
 
     pub fn cancel(&mut self) {
         self.release_session();
-        if !matches!(self.step(), Step::Done | Step::RecoveryCode) {
+        if self.step() != Step::Done {
             self.wizard.reset();
         }
     }
@@ -304,10 +290,7 @@ impl<C: EnrollClient> EnrollmentFlow<C> {
     fn provision(&mut self, from: Step) {
         self.wizard.set_step(from);
         match self.client.provision(self.uid) {
-            Ok(code) => {
-                self.recovery_code = Some(code);
-                self.wizard.advance();
-            }
+            Ok(_) => self.wizard.advance(),
             Err(_) => self.wizard.fail(FailureCause::KeyFailed),
         }
     }
@@ -315,7 +298,6 @@ impl<C: EnrollClient> EnrollmentFlow<C> {
     fn restart(&mut self) {
         self.release_session();
         self.committed = false;
-        self.recovery_code = None;
         self.wizard.reset();
     }
 
