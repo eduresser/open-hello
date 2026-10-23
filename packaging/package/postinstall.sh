@@ -5,6 +5,8 @@ set -u
 STATE_DIR="${OPENHELLO_PKG_STATE_DIR:-/var/lib/openhello}"
 SYSTEMD_RUN_DIR="${OPENHELLO_PKG_SYSTEMD_RUN_DIR:-/run/systemd/system}"
 PAM_DECIDED="$STATE_DIR/pam-enabled-by-package"
+SUDO_DECIDED="$STATE_DIR/sudo-own-password-by-package"
+INSTALLER_UID="${SUDO_UID:-${PKEXEC_UID:-}}"
 
 warn() { echo "openhello: $*" >&2; }
 
@@ -17,6 +19,15 @@ if [ ! -e "$PAM_DECIDED" ]; then
     : > "$PAM_DECIDED"
   else
     warn "could not enable face sign-in in the common PAM stack; passwords are untouched. Enable later with: sudo openhello-cli pam enable"
+  fi
+fi
+
+# Whoever ran the install through sudo or pkexec already proved they are an administrator.
+if [ ! -e "$SUDO_DECIDED" ] && [ -n "$INSTALLER_UID" ] && [ "$INSTALLER_UID" != 0 ]; then
+  if openhello-cli sudo own-password "$INSTALLER_UID" >/dev/null; then
+    : > "$SUDO_DECIDED"
+  else
+    warn "sudo keeps asking for the root password; open Open Hello to let it accept your face"
   fi
 fi
 
