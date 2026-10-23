@@ -1,7 +1,7 @@
 mod common;
 
-use common::{error, fake, fresh, step, Calls};
-use openhello_gui_core::{ClientErrorKind, EnrollmentFlow, FailureCause, Frame, Language, Status, Step};
+use common::{error, fake, fresh, step, Calls, RECOVERY_CODE};
+use openhello_gui_core::{ClientErrorKind, EnrollmentFlow, FailureCause, Frame, Language, Status, Step, Text};
 
 fn open(status: Status, progress: Vec<openhello_gui_core::ClientResult<openhello_gui_core::Progress>>) -> (EnrollmentFlow<common::FakeClient>, std::rc::Rc<std::cell::RefCell<Calls>>) {
     let (client, calls) = fake(status, progress);
@@ -15,7 +15,7 @@ fn reach_capture(flow: &mut EnrollmentFlow<common::FakeClient>) {
 
 // @spec:AC-058
 #[test]
-fn the_full_flow_visits_every_step_in_the_windows_hello_order() {
+fn the_full_flow_visits_welcome_identity_capture_and_done_and_provisions_after_the_commit() {
     let (mut flow, calls) = open(fresh(), vec![step("accepted", "in-progress", 3), step("accepted", "complete", 6)]);
     let mut visited = vec![flow.step()];
     flow.start();
@@ -25,24 +25,39 @@ fn the_full_flow_visits_every_step_in_the_windows_hello_order() {
     flow.tick();
     flow.tick();
     visited.push(flow.step());
-    assert_eq!(flow.recovery_code(), Some("RECOVERY-CODE"));
-    flow.acknowledge_recovery_code();
-    visited.push(flow.step());
-    assert_eq!(visited, [Step::Welcome, Step::Identity, Step::Capture, Step::RecoveryCode, Step::Done]);
+    assert_eq!(visited, [Step::Welcome, Step::Identity, Step::Capture, Step::Done]);
     assert_eq!(calls.borrow().events, ["ready", "status", "begin", "commit", "provision"]);
-    assert_eq!(flow.recovery_code(), None);
 }
 
 // @spec:AC-058
 #[test]
-fn provisioning_and_the_recovery_code_are_skipped_when_the_key_already_exists() {
+fn the_recovery_code_returned_by_the_key_service_appears_in_no_state_and_no_text() {
+    let (mut flow, _calls) = open(fresh(), vec![step("accepted", "complete", 6)]);
+    let mut shown = vec![format!("{:?}", flow.step())];
+    flow.start();
+    shown.push(format!("{:?}", flow.step()));
+    flow.confirm_identity();
+    shown.push(format!("{:?}", flow.step()));
+    let update = flow.tick().unwrap();
+    shown.push(format!("{:?} {:?}", flow.step(), update));
+    shown.push(format!("{:?} {:?}", flow.blocked(), flow.strings().get(Text::DoneTitle)));
+    shown.push(flow.strings().get(Text::DoneBody).to_string());
+    shown.extend(Text::ALL.iter().map(|text| flow.strings().get(*text).to_string()));
+    assert_eq!(flow.step(), Step::Done);
+    assert!(shown.iter().all(|line| !line.contains(RECOVERY_CODE)));
+    let words = |line: &String| line.to_lowercase().split(|c: char| !c.is_alphanumeric()).map(String::from).collect::<Vec<_>>();
+    assert!(shown.iter().flat_map(words).all(|word| word != "recovery" && word != "pin"));
+}
+
+// @spec:AC-058
+#[test]
+fn provisioning_is_skipped_when_the_key_already_exists() {
     let (mut flow, calls) = open(Status { face: false, key: true }, vec![step("accepted", "complete", 6)]);
     reach_capture(&mut flow);
     flow.tick();
     assert_eq!(flow.step(), Step::Done);
     assert_eq!(calls.borrow().provisions, 0);
     assert_eq!(calls.borrow().commits, 1);
-    assert_eq!(flow.recovery_code(), None);
 }
 
 // @spec:AC-059
@@ -131,8 +146,7 @@ fn a_provision_failure_after_the_commit_offers_to_repeat_only_the_provision() {
     flow.tick();
     assert_eq!(flow.step(), Step::Error(FailureCause::KeyFailed));
     flow.retry();
-    assert_eq!(flow.step(), Step::RecoveryCode);
-    assert_eq!(flow.recovery_code(), Some("RECOVERY-CODE"));
+    assert_eq!(flow.step(), Step::Done);
     assert_eq!(calls.borrow().commits, 1);
     assert_eq!(calls.borrow().provisions, 2);
     assert_eq!(calls.borrow().discards, 0);

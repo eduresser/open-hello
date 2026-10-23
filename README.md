@@ -34,7 +34,6 @@ Options:
 
 ```bash
 openhello-cli enroll        # enroll your face
-openhello-cli set-pin       # set the fallback PIN
 openhello-cli verify        # test recognition
 openhello-cli identify      # identify who is in front of the camera
 openhello-cli purge         # erase biometric data and the key

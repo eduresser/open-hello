@@ -64,7 +64,6 @@ fn wire(window: &MainWindow, commands: &Sender<Command>) {
     window.on_get_started(sender(commands, || Command::Start));
     window.on_retry(sender(commands, || Command::Retry));
     window.on_cancel(sender(commands, || Command::Cancel));
-    window.on_acknowledge(sender(commands, || Command::AcknowledgeRecovery));
     window.on_set_up_again(busy_sender(window, commands, false, || Command::Start));
     window.on_test(busy_sender(window, commands, true, || Command::Test));
     window.on_remove(busy_sender(window, commands, false, || Command::Remove));

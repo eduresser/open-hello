@@ -3,14 +3,13 @@ import { T } from "texts.slint";
 import { WelcomePage } from "welcome.slint";
 import { IdentityPage } from "identity.slint";
 import { CapturePage } from "capture.slint";
-import { RecoveryPage } from "recovery.slint";
 import { DonePage } from "done.slint";
 import { ErrorPage } from "error.slint";
 import { ManagePage } from "manage.slint";
 
 export { T }
 
-export enum Page { welcome, identity, capture, recovery, done, error, manage }
+export enum Page { welcome, identity, capture, done, error, manage }
 
 export component MainWindow inherits Window {
     in property <Page> page: Page.welcome;
@@ -21,7 +20,6 @@ export component MainWindow inherits Window {
     in property <string> guidance;
     in property <float> progress;
     in property <bool> accepted;
-    in property <string> recovery-code;
     in property <string> error-title;
     in property <string> error-body;
     in property <bool> busy;
@@ -32,7 +30,6 @@ export component MainWindow inherits Window {
     callback get-started();
     callback retry();
     callback cancel();
-    callback acknowledge();
     callback finish();
     callback test();
     callback remove();
@@ -61,11 +58,6 @@ export component MainWindow inherits Window {
         progress: root.progress;
         accepted: root.accepted;
         cancel => { root.cancel(); }
-    }
-
-    if root.page == Page.recovery: RecoveryPage {
-        code: root.recovery-code;
-        acknowledge => { root.acknowledge(); }
     }
 
     if root.page == Page.done: DonePage {

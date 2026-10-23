@@ -18,15 +18,12 @@ pub enum Text {
     BlockedTitle,
     GetStarted,
     Next,
-    Done,
     Close,
     Cancel,
     TryAgain,
     IdentityTitle,
     IdentityBody,
     CaptureTitle,
-    RecoveryTitle,
-    RecoveryBody,
     DoneTitle,
     DoneBody,
     GuidanceAccepted,
@@ -69,25 +66,21 @@ pub enum Text {
     RemoveConfirmTitle,
     RemoveConfirmBody,
     SetUpAgain,
-    CopyCode,
 }
 
 impl Text {
-    pub const ALL: [Text; 57] = [
+    pub const ALL: [Text; 53] = [
         Text::WelcomeTitle,
         Text::WelcomeBody,
         Text::BlockedTitle,
         Text::GetStarted,
         Text::Next,
-        Text::Done,
         Text::Close,
         Text::Cancel,
         Text::TryAgain,
         Text::IdentityTitle,
         Text::IdentityBody,
         Text::CaptureTitle,
-        Text::RecoveryTitle,
-        Text::RecoveryBody,
         Text::DoneTitle,
         Text::DoneBody,
         Text::GuidanceAccepted,
@@ -130,7 +123,6 @@ impl Text {
         Text::RemoveConfirmTitle,
         Text::RemoveConfirmBody,
         Text::SetUpAgain,
-        Text::CopyCode,
     ];
 
     fn english(self) -> &'static str {
@@ -140,15 +132,12 @@ impl Text {
             Text::BlockedTitle => "Face recognition is not available on this computer",
             Text::GetStarted => "Get started",
             Text::Next => "Next",
-            Text::Done => "Done",
             Text::Close => "Close",
             Text::Cancel => "Cancel",
             Text::TryAgain => "Try again",
             Text::IdentityTitle => "Confirm it’s you",
             Text::IdentityBody => "Enter your password when the system asks for it.",
             Text::CaptureTitle => "Look at the camera",
-            Text::RecoveryTitle => "Save your recovery code",
-            Text::RecoveryBody => "This code unlocks your login key if face recognition stops working. It is shown only once, so store it somewhere safe.",
             Text::DoneTitle => "Face recognition is ready",
             Text::DoneBody => "You can now sign in with your face. If recognition fails, your password still works.",
             Text::GuidanceAccepted => "Hold still and look at the camera",
@@ -191,7 +180,6 @@ impl Text {
             Text::RemoveConfirmTitle => "Remove face recognition?",
             Text::RemoveConfirmBody => "This erases your face data and your login key. You will use your password until you set it up again.",
             Text::SetUpAgain => "Set up again",
-            Text::CopyCode => "Copy",
         }
     }
 }

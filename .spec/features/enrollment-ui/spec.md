@@ -33,7 +33,7 @@ As a laptop owner, I want a step-by-step window that shows me the camera and tel
 
 - **Given** the user opens the app with no face set up
 - **When** they press "Get started" and complete each step
-- **Then** the app shows, in order: welcome, identity check (system password prompt), capture, recovery code (only when the login key was created in this run), and a final "All set" screen with a Close button, and it never asks the user to create a PIN
+- **Then** the app shows, in order: welcome, identity check (system password prompt), capture, and a final "All set" screen with a Close button; when the login key does not exist yet it is created right after the enrollment commits, and the app never asks for, creates or shows a PIN or a recovery code
 
 #### AC-059 — The capture screen shows the preview, the guidance and the progress
 
@@ -125,12 +125,16 @@ As a laptop owner, I want the app to refuse to enroll when face recognition cann
 
 ## Out of scope
 
-- Creating a PIN in the app (the PIN stays available in the daemon and in `openhello-cli set-pin`).
+- Creating or showing a PIN or a recovery code in the app or in `openhello-cli` (both protectors stay in the `openhello-keyd` D-Bus API for future integrations).
 
 - "Improve recognition" (adding a second recognition profile): see Q-004.
 - A page inside KDE System Settings or GNOME Settings (an optional thin layer later).
 - Flatpak packaging, display-manager greeter, fingerprint, gaze or eyes-open checks.
 - Any language other than English (the interface is English only for now).
+
+## Decisions
+
+- Product owner decision 2026-10-23: neither a PIN nor a recovery code is created, shown or printed by the window or the CLI; the key service keeps both protectors in its D-Bus API.
 
 ## Assumptions
 
@@ -140,7 +144,7 @@ As a laptop owner, I want the app to refuse to enroll when face recognition cann
 | ASM-021 | One 640x360 8-bit grayscale frame per call, handed over as a sealed memory file descriptor in a method reply, is fast enough for a smooth preview. | open | Method replies carry descriptors reliably; signals do not. Measure on the VM. |
 | ASM-022 | The wizard wording is original, written for OpenHello: short, direct, no marketing phrases; the Windows Hello strings were consulted only to learn which situations need a message. | confirmed | Product owner decision, 2026-10-23: do not copy the Windows Hello text. |
 | ASM-023 | GTK 4 and libadwaita development packages are installable on the VM. | invalidated | The window no longer uses GTK. |
-| ASM-024 | The app offers no PIN: the system password remains the fallback at sign-in, and the recovery code is shown once at the end of enrollment. | confirmed | Product owner decision, 2026-10-23: when recognition is unavailable the app blocks enrollment instead of offering a PIN. |
+| ASM-024 | The app and the CLI offer no PIN and show no recovery code: the system password remains the fallback at sign-in and the TPM key can be recreated with `purge` and a new enrollment. | confirmed | Product owner decision, 2026-10-23: when recognition is unavailable the app blocks enrollment instead of offering a PIN; on a personal desktop nothing is encrypted with the key, so the recovery code has no use and is discarded. |
 
 ## Open questions
 

@@ -13,7 +13,6 @@ const SEGMENT_TICKS: u32 = 25;
 const REQUIRED: u32 = 6;
 const TICK: Duration = Duration::from_millis(33);
 const PAUSE: Duration = Duration::from_millis(1400);
-const RECOVERY_CODE: &str = "4F2A-91C7-D03B-6E58-A1F4-7B29";
 const SCRIPT: [&str; 13] = [
     "move-left",
     "too-far",
@@ -164,7 +163,7 @@ impl EnrollClient for DemoClient {
 
     fn provision(&mut self, _uid: u32) -> ClientResult<String> {
         self.sleep(PAUSE);
-        Ok(RECOVERY_CODE.into())
+        Ok(String::new())
     }
 }
 
@@ -208,7 +207,7 @@ mod tests {
         while let Some(update) = flow.tick() {
             views.push(CaptureView::new(update, &strings));
         }
-        assert_eq!(flow.step(), Step::RecoveryCode);
+        assert_eq!(flow.step(), Step::Done);
         let first = &views[0];
         assert_eq!((first.guidance, first.progress), ("Move a little to your left", 0.0));
         assert!(views.iter().all(|view| view.frame.is_some() && !view.guidance.is_empty()));

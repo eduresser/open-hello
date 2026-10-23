@@ -11,7 +11,6 @@ const JOIN_POLL: Duration = Duration::from_millis(20);
 
 pub enum Command {
     Start,
-    AcknowledgeRecovery,
     Retry,
     Cancel,
     Test,
@@ -24,7 +23,6 @@ pub enum Event {
     Identity,
     CaptureStarted,
     Capture(CaptureView),
-    Recovery(String),
     Done,
     Failed(FailureCause),
     Manage,
@@ -117,10 +115,6 @@ impl<C: EnrollClient + ManageClient, E: Fn(Event) -> bool> Worker<'_, C, E> {
     fn handle(&mut self, command: Command) {
         match command {
             Command::Start => self.start(),
-            Command::AcknowledgeRecovery => {
-                self.flow.acknowledge_recovery_code();
-                self.emit_step();
-            }
             Command::Retry => self.retry(),
             Command::Cancel => self.cancel(),
             Command::Test => self.test(),
@@ -249,10 +243,6 @@ impl<C: EnrollClient + ManageClient, E: Fn(Event) -> bool> Worker<'_, C, E> {
             Step::Identity if self.begun => Event::Identity,
             Step::Identity => Event::Welcome(None),
             Step::Capture => Event::CaptureStarted,
-            Step::RecoveryCode => {
-                self.face = true;
-                Event::Recovery(self.flow.recovery_code().map(String::from).unwrap_or_default())
-            }
             Step::Done => {
                 self.face = true;
                 Event::Done
@@ -329,7 +319,6 @@ mod tests {
             Event::Identity => "identity",
             Event::CaptureStarted => "capture",
             Event::Capture(_) => "frame",
-            Event::Recovery(_) => "recovery",
             Event::Done => "done",
             Event::Failed(_) => "failed",
             Event::Manage => "manage",
@@ -346,15 +335,13 @@ mod tests {
 
     // @spec:AC-058
     #[test]
-    fn the_worker_walks_welcome_identity_capture_recovery_code_and_done() {
+    fn the_worker_walks_welcome_identity_capture_and_done() {
         let mut harness = harness(DemoMode::default());
         let mut seen = harness.until(|event| matches!(event, Event::Welcome(None)));
         harness.send(Command::Start);
-        seen.extend(harness.until(|event| matches!(event, Event::Recovery(_))));
-        harness.send(Command::AcknowledgeRecovery);
         seen.extend(harness.until(|event| matches!(event, Event::Done)));
         harness.backend.shutdown();
-        assert_eq!(names(&seen), ["welcome", "identity", "capture", "frame", "recovery", "done"]);
+        assert_eq!(names(&seen), ["welcome", "identity", "capture", "frame", "done"]);
     }
 
     // @spec:AC-062
