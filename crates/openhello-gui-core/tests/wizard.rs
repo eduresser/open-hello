@@ -56,7 +56,7 @@ fn each_tick_returns_a_guidance_sentence_progress_text_and_a_frame_and_progress_
     let third = flow.tick().unwrap();
     assert_eq!(first.guidance, "Move a little to your left");
     assert_eq!(first.progress_text, "0 of 6");
-    assert_eq!(second.guidance, "Keep looking directly at your camera.");
+    assert_eq!(second.guidance, "Hold still and look at the camera");
     assert_eq!(third.progress_text, "2 of 6");
     assert!(third.filled > second.filled && second.filled > first.filled);
     assert_eq!(third.frame, Some(Frame { width: 2, height: 2, pixels: vec![1, 2, 3, 4] }));
@@ -92,9 +92,9 @@ fn the_twenty_second_window_ending_shows_a_timeout_error_without_commit_and_try_
 #[test]
 fn a_busy_camera_and_a_stuck_sensor_explain_what_to_do_and_never_commit() {
     for (kind, cause, expected) in [
-        (ClientErrorKind::CameraBusy, FailureCause::CameraBusy, "Close the app and try again"),
-        (ClientErrorKind::SensorStuck, FailureCause::SensorStuck, "power the computer off completely and try again"),
-        (ClientErrorKind::NoCamera, FailureCause::NoCamera, "Couldn’t turn on the camera"),
+        (ClientErrorKind::CameraBusy, FailureCause::CameraBusy, "Close it and try again"),
+        (ClientErrorKind::SensorStuck, FailureCause::SensorStuck, "Shut the computer down completely"),
+        (ClientErrorKind::NoCamera, FailureCause::NoCamera, "No infrared camera was detected"),
         (ClientErrorKind::TpmUnavailable, FailureCause::TpmUnavailable, "TPM"),
     ] {
         let (mut flow, calls) = open(Status { face: false, key: true }, vec![error(kind)]);
@@ -117,7 +117,7 @@ fn a_camera_that_is_busy_when_the_session_starts_is_an_error_without_a_session_t
     flow.start();
     flow.confirm_identity();
     assert_eq!(flow.step(), Step::Error(FailureCause::CameraBusy));
-    assert!(flow.strings().failure_explanation(FailureCause::CameraBusy).contains("Close the app"));
+    assert!(flow.strings().failure_explanation(FailureCause::CameraBusy).contains("Close it"));
     drop(flow);
     assert_eq!(calls.borrow().discards, 0);
     assert_eq!(calls.borrow().commits, 0);

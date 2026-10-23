@@ -4,15 +4,27 @@ const VERDICTS: [&str; 14] = [
     "accepted", "too-soon", "no-face", "move-left", "move-right", "move-up", "move-down", "too-close", "too-far", "too-dark", "too-bright", "yaw-out-of-range", "blurred", "occluded",
 ];
 
-const WINDOWS_WORDING: [(&str, &str); 8] = [
-    ("accepted", "Keep looking directly at your camera."),
-    ("too-soon", "Keep looking directly at your camera."),
-    ("no-face", "We couldn’t detect your face, please make sure there is enough light and your face is centered in the frame."),
-    ("too-close", "Too close! Move a little farther away."),
-    ("too-far", "Too far! Move a bit closer."),
-    ("too-dark", "Too dark! Turn on some lights or move somewhere brighter."),
-    ("too-bright", "Too bright! Turn off some lights or go inside."),
-    ("yaw-out-of-range", "Keep looking forward, facing the camera."),
+const DECK: [(&str, &str); 14] = [
+    ("accepted", "Hold still and look at the camera"),
+    ("too-soon", "Hold still and look at the camera"),
+    ("no-face", "No face found. Center your face in the oval"),
+    ("move-left", "Move a little to your left"),
+    ("move-right", "Move a little to your right"),
+    ("move-up", "Move up a little"),
+    ("move-down", "Move down a little"),
+    ("too-close", "Too close. Move back a little"),
+    ("too-far", "Too far. Move a little closer"),
+    ("too-dark", "Not enough light on your face"),
+    ("too-bright", "Too much light. Avoid glare in front of or behind you"),
+    ("yaw-out-of-range", "Face the camera straight on"),
+    ("blurred", "Hold still. The image is blurry"),
+    ("occluded", "Something is covering your face. Clear it from view"),
+];
+
+const FORBIDDEN: [&str; 16] = [
+    "Your device just got more personal", "Well done", "Making sure it", "Windows Hello", "Forget entering a password", "Too far!", "Too close!", "Too dark!", "Too bright!",
+    "go through the setup again", "Sorry, something went wrong", "Keep looking directly at your camera", "Keep looking forward, facing the camera", "Move closer to the camera",
+    "Move further away from the camera", "Make sure your face is centered in the frame",
 ];
 
 // @spec:AC-060
@@ -30,12 +42,24 @@ fn every_verdict_has_an_english_sentence_that_is_not_the_raw_verdict() {
 
 // @spec:AC-060
 #[test]
-fn verdicts_with_a_windows_hello_equivalent_use_its_wording() {
+fn every_verdict_uses_the_approved_sentence() {
     let english = Strings::new(Language::English);
-    for (verdict, en) in WINDOWS_WORDING {
-        assert_eq!(english.guidance(verdict), en, "{verdict}");
+    for (verdict, sentence) in DECK {
+        assert_eq!(english.guidance(verdict), sentence, "{verdict}");
     }
-    assert_eq!(english.guidance("blurred"), "Hold still: the image is not sharp enough");
+}
+
+// @spec:AC-060
+#[test]
+fn no_text_contains_a_forbidden_windows_hello_phrase() {
+    let strings = Strings::new(Language::English);
+    let texts = Text::ALL.iter().map(|text| strings.get(*text)).chain([strings.guidance("quantum-flux-9")]);
+    for sentence in texts {
+        for phrase in FORBIDDEN {
+            assert!(!sentence.contains(phrase), "{phrase:?} in {sentence:?}");
+        }
+        assert!(!sentence.contains('!'), "{sentence:?}");
+    }
 }
 
 // @spec:AC-060
@@ -54,20 +78,6 @@ fn an_unknown_verdict_gets_a_neutral_sentence_and_never_the_raw_text() {
 #[test]
 fn the_interface_language_is_always_english() {
     assert_eq!(Language::detect(), Language::English);
-}
-
-// @spec:AC-060
-#[test]
-fn the_wizard_wording_says_openhello_and_has_no_typo() {
-    let all: Vec<&str> = [Language::English]
-        .into_iter()
-        .flat_map(|language| {
-            let strings = Strings::new(language);
-            [Text::WelcomeTitle, Text::DoneBody, Text::NoCameraBody, Text::IdentityBody].map(|text| strings.get(text))
-        })
-        .collect();
-    assert!(all.iter().all(|text| !text.contains("Windows Hello")));
-    assert!(all.iter().any(|text| text.contains("OpenHello")));
 }
 
 // @spec:AC-061
