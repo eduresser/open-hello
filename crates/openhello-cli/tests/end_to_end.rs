@@ -3,7 +3,7 @@ use std::process::{Child, Command as Process, Stdio};
 use std::sync::Arc;
 
 use openhello_cli::dbus_client::DbusClient;
-use openhello_cli::{execute, Command, KeyClient, Outcome, PinPrompt, Services};
+use openhello_cli::{execute, Command, KeyClient, KeyStatus, Outcome, PinPrompt, Services};
 use openhellod::backends::*;
 use openhellod::core::{Biometrics, DEFAULT_TARGET_FAR};
 use openhellod::dbus_service::{Action, AuthFuture, Authorizer, Caller, Service, BUS_NAME, OBJECT_PATH};
@@ -151,6 +151,10 @@ impl KeyClient for NoKeys {
 
     fn set_pin(&mut self, _: u32, _: &str) -> Result<(), String> {
         Ok(())
+    }
+
+    fn key_status(&mut self, _: u32) -> Result<KeyStatus, String> {
+        Ok(KeyStatus { key: false, pin: false })
     }
 }
 

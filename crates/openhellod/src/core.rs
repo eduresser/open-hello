@@ -234,6 +234,10 @@ impl Biometrics {
         Ok(outcome.uid)
     }
 
+    pub fn face_enrolled(&mut self, uid: u32) -> Result<bool, DaemonError> {
+        Ok(self.storage.list_uids()?.contains(&uid))
+    }
+
     pub fn purge(&mut self, uid: u32) -> Result<(), DaemonError> {
         let template = self.storage.purge(uid);
         let key = self.keyd.as_ref().map(|client| client.purge(uid));

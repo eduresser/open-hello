@@ -88,6 +88,10 @@ impl BiometricsClient for CompletedEnrollment {
     fn purge(&mut self, _: u32) -> Result<(), String> {
         Ok(())
     }
+
+    fn face_status(&mut self, _: u32) -> Result<bool, String> {
+        Ok(true)
+    }
 }
 
 struct TypedPins(Vec<&'static str>);

@@ -145,6 +145,19 @@ impl Service {
             })
     }
 
+    async fn authorize_own_uid(&self, conn: &Connection, header: &Header<'_>, target_uid: u32) -> fdo::Result<()> {
+        let caller = resolve_caller(conn, header).await?;
+        if caller.uid == 0 || caller.uid == target_uid {
+            return Ok(());
+        }
+        self.logger.log(
+            Level::Warn,
+            "authorization-refused",
+            &[("action", Value::Label("get-status")), ("caller_uid", Value::Uid(caller.uid)), ("target_uid", Value::Uid(target_uid))],
+        );
+        Err(fdo::Error::AuthFailed(format!("uid {} may not read the status of uid {target_uid}", caller.uid)))
+    }
+
     async fn discard_when_owner_leaves(&self, conn: &Connection, header: &Header<'_>, handle: &str) {
         let Some(sender) = header.sender() else { return };
         let Ok(bus) = fdo::DBusProxy::new(conn).await else { return };
@@ -292,5 +305,15 @@ impl Service {
         self.authorize(conn, &header, Action::Purge, uid).await?;
         self.with_core(move |core| core.purge(uid)).await?;
         Ok(true)
+    }
+
+    async fn get_status(
+        &self,
+        uid: u32,
+        #[zbus(connection)] conn: &Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> fdo::Result<bool> {
+        self.authorize_own_uid(conn, &header, uid).await?;
+        self.with_core(move |core| core.face_enrolled(uid)).await
     }
 }

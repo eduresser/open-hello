@@ -221,6 +221,41 @@ fn my_uid() -> u32 {
     std::fs::metadata("/proc/self").map(|m| std::os::unix::fs::MetadataExt::uid(&m)).unwrap()
 }
 
+// @spec:AC-056
+#[test]
+fn status_reports_no_face_for_the_caller_and_refuses_other_users_without_polkit() {
+    let bus = PrivateBus::start();
+    let polkit = Arc::new(ScriptedPolkit { authorized: true, asked: Default::default() });
+    serve(&bus, Arc::new(PolkitAuthorizer::new(polkit.clone())));
+    let conn = client(&bus);
+    let proxy = proxy(&conn);
+
+    assert!(!proxy.call::<_, _, bool>("GetStatus", &(my_uid(),)).unwrap());
+    let error = proxy.call::<_, _, bool>("GetStatus", &(my_uid() + 1,)).unwrap_err();
+    assert!(error.to_string().contains("AuthFailed"), "{error}");
+    assert!(error.to_string().contains("may not read the status"), "{error}");
+    assert!(polkit.asked.lock().unwrap().is_empty());
+}
+
+// @spec:AC-057
+#[test]
+fn status_follows_enrollment_commit_and_purge() {
+    let bus = PrivateBus::start();
+    serve(&bus, Arc::new(AllowAll));
+    let conn = client(&bus);
+    let proxy = proxy(&conn);
+    let uid = my_uid();
+
+    assert!(!proxy.call::<_, _, bool>("GetStatus", &(uid,)).unwrap());
+    let handle: String = proxy.call("EnrollBegin", &(uid,)).unwrap();
+    proxy.call::<_, _, (String, String, u32, u32)>("EnrollCapture", &(handle.as_str(),)).unwrap();
+    assert!(!proxy.call::<_, _, bool>("GetStatus", &(uid,)).unwrap());
+    proxy.call::<_, _, bool>("EnrollCommit", &(handle.as_str(),)).unwrap();
+    assert!(proxy.call::<_, _, bool>("GetStatus", &(uid,)).unwrap());
+    proxy.call::<_, _, bool>("Purge", &(uid,)).unwrap();
+    assert!(!proxy.call::<_, _, bool>("GetStatus", &(uid,)).unwrap());
+}
+
 // @spec:AC-013
 // @principle:P-009
 #[test]

@@ -15,6 +15,12 @@ pub struct Progress {
     pub required: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KeyStatus {
+    pub key: bool,
+    pub pin: bool,
+}
+
 pub trait BiometricsClient {
     fn enroll_begin(&mut self, uid: u32) -> Result<String, String>;
     fn enroll_capture(&mut self, handle: &str) -> Result<Progress, String>;
@@ -23,11 +29,13 @@ pub trait BiometricsClient {
     fn verify(&mut self, uid: u32) -> Result<bool, String>;
     fn identify(&mut self) -> Result<Option<u32>, String>;
     fn purge(&mut self, uid: u32) -> Result<(), String>;
+    fn face_status(&mut self, uid: u32) -> Result<bool, String>;
 }
 
 pub trait KeyClient {
     fn provision(&mut self, uid: u32) -> Result<String, String>;
     fn set_pin(&mut self, uid: u32, pin: &str) -> Result<(), String>;
+    fn key_status(&mut self, uid: u32) -> Result<KeyStatus, String>;
 }
 
 pub trait PinPrompt {
@@ -248,6 +256,7 @@ mod tests {
         progress: Vec<Progress>,
         verify_result: bool,
         identify_result: Option<u32>,
+        face_enrolled: bool,
         fail_with: Option<String>,
     }
 
@@ -293,6 +302,11 @@ mod tests {
             self.calls.push(format!("purge {uid}"));
             Ok(())
         }
+
+        fn face_status(&mut self, uid: u32) -> Result<bool, String> {
+            self.calls.push(format!("face-status {uid}"));
+            Ok(self.face_enrolled)
+        }
     }
 
     #[derive(Default)]
@@ -315,6 +329,11 @@ mod tests {
         fn set_pin(&mut self, uid: u32, pin: &str) -> Result<(), String> {
             self.calls.push(format!("set-pin {uid} {pin}"));
             Ok(())
+        }
+
+        fn key_status(&mut self, uid: u32) -> Result<KeyStatus, String> {
+            self.calls.push(format!("key-status {uid}"));
+            Ok(KeyStatus { key: true, pin: false })
         }
     }
 

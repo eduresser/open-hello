@@ -1,6 +1,6 @@
 use zbus::blocking::{Connection, Proxy};
 
-use crate::{Bus, KeyClient};
+use crate::{Bus, KeyClient, KeyStatus};
 
 const BUS_NAME: &str = "io.openhello.Keyd1";
 const OBJECT_PATH: &str = "/io/openhello/Keyd1";
@@ -51,5 +51,13 @@ impl KeyClient for KeydClient {
             .call::<_, _, bool>("SetPin", &(uid, pin))
             .map(|_| ())
             .map_err(|e| describe("SetPin", e))
+    }
+
+    fn key_status(&mut self, uid: u32) -> Result<KeyStatus, String> {
+        let (key, pin): (bool, bool) = self
+            .proxy()?
+            .call("GetStatus", &(uid,))
+            .map_err(|e| describe("GetStatus", e))?;
+        Ok(KeyStatus { key, pin })
     }
 }
