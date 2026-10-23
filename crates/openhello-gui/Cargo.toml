@@ -1,0 +1,19 @@
+[package]
+name = "openhello-gui"
+version.workspace = true
+edition.workspace = true
+license = "GPL-3.0-only"
+build = "build.rs"
+
+[[bin]]
+name = "openhello-gui"
+path = "src/main.rs"
+
+[dependencies]
+openhello-gui-core = { path = "../openhello-gui-core" }
+openhello-cli = { path = "../openhello-cli" }
+slint = { version = "1.18.1", default-features = false, features = ["std", "backend-winit", "renderer-femtovg", "accessibility", "compat-1-2", "unstable-winit-030"] }
+libc = "0.2"
+
+[build-dependencies]
+slint-build = "1.18.1"

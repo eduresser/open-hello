@@ -1,0 +1,22 @@
+import { Spinner } from "std-widgets.slint";
+import { Column, Footer, Intro, MarkRow } from "components.slint";
+import { T } from "texts.slint";
+
+export component IdentityPage inherits VerticalLayout {
+    Column {
+        MarkRow {}
+        Intro {
+            title: T.identity-title;
+            body: T.identity-body;
+        }
+        HorizontalLayout {
+            alignment: center;
+            Spinner {
+                indeterminate: true;
+                width: 32px;
+                height: 32px;
+            }
+        }
+    }
+    Footer {}
+}

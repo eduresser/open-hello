@@ -21,6 +21,10 @@ fn check(status: Status, context: &str) -> Result<(), DaemonError> {
         Status::NotFound => Err(DaemonError::NotFound),
         Status::AuthenticationFailed => Err(DaemonError::Tampered),
         Status::InvalidArgument => Err(DaemonError::InvalidRequest(format!("{context}: rejected by plugin"))),
+        Status::DeviceBusy => Err(DaemonError::CameraBusy(format!("{context}: device busy"))),
+        Status::NoDevice => Err(DaemonError::NoCamera(format!("{context}: device missing"))),
+        Status::SensorStuck => Err(DaemonError::SensorStuck(format!("{context}: no usable infrared stream"))),
+        Status::TpmUnavailable => Err(DaemonError::TpmUnavailable(format!("{context}: TPM failure"))),
         other => Err(DaemonError::Backend(format!("{context}: plugin status {other:?}"))),
     }
 }
@@ -110,6 +114,10 @@ impl SensorBackend for SensorPlugin {
     fn release(&mut self) {
         unsafe { (self.interface.release)(self.handle) };
     }
+
+    fn probe(&mut self) -> Result<(), DaemonError> {
+        check_with_reason(unsafe { (self.interface.probe)(self.handle) }, "sensor probe", self.last_error)
+    }
 }
 
 impl Drop for SensorPlugin {
@@ -171,7 +179,15 @@ impl EngineBackend for EnginePlugin {
                 EnrollVerdict::Occluded => Verdict::Occluded,
                 EnrollVerdict::NoFace => Verdict::NoFace,
                 EnrollVerdict::YawOutOfRange => Verdict::YawOutOfRange,
-                EnrollVerdict::BucketAlreadyFilled => Verdict::BucketAlreadyFilled,
+                EnrollVerdict::TooSoon => Verdict::TooSoon,
+                EnrollVerdict::TooDark => Verdict::TooDark,
+                EnrollVerdict::TooBright => Verdict::TooBright,
+                EnrollVerdict::MoveLeft => Verdict::MoveLeft,
+                EnrollVerdict::MoveRight => Verdict::MoveRight,
+                EnrollVerdict::MoveUp => Verdict::MoveUp,
+                EnrollVerdict::MoveDown => Verdict::MoveDown,
+                EnrollVerdict::TooClose => Verdict::TooClose,
+                EnrollVerdict::TooFar => Verdict::TooFar,
             },
             state: match out.state {
                 AbiEnrollState::InProgress => EnrollState::InProgress,
@@ -286,6 +302,10 @@ impl StorageBackend for StoragePlugin {
     fn purge(&mut self, uid: u32) -> Result<(), DaemonError> {
         check(unsafe { (self.interface.purge)(self.handle, uid) }, "storage purge")
     }
+
+    fn probe(&mut self) -> Result<(), DaemonError> {
+        check(unsafe { (self.interface.probe)(self.handle) }, "storage probe")
+    }
 }
 
 impl Drop for StoragePlugin {
@@ -326,6 +346,10 @@ mod tests {
         assert!(matches!(check(Status::NotFound, "x"), Err(DaemonError::NotFound)));
         assert!(matches!(check(Status::AuthenticationFailed, "x"), Err(DaemonError::Tampered)));
         assert!(matches!(check(Status::EmitterFailure, "x"), Err(DaemonError::Backend(_))));
+        assert!(matches!(check(Status::DeviceBusy, "x"), Err(DaemonError::CameraBusy(_))));
+        assert!(matches!(check(Status::NoDevice, "x"), Err(DaemonError::NoCamera(_))));
+        assert!(matches!(check(Status::SensorStuck, "x"), Err(DaemonError::SensorStuck(_))));
+        assert!(matches!(check(Status::TpmUnavailable, "x"), Err(DaemonError::TpmUnavailable(_))));
     }
 
     unsafe extern "C" fn fake_last_error(buffer: *mut u8, capacity: usize) -> usize {

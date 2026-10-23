@@ -12,10 +12,26 @@ members = [
     "crates/storage-adapter-templates",
     "crates/openhellod",
     "crates/openhello-cli",
+    "crates/openhello-gui-core",
+    "crates/openhello-gui",
+]
+default-members = [
+    "crates/openhello-plugin-abi",
+    "crates/openhello-ticket",
+    "crates/openhello-auth-proto",
+    "crates/openhello-keyd",
+    "crates/openhello-pkcs11",
+    "crates/openhello-pam",
+    "crates/sensor-adapter-ir",
+    "crates/engine-adapter-face",
+    "crates/storage-adapter-templates",
+    "crates/openhellod",
+    "crates/openhello-cli",
+    "crates/openhello-gui-core",
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "Apache-2.0"
 

@@ -34,7 +34,15 @@ pub enum Verdict {
     Occluded,
     NoFace,
     YawOutOfRange,
-    BucketAlreadyFilled,
+    TooSoon,
+    TooDark,
+    TooBright,
+    MoveLeft,
+    MoveRight,
+    MoveUp,
+    MoveDown,
+    TooClose,
+    TooFar,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,7 +113,7 @@ impl Engine {
     pub fn enroll_submit(&self, id: u64, now_ms: u64, image: &GrayImage) -> Result<EnrollProgress, EngineError> {
         let mut sessions = self.sessions.lock().unwrap();
         let session = sessions.get_mut(&id).ok_or_else(|| EngineError::InvalidInput(format!("unknown enrollment session {id}")))?;
-        let required = self.enrollment.yaw_buckets;
+        let required = self.enrollment.samples_required;
         let progress = |verdict, session: &EnrollmentSession<_>| EnrollProgress {
             verdict,
             state: session.state(),
@@ -124,11 +132,19 @@ impl Engine {
             .submit(now_ms, image, &detection, || embed_detected(self.embedder.as_ref(), image, &detection))
             .map_err(enrollment_error)?;
         let verdict = match outcome {
-            FrameOutcome::Accepted { .. } => Verdict::Accepted,
+            FrameOutcome::Accepted => Verdict::Accepted,
             FrameOutcome::Blurred => Verdict::Blurred,
             FrameOutcome::Occluded => Verdict::Occluded,
             FrameOutcome::YawOutOfRange => Verdict::YawOutOfRange,
-            FrameOutcome::BucketAlreadyFilled { .. } => Verdict::BucketAlreadyFilled,
+            FrameOutcome::TooSoon => Verdict::TooSoon,
+            FrameOutcome::TooDark => Verdict::TooDark,
+            FrameOutcome::TooBright => Verdict::TooBright,
+            FrameOutcome::MoveLeft => Verdict::MoveLeft,
+            FrameOutcome::MoveRight => Verdict::MoveRight,
+            FrameOutcome::MoveUp => Verdict::MoveUp,
+            FrameOutcome::MoveDown => Verdict::MoveDown,
+            FrameOutcome::TooClose => Verdict::TooClose,
+            FrameOutcome::TooFar => Verdict::TooFar,
         };
         Ok(progress(verdict, session))
     }
@@ -305,12 +321,11 @@ mod tests {
 
     #[test]
     fn enrollment_flows_through_detector_gate_and_commits_a_template() {
-        let yaws: Vec<f32> = [-37.5, -22.5, -7.5, 7.5, 22.5, 37.5].iter().map(|deg| deg * 0.28).collect();
-        let engine = engine(yaws.iter().map(|y| vec![face(*y, 0.0)]).collect());
+        let engine = engine((0..6).map(|_| vec![face(0.0, 0.0)]).collect());
         let session = engine.enroll_begin(0);
         let mut last = None;
         for step in 0..6u64 {
-            last = Some(engine.enroll_submit(session, step * 100, &textured()).unwrap());
+            last = Some(engine.enroll_submit(session, step * 250, &textured()).unwrap());
         }
         let last = last.unwrap();
         assert_eq!(last.verdict, Verdict::Accepted);
@@ -409,6 +424,20 @@ mod tests {
         let large = engine_with(steady_face_script(), Box::new(FixedEmbedder(probe)));
         let session = large.auth_begin(vec![(1000, template)], 1e-5, 2).unwrap();
         assert_eq!(run_until_decided(&large, session, 40).verdict, AuthVerdict::Rejected);
+    }
+
+    // @spec:AC-052
+    #[test]
+    fn authentication_scores_faces_that_enrollment_would_ask_to_reposition() {
+        let mut corner = face(0.0, 0.0);
+        corner.x = 0.0;
+        corner.y = 0.0;
+        corner.width = 30.0;
+        corner.height = 30.0;
+        let engine = engine(vec![vec![corner.clone()]]);
+        let template = Template::new(vec![probe_of(&textured(), &corner)]).unwrap();
+        let session = engine.auth_begin(vec![(1000, template)], 1e-5, 16).unwrap();
+        assert_eq!(run_until_decided(&engine, session, 16).verdict, AuthVerdict::Accepted { uid: 1000 });
     }
 
     #[test]

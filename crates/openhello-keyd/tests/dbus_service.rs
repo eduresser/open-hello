@@ -260,6 +260,41 @@ fn the_target_user_provisions_sets_a_pin_and_purges_through_polkit() {
     );
 }
 
+// @spec:AC-056
+#[test]
+fn status_reports_key_and_pin_for_the_caller_and_refuses_other_users_without_polkit() {
+    let rig = rig();
+    let protectors = protectors(&rig);
+    let polkit = Arc::new(ScriptedPolkit {
+        asked: Default::default(),
+    });
+    let bus = PrivateBus::start();
+    serve(
+        &bus,
+        protectors.clone(),
+        Arc::new(PolkitAuthorizer::new(polkit.clone())),
+    );
+    let conn = client(&bus);
+    let proxy = proxy(&conn);
+    let uid = my_uid();
+    let status = || proxy.call::<_, _, (bool, bool)>("GetStatus", &(uid,)).unwrap();
+
+    assert_eq!(status(), (false, false));
+    protectors.provision_protectors(uid).unwrap();
+    assert_eq!(status(), (true, false));
+    protectors.set_pin(uid, PIN).unwrap();
+    assert_eq!(status(), (true, true));
+    protectors.purge(uid).unwrap();
+    assert_eq!(status(), (false, false));
+
+    let error = proxy
+        .call::<_, _, (bool, bool)>("GetStatus", &(uid + 1,))
+        .unwrap_err();
+    assert!(error.to_string().contains("AuthFailed"), "{error}");
+    assert!(error.to_string().contains("may not read the status"), "{error}");
+    assert!(polkit.asked.lock().unwrap().is_empty());
+}
+
 #[test]
 fn bad_input_is_reported_without_echoing_the_pin() {
     let rig = rig();

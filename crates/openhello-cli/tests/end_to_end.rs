@@ -3,7 +3,7 @@ use std::process::{Child, Command as Process, Stdio};
 use std::sync::Arc;
 
 use openhello_cli::dbus_client::DbusClient;
-use openhello_cli::{execute, Command, KeyClient, Outcome, PinPrompt, Services};
+use openhello_cli::{execute, Command, KeyClient, KeyStatus, Outcome, Services};
 use openhellod::backends::*;
 use openhellod::core::{Biometrics, DEFAULT_TARGET_FAR};
 use openhellod::dbus_service::{Action, AuthFuture, Authorizer, Caller, Service, BUS_NAME, OBJECT_PATH};
@@ -149,22 +149,14 @@ impl KeyClient for NoKeys {
         Ok("unused".into())
     }
 
-    fn set_pin(&mut self, _: u32, _: &str) -> Result<(), String> {
-        Ok(())
-    }
-}
-
-struct NoPins;
-
-impl PinPrompt for NoPins {
-    fn read_secret(&mut self, _: &str) -> Result<String, String> {
-        Err("no terminal".into())
+    fn key_status(&mut self, _: u32) -> Result<KeyStatus, String> {
+        Ok(KeyStatus { key: false, pin: false })
     }
 }
 
 fn run_on(client: &mut DbusClient, command: Command) -> (Outcome, String) {
     let mut out = Vec::new();
-    let mut services = Services { biometrics: client, keys: &mut NoKeys, pins: &mut NoPins };
+    let mut services = Services { biometrics: client, keys: &mut NoKeys };
     let outcome = execute(&mut services, command, &mut out);
     (outcome, String::from_utf8(out).unwrap())
 }

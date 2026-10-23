@@ -13,6 +13,7 @@ thiserror.workspace = true
 libloading = "0.8"
 zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
 blocking = "1"
+libc = "0.2"
 async-io = "2"
 
 [dev-dependencies]

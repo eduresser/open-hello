@@ -27,6 +27,10 @@ impl TpmKeyStore {
         Self { config }
     }
 
+    pub fn probe(&self) -> Result<(), StorageError> {
+        self.run("tpm2_getcap", &["handles-persistent"], None).map(|_| ())
+    }
+
     pub fn exists(&self, uid: u32) -> Result<bool, StorageError> {
         let handle = persistent_handle(uid)?;
         let listing = self.run("tpm2_getcap", &["handles-persistent"], None)?;

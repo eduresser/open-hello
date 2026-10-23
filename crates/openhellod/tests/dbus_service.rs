@@ -178,6 +178,99 @@ fn unknown_session_handles_are_rejected_with_a_generic_error() {
     assert!(!error.contains("enroll-999"));
 }
 
+struct FailingSensor(fn() -> DaemonError);
+
+impl SensorBackend for FailingSensor {
+    fn capture(&mut self) -> Result<CapturedFrame, DaemonError> {
+        Err((self.0)())
+    }
+}
+
+struct FailingStorage(fn() -> DaemonError);
+
+impl StorageBackend for FailingStorage {
+    fn put(&mut self, _: u32, _: &[u8]) -> Result<(), DaemonError> {
+        Err((self.0)())
+    }
+
+    fn get(&mut self, _: u32) -> Result<Vec<u8>, DaemonError> {
+        Err((self.0)())
+    }
+
+    fn list_uids(&mut self) -> Result<Vec<u32>, DaemonError> {
+        Err((self.0)())
+    }
+
+    fn purge(&mut self, _: u32) -> Result<(), DaemonError> {
+        Err((self.0)())
+    }
+}
+
+fn verify_error_name(sensor: Box<dyn SensorBackend>, storage: Box<dyn StorageBackend>) -> (String, String) {
+    let bus = PrivateBus::start();
+    let engine = Engine { begins: Arc::new(AtomicUsize::new(0)), candidates: Vec::new() };
+    serve_core(&bus, Arc::new(AllowAll), Biometrics::new(sensor, Box::new(engine), storage, DEFAULT_TARGET_FAR));
+    let conn = client(&bus);
+    let error = proxy(&conn).call::<_, _, bool>("Verify", &(1000u32,)).unwrap_err();
+    match error {
+        zbus::Error::MethodError(name, detail, _) => (name.to_string(), detail.unwrap_or_default()),
+        other => panic!("expected a D-Bus method error, got {other}"),
+    }
+}
+
+fn enrolled_storage() -> Box<dyn StorageBackend> {
+    let mut storage = Storage::default();
+    storage.put(1000, b"secret-template-bytes").unwrap();
+    Box::new(storage)
+}
+
+// @spec:AC-069
+#[test]
+fn a_busy_camera_reaches_the_client_as_camera_busy_without_internal_detail() {
+    let sensor = FailingSensor(|| DaemonError::CameraBusy("sensor capture: /dev/video2 held by pid 4242".into()));
+    let (name, detail) = verify_error_name(Box::new(sensor), enrolled_storage());
+    assert_eq!(name, "io.openhello.Error.CameraBusy");
+    assert!(!detail.contains("/dev/video2") && !detail.contains("4242"), "{detail}");
+}
+
+// @spec:AC-069
+#[test]
+fn a_stuck_infrared_stream_reaches_the_client_as_sensor_stuck() {
+    let sensor = FailingSensor(|| DaemonError::SensorStuck("sensor capture: no alternation".into()));
+    let (name, detail) = verify_error_name(Box::new(sensor), enrolled_storage());
+    assert_eq!(name, "io.openhello.Error.SensorStuck");
+    assert!(!detail.contains("alternation"), "{detail}");
+}
+
+// @spec:AC-069
+#[test]
+fn a_missing_camera_reaches_the_client_as_no_camera() {
+    let sensor = FailingSensor(|| DaemonError::NoCamera("sensor open: /dev/video2 does not exist".into()));
+    let (name, detail) = verify_error_name(Box::new(sensor), enrolled_storage());
+    assert_eq!(name, "io.openhello.Error.NoCamera");
+    assert!(!detail.contains("/dev/video2"), "{detail}");
+}
+
+// @spec:AC-069
+#[test]
+fn an_unavailable_tpm_reaches_the_client_as_tpm_unavailable() {
+    let storage = FailingStorage(|| DaemonError::TpmUnavailable("storage get: tpm2_getcap failed: no TCTI".into()));
+    let (name, detail) = verify_error_name(Box::new(Sensor), Box::new(storage));
+    assert_eq!(name, "io.openhello.Error.TpmUnavailable");
+    assert!(!detail.contains("tpm2_getcap"), "{detail}");
+}
+
+// @spec:AC-069
+#[test]
+fn other_backend_failures_keep_the_generic_failed_error() {
+    let sensor = FailingSensor(|| DaemonError::Backend("camera unplugged".into()));
+    let (name, _) = verify_error_name(Box::new(sensor), enrolled_storage());
+    assert_eq!(name, "org.freedesktop.DBus.Error.Failed");
+}
+
+const ONLY_METHOD_ALLOWED_TO_RETURN_IMAGE_DATA: &str = "EnrollFrame";
+
+// @spec:AC-064
 // @principle:P-003
 #[test]
 fn no_method_returns_embeddings_templates_or_byte_arrays() {
@@ -192,13 +285,27 @@ fn no_method_returns_embeddings_templates_or_byte_arrays() {
         .unwrap();
     let our_interface = xml.split("<interface name=\"io.openhello.Biometrics1\">").nth(1).expect("interface introspected");
     let our_interface = our_interface.split("</interface>").next().unwrap();
-    let out_types: Vec<&str> = our_interface
-        .lines()
-        .filter(|line| line.contains("direction=\"out\""))
-        .filter_map(|line| line.split("type=\"").nth(1)?.split('"').next())
-        .collect();
+    let mut method = "";
+    let mut out_types: Vec<(&str, &str)> = Vec::new();
+    for line in our_interface.lines() {
+        if let Some(name) = line.split("<method name=\"").nth(1).and_then(|rest| rest.split('"').next()) {
+            method = name;
+        }
+        if line.contains("direction=\"out\"") {
+            if let Some(kind) = line.split("type=\"").nth(1).and_then(|rest| rest.split('"').next()) {
+                out_types.push((method, kind));
+            }
+        }
+    }
     assert!(out_types.len() >= 8, "{out_types:?}");
-    assert!(out_types.iter().all(|t| matches!(*t, "s" | "b" | "u")), "{out_types:?}");
+    let offenders: Vec<_> = out_types
+        .iter()
+        .filter(|(method, _)| *method != ONLY_METHOD_ALLOWED_TO_RETURN_IMAGE_DATA)
+        .filter(|(_, kind)| !matches!(*kind, "s" | "b" | "u"))
+        .collect();
+    assert!(offenders.is_empty(), "{offenders:?}");
+    let allowed: Vec<_> = out_types.iter().filter(|(method, _)| *method == ONLY_METHOD_ALLOWED_TO_RETURN_IMAGE_DATA).map(|(_, kind)| *kind).collect();
+    assert_eq!(allowed, ["h", "u", "u"]);
 
     let handle: String = proxy(&conn).call("EnrollBegin", &(1000u32,)).unwrap();
     assert!(!handle.contains("secret-template-bytes"));
@@ -219,6 +326,41 @@ impl PolkitClient for ScriptedPolkit {
 
 fn my_uid() -> u32 {
     std::fs::metadata("/proc/self").map(|m| std::os::unix::fs::MetadataExt::uid(&m)).unwrap()
+}
+
+// @spec:AC-056
+#[test]
+fn status_reports_no_face_for_the_caller_and_refuses_other_users_without_polkit() {
+    let bus = PrivateBus::start();
+    let polkit = Arc::new(ScriptedPolkit { authorized: true, asked: Default::default() });
+    serve(&bus, Arc::new(PolkitAuthorizer::new(polkit.clone())));
+    let conn = client(&bus);
+    let proxy = proxy(&conn);
+
+    assert!(!proxy.call::<_, _, bool>("GetStatus", &(my_uid(),)).unwrap());
+    let error = proxy.call::<_, _, bool>("GetStatus", &(my_uid() + 1,)).unwrap_err();
+    assert!(error.to_string().contains("AuthFailed"), "{error}");
+    assert!(error.to_string().contains("may not read the status"), "{error}");
+    assert!(polkit.asked.lock().unwrap().is_empty());
+}
+
+// @spec:AC-057
+#[test]
+fn status_follows_enrollment_commit_and_purge() {
+    let bus = PrivateBus::start();
+    serve(&bus, Arc::new(AllowAll));
+    let conn = client(&bus);
+    let proxy = proxy(&conn);
+    let uid = my_uid();
+
+    assert!(!proxy.call::<_, _, bool>("GetStatus", &(uid,)).unwrap());
+    let handle: String = proxy.call("EnrollBegin", &(uid,)).unwrap();
+    proxy.call::<_, _, (String, String, u32, u32)>("EnrollCapture", &(handle.as_str(),)).unwrap();
+    assert!(!proxy.call::<_, _, bool>("GetStatus", &(uid,)).unwrap());
+    proxy.call::<_, _, bool>("EnrollCommit", &(handle.as_str(),)).unwrap();
+    assert!(proxy.call::<_, _, bool>("GetStatus", &(uid,)).unwrap());
+    proxy.call::<_, _, bool>("Purge", &(uid,)).unwrap();
+    assert!(!proxy.call::<_, _, bool>("GetStatus", &(uid,)).unwrap());
 }
 
 // @spec:AC-013
@@ -435,4 +577,238 @@ fn an_enrollment_that_is_committed_or_discarded_by_its_owner_is_not_discarded_ag
     std::thread::sleep(std::time::Duration::from_millis(500));
     assert_eq!(probe.enroll_discards.load(Ordering::SeqCst), 1);
     assert_eq!(probe.releases.load(Ordering::SeqCst), 1);
+}
+
+const PREVIEW_PIXELS: [u8; 6] = [10, 20, 30, 40, 50, 60];
+
+struct PreviewSensor;
+
+impl SensorBackend for PreviewSensor {
+    fn capture(&mut self) -> Result<CapturedFrame, DaemonError> {
+        Ok(CapturedFrame { width: 3, height: 2, pixels: PREVIEW_PIXELS.to_vec() })
+    }
+}
+
+fn preview_core() -> Biometrics {
+    let engine = Engine { begins: Arc::new(AtomicUsize::new(0)), candidates: Vec::new() };
+    Biometrics::new(Box::new(PreviewSensor), Box::new(engine), Box::new(Storage::default()), DEFAULT_TARGET_FAR)
+}
+
+fn serve_preview(authorized: bool) -> (PrivateBus, Arc<ScriptedPolkit>) {
+    let bus = PrivateBus::start();
+    let polkit = Arc::new(ScriptedPolkit { authorized, asked: Default::default() });
+    serve_core(&bus, Arc::new(PolkitAuthorizer::new(polkit.clone())), preview_core());
+    (bus, polkit)
+}
+
+fn read_frame(reply: (zbus::zvariant::OwnedFd, u32, u32)) -> (std::fs::File, u32, u32) {
+    (std::fs::File::from(std::os::fd::OwnedFd::from(reply.0)), reply.1, reply.2)
+}
+
+fn capture_once(proxy: &zbus::blocking::Proxy<'_>, handle: &str) {
+    proxy.call::<_, _, (String, String, u32, u32)>("EnrollCapture", &(handle,)).unwrap();
+}
+
+// @spec:AC-063
+#[test]
+fn the_owner_receives_the_latest_frame_as_a_sealed_read_only_memory_file() {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::FileExt;
+
+    let (bus, polkit) = serve_preview(true);
+    let conn = client(&bus);
+    let proxy = proxy(&conn);
+    let handle: String = proxy.call("EnrollBegin", &(my_uid(),)).unwrap();
+    capture_once(&proxy, &handle);
+
+    let (file, width, height) = read_frame(proxy.call("EnrollFrame", &(handle.as_str(),)).unwrap());
+    assert_eq!((width, height), (3, 2));
+    let mut pixels = vec![0u8; (width * height) as usize];
+    file.read_exact_at(&mut pixels, 0).unwrap();
+    assert_eq!(pixels, PREVIEW_PIXELS);
+    assert_eq!(file.metadata().unwrap().len(), PREVIEW_PIXELS.len() as u64);
+    assert!(polkit.asked.lock().unwrap().contains(&"io.openhello.biometrics.enroll-frame".to_string()));
+
+    let flags = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFD) };
+    assert_ne!(flags & libc::FD_CLOEXEC, 0);
+    assert!(file.write_at(&[1], 0).is_err());
+    assert!(file.set_len(0).is_err());
+    assert!(file.set_len(100).is_err());
+    file.read_exact_at(&mut pixels, 0).unwrap();
+    assert_eq!(pixels, PREVIEW_PIXELS);
+}
+
+type FrameReply = (zbus::zvariant::OwnedFd, u32, u32);
+
+fn serve_with_captured_session(owner_uid: u32, authorized: bool) -> (PrivateBus, Arc<ScriptedPolkit>, String) {
+    let bus = PrivateBus::start();
+    let polkit = Arc::new(ScriptedPolkit { authorized, asked: Default::default() });
+    let mut core = preview_core();
+    let handle = core.enroll_begin(owner_uid).unwrap();
+    core.enroll_capture(&handle).unwrap();
+    serve_core(&bus, Arc::new(PolkitAuthorizer::new(polkit.clone())), core);
+    (bus, polkit, handle)
+}
+
+// @spec:AC-063
+#[test]
+fn the_preview_refuses_unknown_handles_and_sessions_without_a_frame() {
+    let (bus, _) = serve_preview(true);
+    let conn = client(&bus);
+    let proxy = proxy(&conn);
+    let unknown = proxy.call::<_, _, FrameReply>("EnrollFrame", &("enroll-999",)).unwrap_err();
+    assert!(unknown.to_string().contains("not valid in the current state"), "{unknown}");
+    let handle: String = proxy.call("EnrollBegin", &(my_uid(),)).unwrap();
+    let early = proxy.call::<_, _, FrameReply>("EnrollFrame", &(handle.as_str(),)).unwrap_err();
+    assert!(early.to_string().contains("not valid in the current state"), "{early}");
+}
+
+// @spec:AC-063
+// @principle:P-009
+#[test]
+fn the_preview_is_refused_to_another_user_and_without_polkit_authorization() {
+    let (bus, polkit, handle) = serve_with_captured_session(my_uid() + 1, true);
+    let conn = client(&bus);
+    let error = proxy(&conn).call::<_, _, FrameReply>("EnrollFrame", &(handle.as_str(),)).unwrap_err();
+    assert!(error.to_string().contains("AuthFailed"), "{error}");
+    assert!(polkit.asked.lock().unwrap().is_empty());
+
+    let (bus, polkit, handle) = serve_with_captured_session(my_uid(), false);
+    let conn = client(&bus);
+    let error = proxy(&conn).call::<_, _, FrameReply>("EnrollFrame", &(handle.as_str(),)).unwrap_err();
+    assert!(error.to_string().contains("AuthFailed"), "{error}");
+    assert!(error.to_string().contains("io.openhello.biometrics.enroll-frame"), "{error}");
+    assert_eq!(*polkit.asked.lock().unwrap(), vec!["io.openhello.biometrics.enroll-frame"]);
+}
+
+// @spec:AC-063
+#[test]
+fn a_committed_or_discarded_session_no_longer_serves_its_preview() {
+    let (bus, _) = serve_preview(true);
+    let conn = client(&bus);
+    let proxy = proxy(&conn);
+    for finish in ["EnrollCommit", "EnrollDiscard"] {
+        let handle: String = proxy.call("EnrollBegin", &(my_uid(),)).unwrap();
+        capture_once(&proxy, &handle);
+        let (kept, _, _) = read_frame(proxy.call("EnrollFrame", &(handle.as_str(),)).unwrap());
+        proxy.call_method(finish, &(handle.as_str(),)).unwrap();
+        let error = proxy.call::<_, _, FrameReply>("EnrollFrame", &(handle.as_str(),)).unwrap_err();
+        assert!(error.to_string().contains("not valid in the current state"), "{finish}: {error}");
+        drop(kept);
+    }
+}
+
+struct ReadinessSensor {
+    probe: fn() -> Result<(), DaemonError>,
+    captures: Arc<AtomicUsize>,
+}
+
+impl SensorBackend for ReadinessSensor {
+    fn capture(&mut self) -> Result<CapturedFrame, DaemonError> {
+        self.captures.fetch_add(1, Ordering::SeqCst);
+        Err(DaemonError::Backend("capture must not be called by the readiness check".into()))
+    }
+
+    fn probe(&mut self) -> Result<(), DaemonError> {
+        (self.probe)()
+    }
+}
+
+struct ReadinessStorage(fn() -> Result<(), DaemonError>);
+
+impl StorageBackend for ReadinessStorage {
+    fn put(&mut self, _: u32, _: &[u8]) -> Result<(), DaemonError> {
+        Ok(())
+    }
+
+    fn get(&mut self, _: u32) -> Result<Vec<u8>, DaemonError> {
+        Err(DaemonError::NotFound)
+    }
+
+    fn list_uids(&mut self) -> Result<Vec<u32>, DaemonError> {
+        Ok(Vec::new())
+    }
+
+    fn purge(&mut self, _: u32) -> Result<(), DaemonError> {
+        Ok(())
+    }
+
+    fn probe(&mut self) -> Result<(), DaemonError> {
+        (self.0)()
+    }
+}
+
+struct CountingAuthorizer(Arc<AtomicUsize>);
+
+impl Authorizer for CountingAuthorizer {
+    fn authorize<'a>(&'a self, _: Action, _: &'a Caller, _: u32) -> AuthFuture<'a> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { Err("refused".to_string()) })
+    }
+}
+
+struct Readiness {
+    outcome: Result<(), (String, String)>,
+    captures: usize,
+    authorizations: usize,
+}
+
+fn check_ready(sensor_probe: fn() -> Result<(), DaemonError>, storage_probe: fn() -> Result<(), DaemonError>) -> Readiness {
+    let bus = PrivateBus::start();
+    let (captures, authorizations) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+    let sensor = ReadinessSensor { probe: sensor_probe, captures: captures.clone() };
+    let engine = Engine { begins: Arc::new(AtomicUsize::new(0)), candidates: Vec::new() };
+    let core = Biometrics::new(Box::new(sensor), Box::new(engine), Box::new(ReadinessStorage(storage_probe)), DEFAULT_TARGET_FAR);
+    serve_core(&bus, Arc::new(CountingAuthorizer(authorizations.clone())), core);
+    let conn = client(&bus);
+    let outcome = match proxy(&conn).call::<_, _, ()>("CheckReady", &()) {
+        Ok(()) => Ok(()),
+        Err(zbus::Error::MethodError(name, detail, _)) => Err((name.to_string(), detail.unwrap_or_default())),
+        Err(other) => panic!("expected a D-Bus method error, got {other}"),
+    };
+    Readiness { outcome, captures: captures.load(Ordering::SeqCst), authorizations: authorizations.load(Ordering::SeqCst) }
+}
+
+fn healthy() -> Result<(), DaemonError> {
+    Ok(())
+}
+
+// @spec:AC-070
+#[test]
+fn check_ready_succeeds_with_a_healthy_camera_and_tpm_without_capturing_or_asking_polkit() {
+    let readiness = check_ready(healthy, healthy);
+    assert!(readiness.outcome.is_ok(), "{:?}", readiness.outcome);
+    assert_eq!(readiness.captures, 0);
+    assert_eq!(readiness.authorizations, 0);
+}
+
+// @spec:AC-070
+// @spec:AC-069
+#[test]
+fn check_ready_reports_a_missing_camera_as_no_camera() {
+    let readiness = check_ready(|| Err(DaemonError::NoCamera("/dev/video2 does not exist".into())), healthy);
+    let (name, detail) = readiness.outcome.unwrap_err();
+    assert_eq!(name, "io.openhello.Error.NoCamera");
+    assert!(!detail.contains("/dev/video2"), "{detail}");
+    assert_eq!(readiness.captures, 0);
+}
+
+// @spec:AC-070
+// @spec:AC-069
+#[test]
+fn check_ready_reports_a_busy_camera_as_camera_busy() {
+    let readiness = check_ready(|| Err(DaemonError::CameraBusy("VIDIOC_S_FMT: busy".into())), healthy);
+    assert_eq!(readiness.outcome.unwrap_err().0, "io.openhello.Error.CameraBusy");
+    assert_eq!(readiness.captures, 0);
+}
+
+// @spec:AC-070
+// @spec:AC-069
+#[test]
+fn check_ready_reports_an_unavailable_tpm_as_tpm_unavailable() {
+    let readiness = check_ready(healthy, || Err(DaemonError::TpmUnavailable("tpm2_getcap failed".into())));
+    let (name, detail) = readiness.outcome.unwrap_err();
+    assert_eq!(name, "io.openhello.Error.TpmUnavailable");
+    assert!(!detail.contains("tpm2_getcap"), "{detail}");
+    assert_eq!(readiness.captures, 0);
 }

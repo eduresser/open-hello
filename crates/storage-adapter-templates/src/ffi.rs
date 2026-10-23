@@ -13,7 +13,8 @@ fn status_of(error: &StorageError) -> Status {
         StorageError::NotFound => Status::NotFound,
         StorageError::AuthenticationFailed => Status::AuthenticationFailed,
         StorageError::InvalidUid(_) => Status::InvalidArgument,
-        StorageError::Tpm(_) | StorageError::Io(_) => Status::Internal,
+        StorageError::Tpm(_) => Status::TpmUnavailable,
+        StorageError::Io(_) => Status::Internal,
     }
 }
 
@@ -105,6 +106,16 @@ unsafe extern "C" fn storage_purge(handle: StorageHandle, uid: u32) -> Status {
     }
 }
 
+unsafe extern "C" fn storage_probe(handle: StorageHandle) -> Status {
+    let Some(store) = store(handle) else {
+        return Status::InvalidArgument;
+    };
+    match store.probe() {
+        Ok(()) => Status::Ok,
+        Err(error) => status_of(&error),
+    }
+}
+
 unsafe extern "C" fn storage_close(handle: StorageHandle) {
     if !handle.is_null() {
         drop(Box::from_raw(handle as *mut TemplateStore));
@@ -119,9 +130,21 @@ static STORAGE_INTERFACE: StorageInterface = StorageInterface {
     list_uids: storage_list_uids,
     purge: storage_purge,
     close: storage_close,
+    probe: storage_probe,
 };
 
 #[no_mangle]
 pub extern "C" fn openhello_storage_interface() -> *const StorageInterface {
     &STORAGE_INTERFACE
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tpm_failures_have_their_own_status_and_io_stays_internal() {
+        assert_eq!(status_of(&StorageError::Tpm("x".into())), Status::TpmUnavailable);
+        assert_eq!(status_of(&StorageError::Io("x".into())), Status::Internal);
+    }
 }

@@ -1,0 +1,54 @@
+import { ActionButton, Brand, Column, Footer, Intro, LinkButton, MarkRow, Spacer, TestStatus } from "components.slint";
+import { T } from "texts.slint";
+
+export component ManagePage inherits VerticalLayout {
+    in property <bool> busy;
+    in property <bool> testing;
+    in property <string> result;
+    in property <bool> blocked;
+    in property <string> blocked-title;
+    in property <string> blocked-body;
+    in-out property <bool> confirming;
+    callback test();
+    callback set-up-again();
+
+    property <bool> usable: !root.busy && !root.confirming && !root.blocked;
+
+    Column {
+        TestStatus {
+            busy: root.busy;
+            testing: root.testing;
+            result: root.result;
+        }
+        MarkRow {
+            fill: root.blocked ? Brand.muted : Brand.positive;
+            troubled: root.blocked;
+        }
+        Intro {
+            title: root.blocked ? root.blocked-title : T.window-title;
+            body: root.blocked ? root.blocked-body : T.manage-body;
+        }
+    }
+    Footer {
+        LinkButton {
+            text: T.delete-data;
+            clicked => {
+                if (!root.busy) {
+                    root.confirming = true;
+                }
+            }
+        }
+        Spacer {}
+        ActionButton {
+            text: T.test;
+            enabled: root.usable;
+            clicked => { root.test(); }
+        }
+        ActionButton {
+            text: T.set-up-again;
+            secondary: true;
+            enabled: root.usable;
+            clicked => { root.set-up-again(); }
+        }
+    }
+}

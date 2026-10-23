@@ -118,9 +118,32 @@ fn a_full_cycle_at_trace_verbosity_never_logs_frame_or_template_bytes() {
     core.purge(1000).unwrap();
 
     let lines = capture.0.lock().unwrap();
-    for event in ["enroll-begin", "enroll-frame", "enroll-commit", "verify", "identify", "purge", "verify-template-unavailable"] {
+    for event in ["enroll-begin", "enroll-frame", "enroll-commit", "verify", "identify", "purge", "verify-template-unavailable", "sensor-release"] {
         assert!(lines.iter().any(|l| l.contains(event)), "missing {event} in {lines:#?}");
     }
+    for rendering in forbidden_renderings() {
+        assert!(!lines.iter().any(|l| l.contains(&rendering)), "log leaked `{rendering}`:\n{lines:#?}");
+    }
+}
+
+// @spec:AC-064
+// @principle:P-010
+#[test]
+fn an_enrollment_with_preview_never_logs_the_frame_bytes() {
+    let capture = Arc::new(Capture::default());
+    let logger = Logger::new(Level::Trace, capture.clone());
+    let mut core = Biometrics::new(Box::new(Sensor), Box::new(Engine::default()), Box::new(Storage::default()), DEFAULT_TARGET_FAR).with_logger(logger);
+
+    let handle = core.enroll_begin(1000).unwrap();
+    core.enroll_capture(&handle).unwrap();
+    let preview = core.enroll_frame(&handle).unwrap();
+    assert_eq!(preview.pixels, PIXELS);
+    assert!(core.enroll_frame("enroll-unknown").is_err());
+    core.enroll_commit(&handle).unwrap();
+    assert!(core.enroll_frame(&handle).is_err());
+
+    let lines = capture.0.lock().unwrap();
+    assert!(lines.iter().any(|l| l.contains("enroll-frame")), "{lines:#?}");
     for rendering in forbidden_renderings() {
         assert!(!lines.iter().any(|l| l.contains(&rendering)), "log leaked `{rendering}`:\n{lines:#?}");
     }

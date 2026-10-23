@@ -1,0 +1,260 @@
+import { Palette, Spinner } from "std-widgets.slint";
+import { T } from "texts.slint";
+
+export global Brand {
+    out property <color> accent: #1f6feb;
+    out property <color> accepted: #3fb950;
+    out property <color> danger: #d1242f;
+    out property <brush> logo: @linear-gradient(135deg, #3b8cff 0%, #1747c9 100%);
+    out property <brush> positive: @linear-gradient(135deg, #46c35f 0%, #1a7f37 100%);
+    out property <brush> negative: @linear-gradient(135deg, #f0525c 0%, #b31d28 100%);
+    out property <brush> muted: @linear-gradient(135deg, #9aa1ad 0%, #5f6672 100%);
+}
+
+export component Heading inherits Text {
+    font-size: 26px;
+    font-weight: 700;
+    color: Palette.foreground;
+    horizontal-alignment: center;
+    wrap: word-wrap;
+}
+
+export component Body inherits Text {
+    font-size: 15px;
+    color: Palette.foreground.with-alpha(0.78);
+    horizontal-alignment: center;
+    wrap: word-wrap;
+}
+
+export component Intro inherits VerticalLayout {
+    in property <string> title;
+    in property <string> body;
+
+    spacing: 8px;
+    Heading { text: root.title; }
+    Body { text: root.body; }
+}
+
+export component FaceMark inherits Rectangle {
+    in property <brush> fill: Brand.logo;
+    in property <bool> troubled;
+
+    width: 112px;
+    height: 112px;
+    border-radius: self.width * 14 / 64;
+    background: root.fill;
+
+    Path {
+        width: parent.width;
+        height: parent.height;
+        viewbox-width: 64;
+        viewbox-height: 64;
+        stroke: #ffffff;
+        stroke-width: root.width * 5 / 64;
+        stroke-line-cap: round;
+        commands: "M 22 17 V 26 M 42 17 V 26 " + (root.troubled ? "M 19 42 H 45" : "M 15 38 C 23.5 48.5 40.5 48.5 49 38");
+    }
+}
+
+export component Column inherits Rectangle {
+    in property <length> column-width: 480px;
+    vertical-stretch: 1;
+    VerticalLayout {
+        alignment: center;
+        padding: 32px;
+        HorizontalLayout {
+            alignment: center;
+            VerticalLayout {
+                width: min(root.column-width, root.width - 64px);
+                spacing: 24px;
+                @children
+            }
+        }
+    }
+}
+
+export component MarkRow inherits HorizontalLayout {
+    in property <brush> fill: Brand.logo;
+    in property <bool> troubled;
+
+    alignment: center;
+    FaceMark {
+        fill: root.fill;
+        troubled: root.troubled;
+    }
+}
+
+export component Footer inherits Rectangle {
+    height: 68px;
+    vertical-stretch: 0;
+    background: Palette.foreground.with-alpha(0.035);
+
+    Rectangle {
+        y: 0;
+        height: 1px;
+        background: Palette.foreground.with-alpha(0.08);
+    }
+
+    HorizontalLayout {
+        padding-left: 24px;
+        padding-right: 24px;
+        padding-top: 16px;
+        padding-bottom: 16px;
+        spacing: 8px;
+        @children
+    }
+}
+
+export component Spacer inherits Rectangle {
+    horizontal-stretch: 1;
+}
+
+export component ActionButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <bool> secondary;
+    in property <color> tone: Brand.accent;
+    callback clicked();
+
+    property <bool> keyboard-focus;
+    property <brush> secondary-fill: !root.enabled ? Palette.foreground.with-alpha(0.03) : touch.pressed ? Palette.foreground.with-alpha(0.04) : touch.has-hover ? Palette.foreground.with-alpha(0.11) : Palette.foreground.with-alpha(0.07);
+    property <brush> primary-fill: !root.enabled ? Palette.foreground.with-alpha(0.1) : touch.pressed ? root.tone.darker(0.2) : touch.has-hover ? root.tone.brighter(0.1) : root.tone;
+
+    preferred-width: max(120px, label.preferred-width + 40px);
+    horizontal-stretch: 0;
+    height: 36px;
+    border-radius: 6px;
+    border-width: root.secondary ? 1px : 0px;
+    border-color: Palette.foreground.with-alpha(root.enabled ? 0.16 : 0.08);
+    background: root.secondary ? root.secondary-fill : root.primary-fill;
+    animate background { duration: 120ms; }
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        if (root.enabled) {
+            root.clicked();
+        }
+    }
+
+    Rectangle {
+        x: -4px;
+        y: -4px;
+        width: parent.width + 8px;
+        height: parent.height + 8px;
+        border-radius: parent.border-radius + 4px;
+        border-width: 2px;
+        border-color: Palette.foreground;
+        visible: root.keyboard-focus && scope.has-focus;
+    }
+
+    label := Text {
+        text: root.text;
+        color: !root.enabled ? Palette.foreground.with-alpha(0.38) : root.secondary ? Palette.foreground : #ffffff;
+        font-size: 15px;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+
+    scope := FocusScope {
+        enabled: root.enabled;
+        focus-gained(reason) => { root.keyboard-focus = reason != FocusReason.pointer-click; }
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}
+
+export component ButtonRow inherits HorizontalLayout {
+    alignment: center;
+    spacing: 12px;
+}
+
+export component LinkButton inherits Rectangle {
+    in property <string> text;
+    callback clicked();
+
+    property <bool> keyboard-focus;
+
+    preferred-width: label.preferred-width + 16px;
+    horizontal-stretch: 0;
+    height: 36px;
+    border-radius: 6px;
+    border-width: root.keyboard-focus && scope.has-focus ? 2px : 0px;
+    border-color: Palette.foreground;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { root.clicked(); }
+
+    label := Text {
+        text: root.text;
+        color: touch.has-hover ? Brand.danger.brighter(0.3) : Palette.foreground.with-alpha(0.66);
+        font-size: 14px;
+        font-weight: 500;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    scope := FocusScope {
+        focus-gained(reason) => { root.keyboard-focus = reason != FocusReason.pointer-click; }
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}
+
+export component TestStatus inherits Rectangle {
+    in property <bool> busy;
+    in property <bool> testing;
+    in property <string> result;
+
+    property <bool> shown: root.testing || root.result != "";
+
+    min-height: 40px;
+    border-radius: 6px;
+    background: root.shown ? Palette.foreground.with-alpha(0.06) : transparent;
+    border-width: root.shown ? 1px : 0px;
+    border-color: Palette.foreground.with-alpha(0.08);
+
+    HorizontalLayout {
+        alignment: center;
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        spacing: 10px;
+        if root.busy: Spinner {
+            indeterminate: true;
+            width: 20px;
+            height: 20px;
+        }
+        Text {
+            text: root.testing ? T.testing : root.result;
+            font-size: 15px;
+            font-weight: 600;
+            color: Palette.foreground;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+}

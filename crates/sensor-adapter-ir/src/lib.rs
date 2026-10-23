@@ -3,6 +3,7 @@ mod illumination;
 mod ioctl;
 mod lazy;
 mod msxu;
+mod session_log;
 mod v4l2_capture;
 
 use std::ffi::CStr;
@@ -29,6 +30,12 @@ const AUTO_EMITTER: &str = "auto";
 pub enum SensorError {
     #[error("camera device error: {0}")]
     Device(String),
+    #[error("camera device error: camera keeps delivering incomplete frames ({count} in a row; last: bytesused={bytes_used} of {size_image}, flags={flags:#x})")]
+    IncompleteFrames { count: usize, bytes_used: u32, size_image: u32, flags: u32 },
+    #[error("camera device busy: {0}")]
+    DeviceBusy(String),
+    #[error("camera device missing: {0}")]
+    NoDevice(String),
     #[error("IR emitter configuration invalid: {0}")]
     EmitterConfig(String),
     #[error("IR emitter activation failed: {0}")]
@@ -41,6 +48,12 @@ pub enum SensorError {
     EmitterNotConfirmed(u8),
     #[error("the stream never alternates between lit and unlit frames although the emitter is controllable")]
     NoAlternation,
+}
+
+impl SensorError {
+    pub fn is_transient_start_failure(&self) -> bool {
+        matches!(self, SensorError::IncompleteFrames { .. })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -162,6 +175,7 @@ impl EmitterPolicy {
 }
 
 struct SensorState {
+    device_path: String,
     capture: LazyCapture<V4l2Camera>,
     last: Option<Frame>,
 }
@@ -171,7 +185,7 @@ type SharedState = Arc<Mutex<SensorState>>;
 fn open_state(device_path: &str) -> Result<SharedState, SensorError> {
     let policy = EmitterPolicy::from_env()?;
     if !std::path::Path::new(device_path).exists() {
-        return Err(SensorError::Device(format!("{device_path} does not exist")));
+        return Err(SensorError::NoDevice(format!("{device_path} does not exist")));
     }
     let path = device_path.to_string();
     let opener = Box::new(move || {
@@ -179,7 +193,7 @@ fn open_state(device_path: &str) -> Result<SharedState, SensorError> {
         let mut emitter = policy.clone().emitter_for(&path, camera.raw_fd());
         CaptureSession::begin(emitter.as_mut(), camera)
     });
-    let state = Arc::new(Mutex::new(SensorState { capture: LazyCapture::new(opener, Instant::now()), last: None }));
+    let state = Arc::new(Mutex::new(SensorState { device_path: device_path.to_string(), capture: LazyCapture::new(opener, Instant::now()), last: None }));
     spawn_idle_release(Arc::downgrade(&state));
     Ok(state)
 }
@@ -198,13 +212,11 @@ fn spawn_idle_release(state: std::sync::Weak<Mutex<SensorState>>) {
 
 fn status_of(error: &SensorError) -> Status {
     match error {
-        SensorError::Device(_) => Status::DeviceUnavailable,
-        SensorError::EmitterConfig(_)
-        | SensorError::EmitterActivation(_)
-        | SensorError::NoIllumination
-        | SensorError::EmitterWriteRefused(_)
-        | SensorError::EmitterNotConfirmed(_)
-        | SensorError::NoAlternation => Status::EmitterFailure,
+        SensorError::Device(_) | SensorError::IncompleteFrames { .. } => Status::DeviceUnavailable,
+        SensorError::DeviceBusy(_) => Status::DeviceBusy,
+        SensorError::NoDevice(_) => Status::NoDevice,
+        SensorError::EmitterConfig(_) | SensorError::EmitterActivation(_) | SensorError::EmitterWriteRefused(_) => Status::EmitterFailure,
+        SensorError::NoIllumination | SensorError::EmitterNotConfirmed(_) | SensorError::NoAlternation => Status::SensorStuck,
     }
 }
 
@@ -279,7 +291,24 @@ unsafe extern "C" fn sensor_release(handle: SensorHandle) {
     }
     let shared = &*(handle as *const SharedState);
     if let Ok(mut state) = shared.lock() {
-        state.capture.release();
+        state.capture.release(Instant::now());
+    }
+}
+
+unsafe extern "C" fn sensor_probe(handle: SensorHandle) -> Status {
+    if handle.is_null() {
+        return Status::InvalidArgument;
+    }
+    let shared = &*(handle as *const SharedState);
+    let Ok(state) = shared.lock() else {
+        return Status::Internal;
+    };
+    if state.capture.is_open() {
+        return Status::Ok;
+    }
+    match V4l2Camera::probe(&state.device_path) {
+        Ok(()) => Status::Ok,
+        Err(error) => fail(&error),
     }
 }
 
@@ -296,6 +325,7 @@ static SENSOR_INTERFACE: SensorInterface = SensorInterface {
     release_frame: sensor_release_frame,
     release: sensor_release,
     close: sensor_close,
+    probe: sensor_probe,
 };
 
 #[no_mangle]
@@ -625,11 +655,21 @@ mod tests {
 
     #[test]
     fn emitter_errors_are_reported_as_emitter_failure_with_the_reason_available() {
-        let error = SensorError::EmitterNotConfirmed(1);
+        let error = SensorError::EmitterWriteRefused("denied".into());
         assert_eq!(fail(&error), Status::EmitterFailure);
         let mut buffer = [0u8; 256];
         let length = unsafe { openhello_sensor_last_error(buffer.as_mut_ptr(), buffer.len()) };
         assert_eq!(std::str::from_utf8(&buffer[..length]).unwrap(), error.to_string());
+    }
+
+    #[test]
+    fn stuck_stream_busy_and_missing_camera_get_their_own_statuses() {
+        assert_eq!(status_of(&SensorError::NoAlternation), Status::SensorStuck);
+        assert_eq!(status_of(&SensorError::EmitterNotConfirmed(1)), Status::SensorStuck);
+        assert_eq!(status_of(&SensorError::NoIllumination), Status::SensorStuck);
+        assert_eq!(status_of(&SensorError::DeviceBusy("x".into())), Status::DeviceBusy);
+        assert_eq!(status_of(&SensorError::NoDevice("x".into())), Status::NoDevice);
+        assert_eq!(status_of(&SensorError::Device("x".into())), Status::DeviceUnavailable);
     }
 
     #[test]
