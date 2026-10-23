@@ -329,73 +329,73 @@
       "code": "REF_MALFORMED",
       "feature": "face-recognition-proof",
       "ref": "T-002",
-      "occurrences": 38,
+      "occurrences": 40,
       "firstSeen": "2026-10-20T19:42:54.199Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "REF_MALFORMED::face-recognition-proof::T-004": {
       "code": "REF_MALFORMED",
       "feature": "face-recognition-proof",
       "ref": "T-004",
-      "occurrences": 38,
+      "occurrences": 40,
       "firstSeen": "2026-10-20T19:42:54.200Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "REF_MALFORMED::face-recognition-proof::T-005": {
       "code": "REF_MALFORMED",
       "feature": "face-recognition-proof",
       "ref": "T-005",
-      "occurrences": 38,
+      "occurrences": 40,
       "firstSeen": "2026-10-20T19:42:54.200Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "REF_MALFORMED::face-recognition-proof::T-007": {
       "code": "REF_MALFORMED",
       "feature": "face-recognition-proof",
       "ref": "T-007",
-      "occurrences": 76,
+      "occurrences": 80,
       "firstSeen": "2026-10-20T19:42:54.200Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "REF_MALFORMED::face-recognition-proof::T-008": {
       "code": "REF_MALFORMED",
       "feature": "face-recognition-proof",
       "ref": "T-008",
-      "occurrences": 38,
+      "occurrences": 40,
       "firstSeen": "2026-10-20T19:42:54.200Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "REF_MALFORMED::face-recognition-proof::T-009": {
       "code": "REF_MALFORMED",
       "feature": "face-recognition-proof",
       "ref": "T-009",
-      "occurrences": 38,
+      "occurrences": 40,
       "firstSeen": "2026-10-20T19:42:54.200Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "REF_MALFORMED::face-recognition-proof::T-010": {
       "code": "REF_MALFORMED",
       "feature": "face-recognition-proof",
       "ref": "T-010",
-      "occurrences": 38,
+      "occurrences": 40,
       "firstSeen": "2026-10-20T19:42:54.200Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "REF_MALFORMED::face-recognition-proof::T-011": {
       "code": "REF_MALFORMED",
       "feature": "face-recognition-proof",
       "ref": "T-011",
-      "occurrences": 38,
+      "occurrences": 40,
       "firstSeen": "2026-10-20T19:42:54.200Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "FILE_NOT_FOUND::face-recognition-proof::T-002": {
       "code": "FILE_NOT_FOUND",
@@ -509,100 +509,100 @@
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-001",
-      "occurrences": 36,
+      "occurrences": 37,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::face-recognition-proof::AC-002": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-002",
-      "occurrences": 36,
+      "occurrences": 37,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::face-recognition-proof::AC-003": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-003",
-      "occurrences": 36,
+      "occurrences": 37,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::face-recognition-proof::AC-004": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-004",
-      "occurrences": 36,
+      "occurrences": 37,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::face-recognition-proof::AC-005": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-005",
-      "occurrences": 36,
+      "occurrences": 37,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::face-recognition-proof::AC-006": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-006",
-      "occurrences": 36,
+      "occurrences": 37,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::face-recognition-proof::AC-007": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-007",
-      "occurrences": 36,
+      "occurrences": 37,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::face-recognition-proof::AC-008": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-008",
-      "occurrences": 36,
+      "occurrences": 37,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::face-recognition-proof::AC-009": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-009",
-      "occurrences": 36,
+      "occurrences": 37,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::face-recognition-proof::AC-010": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-010",
-      "occurrences": 36,
+      "occurrences": 37,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::face-recognition-proof::AC-011": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-011",
-      "occurrences": 36,
+      "occurrences": 37,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::face-recognition-proof::AC-012": {
       "code": "PROOF_WEAK",
@@ -617,127 +617,127 @@
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-013",
-      "occurrences": 36,
+      "occurrences": 37,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::face-recognition-proof::AC-014": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-014",
-      "occurrences": 36,
+      "occurrences": 37,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::face-recognition-proof::AC-015": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-015",
-      "occurrences": 36,
+      "occurrences": 37,
       "firstSeen": "2026-10-20T20:16:42.880Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::face-recognition-proof::AC-001": {
       "code": "VERIFY_FAILED",
       "feature": "face-recognition-proof",
       "ref": "AC-001",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T21:56:56.163Z",
-      "lastSeen": "2026-10-23T14:40:19.394Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.037Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::face-recognition-proof::AC-002": {
       "code": "VERIFY_FAILED",
       "feature": "face-recognition-proof",
       "ref": "AC-002",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T21:56:56.163Z",
-      "lastSeen": "2026-10-23T14:40:19.394Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.037Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::face-recognition-proof::AC-003": {
       "code": "VERIFY_FAILED",
       "feature": "face-recognition-proof",
       "ref": "AC-003",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T21:56:56.163Z",
-      "lastSeen": "2026-10-23T14:40:19.394Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.037Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::face-recognition-proof::AC-004": {
       "code": "VERIFY_FAILED",
       "feature": "face-recognition-proof",
       "ref": "AC-004",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T21:56:56.163Z",
-      "lastSeen": "2026-10-23T14:40:19.394Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.037Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::face-recognition-proof::AC-005": {
       "code": "VERIFY_FAILED",
       "feature": "face-recognition-proof",
       "ref": "AC-005",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T21:56:56.163Z",
-      "lastSeen": "2026-10-23T14:40:19.394Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.037Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::face-recognition-proof::AC-006": {
       "code": "VERIFY_FAILED",
       "feature": "face-recognition-proof",
       "ref": "AC-006",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T21:56:56.163Z",
-      "lastSeen": "2026-10-23T14:40:19.394Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.037Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::face-recognition-proof::AC-007": {
       "code": "VERIFY_FAILED",
       "feature": "face-recognition-proof",
       "ref": "AC-007",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T21:56:56.163Z",
-      "lastSeen": "2026-10-23T14:40:19.394Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.037Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::face-recognition-proof::AC-008": {
       "code": "VERIFY_FAILED",
       "feature": "face-recognition-proof",
       "ref": "AC-008",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T21:56:56.163Z",
-      "lastSeen": "2026-10-23T14:40:19.394Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.037Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::face-recognition-proof::AC-009": {
       "code": "VERIFY_FAILED",
       "feature": "face-recognition-proof",
       "ref": "AC-009",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T21:56:56.163Z",
-      "lastSeen": "2026-10-23T14:40:19.394Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.037Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::face-recognition-proof::AC-010": {
       "code": "VERIFY_FAILED",
       "feature": "face-recognition-proof",
       "ref": "AC-010",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T21:56:56.163Z",
-      "lastSeen": "2026-10-23T14:40:19.394Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.037Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::face-recognition-proof::AC-011": {
       "code": "VERIFY_FAILED",
       "feature": "face-recognition-proof",
       "ref": "AC-011",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T21:56:56.163Z",
-      "lastSeen": "2026-10-23T14:40:19.394Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.037Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::face-recognition-proof::AC-012": {
       "code": "VERIFY_FAILED",
@@ -752,37 +752,37 @@
       "code": "VERIFY_FAILED",
       "feature": "face-recognition-proof",
       "ref": "AC-013",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T21:56:56.163Z",
-      "lastSeen": "2026-10-23T14:40:19.394Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.037Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::face-recognition-proof::AC-014": {
       "code": "VERIFY_FAILED",
       "feature": "face-recognition-proof",
       "ref": "AC-014",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T21:56:56.163Z",
-      "lastSeen": "2026-10-23T14:40:19.394Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.037Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::face-recognition-proof::AC-015": {
       "code": "VERIFY_FAILED",
       "feature": "face-recognition-proof",
       "ref": "AC-015",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-20T21:56:56.163Z",
-      "lastSeen": "2026-10-23T14:40:19.394Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.037Z",
+      "gitRev": "cb923b3"
     },
     "Q_STATUS_INVALID::face-recognition-proof::Q-001": {
       "code": "Q_STATUS_INVALID",
       "feature": "face-recognition-proof",
       "ref": "Q-001",
-      "occurrences": 30,
+      "occurrences": 32,
       "firstSeen": "2026-10-21T01:16:19.270Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "Q_STATUS_INVALID::credential-login-v1b::Q-002": {
       "code": "Q_STATUS_INVALID",
@@ -1220,10 +1220,10 @@
       "code": "FILE_NOT_FOUND",
       "feature": "credential-login-v1b",
       "ref": "T-022",
-      "occurrences": 33,
+      "occurrences": 37,
       "firstSeen": "2026-10-21T02:33:38.157Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "FILE_NOT_FOUND::credential-login-v1b::T-023": {
       "code": "FILE_NOT_FOUND",
@@ -1238,352 +1238,352 @@
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-014",
-      "occurrences": 4,
+      "occurrences": 6,
       "firstSeen": "2026-10-21T02:49:25.306Z",
-      "lastSeen": "2026-10-23T14:40:20.486Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-016": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-016",
-      "occurrences": 7,
+      "occurrences": 8,
       "firstSeen": "2026-10-21T03:50:42.485Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-017": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-017",
-      "occurrences": 7,
+      "occurrences": 8,
       "firstSeen": "2026-10-21T03:50:42.485Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-018": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-018",
-      "occurrences": 7,
+      "occurrences": 8,
       "firstSeen": "2026-10-21T03:50:42.485Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-019": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-019",
-      "occurrences": 7,
+      "occurrences": 8,
       "firstSeen": "2026-10-21T03:50:42.485Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-020": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-020",
-      "occurrences": 7,
+      "occurrences": 8,
       "firstSeen": "2026-10-21T03:50:42.485Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-021": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-021",
-      "occurrences": 7,
+      "occurrences": 8,
       "firstSeen": "2026-10-21T03:50:42.485Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-022": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-022",
-      "occurrences": 7,
+      "occurrences": 8,
       "firstSeen": "2026-10-21T03:50:42.485Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-023": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-023",
-      "occurrences": 7,
+      "occurrences": 8,
       "firstSeen": "2026-10-21T03:50:42.485Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-024": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-024",
-      "occurrences": 7,
+      "occurrences": 8,
       "firstSeen": "2026-10-21T03:50:42.485Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-025": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-025",
-      "occurrences": 7,
+      "occurrences": 8,
       "firstSeen": "2026-10-21T03:50:42.485Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-026": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-026",
-      "occurrences": 7,
+      "occurrences": 8,
       "firstSeen": "2026-10-21T03:50:42.485Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-031": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-031",
-      "occurrences": 7,
+      "occurrences": 8,
       "firstSeen": "2026-10-21T03:50:42.485Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-032": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-032",
-      "occurrences": 7,
+      "occurrences": 8,
       "firstSeen": "2026-10-21T03:50:42.485Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-034": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-034",
-      "occurrences": 5,
+      "occurrences": 6,
       "firstSeen": "2026-10-21T04:01:16.225Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-016": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-016",
-      "occurrences": 19,
+      "occurrences": 20,
       "firstSeen": "2026-10-21T13:14:06.915Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-017": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-017",
-      "occurrences": 19,
+      "occurrences": 20,
       "firstSeen": "2026-10-21T13:14:06.915Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-018": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-018",
-      "occurrences": 19,
+      "occurrences": 20,
       "firstSeen": "2026-10-21T13:14:06.915Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-019": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-019",
-      "occurrences": 19,
+      "occurrences": 20,
       "firstSeen": "2026-10-21T13:14:06.915Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-020": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-020",
-      "occurrences": 19,
+      "occurrences": 20,
       "firstSeen": "2026-10-21T13:14:06.915Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-021": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-021",
-      "occurrences": 19,
+      "occurrences": 20,
       "firstSeen": "2026-10-21T13:14:06.915Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-022": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-022",
-      "occurrences": 19,
+      "occurrences": 20,
       "firstSeen": "2026-10-21T13:14:06.915Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-023": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-023",
-      "occurrences": 19,
+      "occurrences": 20,
       "firstSeen": "2026-10-21T13:14:06.915Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-024": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-024",
-      "occurrences": 19,
+      "occurrences": 20,
       "firstSeen": "2026-10-21T13:14:06.915Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-025": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-025",
-      "occurrences": 19,
+      "occurrences": 20,
       "firstSeen": "2026-10-21T13:14:06.915Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-026": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-026",
-      "occurrences": 19,
+      "occurrences": 20,
       "firstSeen": "2026-10-21T13:14:06.915Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-027": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-027",
-      "occurrences": 19,
+      "occurrences": 20,
       "firstSeen": "2026-10-21T13:14:06.915Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-029": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-029",
-      "occurrences": 19,
+      "occurrences": 20,
       "firstSeen": "2026-10-21T13:14:06.915Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-030": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-030",
-      "occurrences": 19,
+      "occurrences": 20,
       "firstSeen": "2026-10-21T13:14:06.915Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-031": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-031",
-      "occurrences": 19,
+      "occurrences": 20,
       "firstSeen": "2026-10-21T13:14:06.915Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-032": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-032",
-      "occurrences": 19,
+      "occurrences": 20,
       "firstSeen": "2026-10-21T13:14:06.915Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-033": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-033",
-      "occurrences": 19,
+      "occurrences": 20,
       "firstSeen": "2026-10-21T13:14:06.915Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-034": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-034",
-      "occurrences": 19,
+      "occurrences": 20,
       "firstSeen": "2026-10-21T13:14:06.915Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-035": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-035",
-      "occurrences": 19,
+      "occurrences": 20,
       "firstSeen": "2026-10-21T13:14:06.915Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-027": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-027",
-      "occurrences": 4,
+      "occurrences": 5,
       "firstSeen": "2026-10-21T14:10:39.734Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-029": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-029",
-      "occurrences": 4,
+      "occurrences": 5,
       "firstSeen": "2026-10-21T14:10:39.734Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-030": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-030",
-      "occurrences": 4,
+      "occurrences": 5,
       "firstSeen": "2026-10-21T14:10:39.734Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-033": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-033",
-      "occurrences": 4,
+      "occurrences": 5,
       "firstSeen": "2026-10-21T14:10:39.734Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-035": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-035",
-      "occurrences": 4,
+      "occurrences": 5,
       "firstSeen": "2026-10-21T14:10:39.734Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "FILE_NOT_FOUND::credential-login-v1b::T-026": {
       "code": "FILE_NOT_FOUND",
@@ -1652,10 +1652,10 @@
       "code": "FILE_NOT_FOUND",
       "feature": "credential-login-v1b",
       "ref": "T-039",
-      "occurrences": 68,
+      "occurrences": 76,
       "firstSeen": "2026-10-21T18:58:53.407Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_STALE::credential-login-v1b::—": {
       "code": "VERIFY_STALE",
@@ -1679,28 +1679,28 @@
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-036",
-      "occurrences": 15,
+      "occurrences": 16,
       "firstSeen": "2026-10-21T20:03:33.935Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-037": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-037",
-      "occurrences": 15,
+      "occurrences": 16,
       "firstSeen": "2026-10-21T20:03:33.935Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-038": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-038",
-      "occurrences": 15,
+      "occurrences": 16,
       "firstSeen": "2026-10-21T20:03:33.935Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "FILE_NOT_FOUND::credential-login-v1b::T-037": {
       "code": "FILE_NOT_FOUND",
@@ -1715,64 +1715,64 @@
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-042",
-      "occurrences": 3,
+      "occurrences": 5,
       "firstSeen": "2026-10-21T21:54:30.864Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-028": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-028",
-      "occurrences": 13,
+      "occurrences": 14,
       "firstSeen": "2026-10-21T22:16:41.432Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-028": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-028",
-      "occurrences": 2,
+      "occurrences": 3,
       "firstSeen": "2026-10-22T00:41:46.282Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-036": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-036",
-      "occurrences": 2,
+      "occurrences": 3,
       "firstSeen": "2026-10-22T00:41:46.282Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-037": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-037",
-      "occurrences": 2,
+      "occurrences": 3,
       "firstSeen": "2026-10-22T00:41:46.282Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-038": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-038",
-      "occurrences": 2,
+      "occurrences": 3,
       "firstSeen": "2026-10-22T00:41:46.282Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-039": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-039",
-      "occurrences": 2,
+      "occurrences": 3,
       "firstSeen": "2026-10-22T00:41:46.282Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "ID_DUPLICATE::face-recognition-proof::AC-039": {
       "code": "ID_DUPLICATE",
@@ -1805,118 +1805,118 @@
       "code": "FILE_NOT_FOUND",
       "feature": "credential-login-v1b",
       "ref": "T-025",
-      "occurrences": 12,
+      "occurrences": 14,
       "firstSeen": "2026-10-23T13:54:52.209Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "FILE_NOT_FOUND::credential-login-v1b::T-050": {
       "code": "FILE_NOT_FOUND",
       "feature": "credential-login-v1b",
       "ref": "T-050",
-      "occurrences": 24,
+      "occurrences": 28,
       "firstSeen": "2026-10-23T13:54:52.209Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-056": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-056",
-      "occurrences": 24,
+      "occurrences": 28,
       "firstSeen": "2026-10-23T13:54:52.209Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-039": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-039",
-      "occurrences": 11,
+      "occurrences": 12,
       "firstSeen": "2026-10-23T13:54:52.210Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-040": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-040",
-      "occurrences": 11,
+      "occurrences": 12,
       "firstSeen": "2026-10-23T13:54:52.210Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-041": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-041",
-      "occurrences": 11,
+      "occurrences": 12,
       "firstSeen": "2026-10-23T13:54:52.210Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_TEST::credential-login-v1b::AC-046": {
       "code": "AC_WITHOUT_TEST",
       "feature": "credential-login-v1b",
       "ref": "AC-046",
-      "occurrences": 12,
+      "occurrences": 14,
       "firstSeen": "2026-10-23T13:54:52.210Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_TEST::credential-login-v1b::AC-047": {
       "code": "AC_WITHOUT_TEST",
       "feature": "credential-login-v1b",
       "ref": "AC-047",
-      "occurrences": 12,
+      "occurrences": 14,
       "firstSeen": "2026-10-23T13:54:52.210Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-044": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-044",
-      "occurrences": 11,
+      "occurrences": 12,
       "firstSeen": "2026-10-23T13:54:52.210Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-045": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-045",
-      "occurrences": 11,
+      "occurrences": 12,
       "firstSeen": "2026-10-23T13:54:52.210Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-042": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-042",
-      "occurrences": 11,
+      "occurrences": 12,
       "firstSeen": "2026-10-23T13:54:52.210Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::credential-login-v1b::AC-043": {
       "code": "PROOF_WEAK",
       "feature": "credential-login-v1b",
       "ref": "AC-043",
-      "occurrences": 11,
+      "occurrences": 12,
       "firstSeen": "2026-10-23T13:54:52.210Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "REF_MALFORMED::face-recognition-proof::T-057": {
       "code": "REF_MALFORMED",
       "feature": "face-recognition-proof",
       "ref": "T-057",
-      "occurrences": 22,
+      "occurrences": 26,
       "firstSeen": "2026-10-23T13:54:52.210Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::face-recognition-proof::AC-039": {
       "code": "PROOF_WEAK",
@@ -1940,73 +1940,73 @@
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-048",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-23T13:58:03.600Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::face-recognition-proof::AC-049": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-049",
-      "occurrences": 9,
+      "occurrences": 10,
       "firstSeen": "2026-10-23T13:58:03.600Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "REF_MALFORMED::face-recognition-proof::T-058": {
       "code": "REF_MALFORMED",
       "feature": "face-recognition-proof",
       "ref": "T-058",
-      "occurrences": 8,
+      "occurrences": 10,
       "firstSeen": "2026-10-23T14:08:04.215Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::face-recognition-proof::AC-050": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-050",
-      "occurrences": 8,
+      "occurrences": 9,
       "firstSeen": "2026-10-23T14:08:04.215Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::face-recognition-proof::AC-051": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-051",
-      "occurrences": 8,
+      "occurrences": 9,
       "firstSeen": "2026-10-23T14:08:04.215Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::face-recognition-proof::AC-052": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-052",
-      "occurrences": 8,
+      "occurrences": 9,
       "firstSeen": "2026-10-23T14:08:04.215Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::face-recognition-proof::AC-053": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-053",
-      "occurrences": 8,
+      "occurrences": 9,
       "firstSeen": "2026-10-23T14:08:04.215Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "REF_MALFORMED::face-recognition-proof::T-059": {
       "code": "REF_MALFORMED",
       "feature": "face-recognition-proof",
       "ref": "T-059",
-      "occurrences": 8,
+      "occurrences": 10,
       "firstSeen": "2026-10-23T14:15:08.952Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_TASK::face-recognition-proof::AC-001": {
       "code": "AC_WITHOUT_TASK",
@@ -2102,55 +2102,55 @@
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-054",
-      "occurrences": 7,
+      "occurrences": 8,
       "firstSeen": "2026-10-23T14:15:08.952Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::face-recognition-proof::AC-055": {
       "code": "PROOF_WEAK",
       "feature": "face-recognition-proof",
       "ref": "AC-055",
-      "occurrences": 7,
+      "occurrences": 8,
       "firstSeen": "2026-10-23T14:15:08.952Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "FILE_NOT_FOUND::enrollment-ui::T-063": {
       "code": "FILE_NOT_FOUND",
       "feature": "enrollment-ui",
       "ref": "T-063",
-      "occurrences": 24,
+      "occurrences": 32,
       "firstSeen": "2026-10-23T14:34:30.463Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "FILE_NOT_FOUND::enrollment-ui::T-064": {
       "code": "FILE_NOT_FOUND",
       "feature": "enrollment-ui",
       "ref": "T-064",
-      "occurrences": 12,
+      "occurrences": 16,
       "firstSeen": "2026-10-23T14:34:30.463Z",
-      "lastSeen": "2026-10-23T14:43:13.856Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "FILE_NOT_FOUND::enrollment-ui::T-065": {
       "code": "FILE_NOT_FOUND",
       "feature": "enrollment-ui",
       "ref": "T-065",
-      "occurrences": 24,
+      "occurrences": 32,
       "firstSeen": "2026-10-23T14:34:30.464Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "FILE_NOT_FOUND::enrollment-ui::T-066": {
       "code": "FILE_NOT_FOUND",
       "feature": "enrollment-ui",
       "ref": "T-066",
-      "occurrences": 6,
+      "occurrences": 8,
       "firstSeen": "2026-10-23T14:34:30.464Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_TEST::enrollment-ui::AC-056": {
       "code": "AC_WITHOUT_TEST",
@@ -2174,100 +2174,100 @@
       "code": "AC_WITHOUT_TEST",
       "feature": "enrollment-ui",
       "ref": "AC-058",
-      "occurrences": 6,
+      "occurrences": 8,
       "firstSeen": "2026-10-23T14:34:30.464Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_TEST::enrollment-ui::AC-059": {
       "code": "AC_WITHOUT_TEST",
       "feature": "enrollment-ui",
       "ref": "AC-059",
-      "occurrences": 6,
+      "occurrences": 8,
       "firstSeen": "2026-10-23T14:34:30.464Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_TEST::enrollment-ui::AC-060": {
       "code": "AC_WITHOUT_TEST",
       "feature": "enrollment-ui",
       "ref": "AC-060",
-      "occurrences": 6,
+      "occurrences": 8,
       "firstSeen": "2026-10-23T14:34:30.464Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_TEST::enrollment-ui::AC-061": {
       "code": "AC_WITHOUT_TEST",
       "feature": "enrollment-ui",
       "ref": "AC-061",
-      "occurrences": 6,
+      "occurrences": 8,
       "firstSeen": "2026-10-23T14:34:30.464Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_TEST::enrollment-ui::AC-062": {
       "code": "AC_WITHOUT_TEST",
       "feature": "enrollment-ui",
       "ref": "AC-062",
-      "occurrences": 6,
+      "occurrences": 8,
       "firstSeen": "2026-10-23T14:34:30.464Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_TEST::enrollment-ui::AC-063": {
       "code": "AC_WITHOUT_TEST",
       "feature": "enrollment-ui",
       "ref": "AC-063",
-      "occurrences": 6,
+      "occurrences": 8,
       "firstSeen": "2026-10-23T14:34:30.464Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_TEST::enrollment-ui::AC-064": {
       "code": "AC_WITHOUT_TEST",
       "feature": "enrollment-ui",
       "ref": "AC-064",
-      "occurrences": 6,
+      "occurrences": 8,
       "firstSeen": "2026-10-23T14:34:30.464Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_TEST::enrollment-ui::AC-065": {
       "code": "AC_WITHOUT_TEST",
       "feature": "enrollment-ui",
       "ref": "AC-065",
-      "occurrences": 6,
+      "occurrences": 8,
       "firstSeen": "2026-10-23T14:34:30.464Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_TEST::enrollment-ui::AC-066": {
       "code": "AC_WITHOUT_TEST",
       "feature": "enrollment-ui",
       "ref": "AC-066",
-      "occurrences": 6,
+      "occurrences": 8,
       "firstSeen": "2026-10-23T14:34:30.464Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_TEST::enrollment-ui::AC-067": {
       "code": "AC_WITHOUT_TEST",
       "feature": "enrollment-ui",
       "ref": "AC-067",
-      "occurrences": 6,
+      "occurrences": 8,
       "firstSeen": "2026-10-23T14:34:30.464Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_TEST::enrollment-ui::AC-068": {
       "code": "AC_WITHOUT_TEST",
       "feature": "enrollment-ui",
       "ref": "AC-068",
-      "occurrences": 6,
+      "occurrences": 8,
       "firstSeen": "2026-10-23T14:34:30.464Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_TEST::enrollment-ui::AC-069": {
       "code": "AC_WITHOUT_TEST",
@@ -2282,1090 +2282,1126 @@
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-040",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:19.392Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-041": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-041",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:19.392Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-044": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-044",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:19.392Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-045": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-045",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:19.392Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-042": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-042",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:19.392Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::credential-login-v1b::AC-043": {
       "code": "VERIFY_FAILED",
       "feature": "credential-login-v1b",
       "ref": "AC-043",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:19.392Z",
-      "lastSeen": "2026-10-23T14:40:19.392Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.035Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::enrollment-ui::AC-056": {
       "code": "VERIFY_FAILED",
       "feature": "enrollment-ui",
       "ref": "AC-056",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:19.393Z",
-      "lastSeen": "2026-10-23T14:40:19.393Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.036Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::enrollment-ui::AC-057": {
       "code": "VERIFY_FAILED",
       "feature": "enrollment-ui",
       "ref": "AC-057",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:19.393Z",
-      "lastSeen": "2026-10-23T14:40:19.393Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.036Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::face-recognition-proof::AC-048": {
       "code": "VERIFY_FAILED",
       "feature": "face-recognition-proof",
       "ref": "AC-048",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:19.394Z",
-      "lastSeen": "2026-10-23T14:40:19.394Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.037Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::face-recognition-proof::AC-049": {
       "code": "VERIFY_FAILED",
       "feature": "face-recognition-proof",
       "ref": "AC-049",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:19.394Z",
-      "lastSeen": "2026-10-23T14:40:19.394Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.037Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::face-recognition-proof::AC-050": {
       "code": "VERIFY_FAILED",
       "feature": "face-recognition-proof",
       "ref": "AC-050",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:19.394Z",
-      "lastSeen": "2026-10-23T14:40:19.394Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.037Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::face-recognition-proof::AC-051": {
       "code": "VERIFY_FAILED",
       "feature": "face-recognition-proof",
       "ref": "AC-051",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:19.394Z",
-      "lastSeen": "2026-10-23T14:40:19.394Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.037Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::face-recognition-proof::AC-052": {
       "code": "VERIFY_FAILED",
       "feature": "face-recognition-proof",
       "ref": "AC-052",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:19.394Z",
-      "lastSeen": "2026-10-23T14:40:19.394Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.037Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::face-recognition-proof::AC-054": {
       "code": "VERIFY_FAILED",
       "feature": "face-recognition-proof",
       "ref": "AC-054",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:19.394Z",
-      "lastSeen": "2026-10-23T14:40:19.394Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.037Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::face-recognition-proof::AC-055": {
       "code": "VERIFY_FAILED",
       "feature": "face-recognition-proof",
       "ref": "AC-055",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:19.394Z",
-      "lastSeen": "2026-10-23T14:40:19.394Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.037Z",
+      "gitRev": "cb923b3"
     },
     "VERIFY_FAILED::face-recognition-proof::AC-053": {
       "code": "VERIFY_FAILED",
       "feature": "face-recognition-proof",
       "ref": "AC-053",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:19.394Z",
-      "lastSeen": "2026-10-23T14:40:19.394Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:54.037Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-015": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-015",
-      "occurrences": 3,
+      "occurrences": 6,
       "firstSeen": "2026-10-23T14:40:20.486Z",
-      "lastSeen": "2026-10-23T14:40:20.486Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-016": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-016",
-      "occurrences": 3,
+      "occurrences": 6,
       "firstSeen": "2026-10-23T14:40:20.486Z",
-      "lastSeen": "2026-10-23T14:40:20.486Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-017": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-017",
-      "occurrences": 6,
+      "occurrences": 12,
       "firstSeen": "2026-10-23T14:40:20.486Z",
-      "lastSeen": "2026-10-23T14:40:20.486Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-018": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-018",
-      "occurrences": 2,
+      "occurrences": 4,
       "firstSeen": "2026-10-23T14:40:20.486Z",
-      "lastSeen": "2026-10-23T14:40:20.486Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-019": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-019",
-      "occurrences": 3,
+      "occurrences": 6,
       "firstSeen": "2026-10-23T14:40:20.486Z",
-      "lastSeen": "2026-10-23T14:40:20.486Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-020": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-020",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.486Z",
-      "lastSeen": "2026-10-23T14:40:20.486Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-021": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-021",
-      "occurrences": 2,
+      "occurrences": 4,
       "firstSeen": "2026-10-23T14:40:20.486Z",
-      "lastSeen": "2026-10-23T14:40:20.486Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-024": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-024",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.486Z",
-      "lastSeen": "2026-10-23T14:40:20.486Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-022": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-022",
-      "occurrences": 3,
+      "occurrences": 6,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-025": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-025",
-      "occurrences": 3,
+      "occurrences": 6,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-026": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-026",
-      "occurrences": 3,
+      "occurrences": 6,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-027": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-027",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-028": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-028",
-      "occurrences": 3,
+      "occurrences": 6,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-029": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-029",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-030": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-030",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-031": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-031",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-032": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-032",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-033": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-033",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-034": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-034",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-035": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-035",
-      "occurrences": 3,
+      "occurrences": 6,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-036": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-036",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-037": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-037",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-038": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-038",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-040": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-040",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-041": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-041",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-043": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-043",
-      "occurrences": 2,
+      "occurrences": 4,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-044": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-044",
-      "occurrences": 2,
+      "occurrences": 4,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-045": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-045",
-      "occurrences": 2,
+      "occurrences": 4,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-046": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-046",
-      "occurrences": 2,
+      "occurrences": 4,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-047": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-047",
-      "occurrences": 3,
+      "occurrences": 6,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-048": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-048",
-      "occurrences": 2,
+      "occurrences": 4,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-049": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-049",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-050": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-050",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-051": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-051",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-052": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-052",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-053": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-053",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::credential-login-v1b::T-055": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "T-055",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-016": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-016",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-017": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-017",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-018": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-018",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-019": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-019",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-020": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-020",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-021": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-021",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-022": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-022",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-023": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-023",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-024": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-024",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-025": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-025",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-026": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-026",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-027": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-027",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-028": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-028",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-029": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-029",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-030": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-030",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-031": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-031",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-032": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-032",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-033": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-033",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-034": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-034",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-035": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-035",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-036": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-036",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-037": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-037",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-038": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-038",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-039": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-039",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-040": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-040",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-041": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-041",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-044": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-044",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-045": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-045",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-042": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-042",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::credential-login-v1b::AC-043": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "credential-login-v1b",
       "ref": "AC-043",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::enrollment-ui::T-060": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "enrollment-ui",
       "ref": "T-060",
-      "occurrences": 2,
+      "occurrences": 4,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::enrollment-ui::AC-056": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "enrollment-ui",
       "ref": "AC-056",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::enrollment-ui::AC-057": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "enrollment-ui",
       "ref": "AC-057",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::face-recognition-proof::T-002": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "T-002",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::face-recognition-proof::T-004": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "T-004",
-      "occurrences": 4,
+      "occurrences": 8,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::face-recognition-proof::T-005": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "T-005",
-      "occurrences": 4,
+      "occurrences": 8,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::face-recognition-proof::T-007": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "T-007",
-      "occurrences": 2,
+      "occurrences": 4,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::face-recognition-proof::T-008": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "T-008",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::face-recognition-proof::T-010": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "T-010",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::face-recognition-proof::T-011": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "T-011",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::face-recognition-proof::T-013": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "T-013",
-      "occurrences": 4,
+      "occurrences": 8,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::face-recognition-proof::T-057": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "T-057",
-      "occurrences": 6,
+      "occurrences": 12,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::face-recognition-proof::T-058": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "T-058",
-      "occurrences": 4,
+      "occurrences": 8,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "TASK_DONE_WITHOUT_PROOF::face-recognition-proof::T-059": {
       "code": "TASK_DONE_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "T-059",
-      "occurrences": 2,
+      "occurrences": 4,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::face-recognition-proof::AC-001": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "AC-001",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::face-recognition-proof::AC-002": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "AC-002",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::face-recognition-proof::AC-003": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "AC-003",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::face-recognition-proof::AC-004": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "AC-004",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::face-recognition-proof::AC-048": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "AC-048",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::face-recognition-proof::AC-049": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "AC-049",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::face-recognition-proof::AC-050": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "AC-050",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::face-recognition-proof::AC-051": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "AC-051",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::face-recognition-proof::AC-052": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "AC-052",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::face-recognition-proof::AC-054": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "AC-054",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::face-recognition-proof::AC-055": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "AC-055",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::face-recognition-proof::AC-053": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "AC-053",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::face-recognition-proof::AC-005": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "AC-005",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::face-recognition-proof::AC-006": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "AC-006",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::face-recognition-proof::AC-007": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "AC-007",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::face-recognition-proof::AC-008": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "AC-008",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::face-recognition-proof::AC-009": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "AC-009",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::face-recognition-proof::AC-010": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "AC-010",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::face-recognition-proof::AC-011": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "AC-011",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::face-recognition-proof::AC-013": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "AC-013",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::face-recognition-proof::AC-014": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "AC-014",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "AC_WITHOUT_PROOF::face-recognition-proof::AC-015": {
       "code": "AC_WITHOUT_PROOF",
       "feature": "face-recognition-proof",
       "ref": "AC-015",
-      "occurrences": 1,
+      "occurrences": 2,
       "firstSeen": "2026-10-23T14:40:20.487Z",
-      "lastSeen": "2026-10-23T14:40:20.487Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::enrollment-ui::AC-056": {
       "code": "PROOF_WEAK",
       "feature": "enrollment-ui",
       "ref": "AC-056",
-      "occurrences": 4,
+      "occurrences": 5,
       "firstSeen": "2026-10-23T14:43:10.643Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     },
     "PROOF_WEAK::enrollment-ui::AC-057": {
       "code": "PROOF_WEAK",
       "feature": "enrollment-ui",
       "ref": "AC-057",
-      "occurrences": 4,
+      "occurrences": 5,
       "firstSeen": "2026-10-23T14:43:10.643Z",
-      "lastSeen": "2026-10-23T14:43:13.857Z",
-      "gitRev": "483d854"
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
+    },
+    "VERIFY_FAILED::enrollment-ui::AC-069": {
+      "code": "VERIFY_FAILED",
+      "feature": "enrollment-ui",
+      "ref": "AC-069",
+      "occurrences": 1,
+      "firstSeen": "2026-10-23T14:53:54.036Z",
+      "lastSeen": "2026-10-23T14:53:54.036Z",
+      "gitRev": "cb923b3"
+    },
+    "TASK_DONE_WITHOUT_PROOF::enrollment-ui::T-061": {
+      "code": "TASK_DONE_WITHOUT_PROOF",
+      "feature": "enrollment-ui",
+      "ref": "T-061",
+      "occurrences": 1,
+      "firstSeen": "2026-10-23T14:53:55.244Z",
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
+    },
+    "AC_WITHOUT_PROOF::enrollment-ui::AC-069": {
+      "code": "AC_WITHOUT_PROOF",
+      "feature": "enrollment-ui",
+      "ref": "AC-069",
+      "occurrences": 1,
+      "firstSeen": "2026-10-23T14:53:55.244Z",
+      "lastSeen": "2026-10-23T14:53:55.244Z",
+      "gitRev": "cb923b3"
+    },
+    "PROOF_WEAK::enrollment-ui::AC-069": {
+      "code": "PROOF_WEAK",
+      "feature": "enrollment-ui",
+      "ref": "AC-069",
+      "occurrences": 1,
+      "firstSeen": "2026-10-23T15:00:21.467Z",
+      "lastSeen": "2026-10-23T15:00:21.467Z",
+      "gitRev": "cb923b3"
     }
   }
 }

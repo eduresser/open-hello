@@ -9,8 +9,7 @@
 - Effort: medium
 - Notes: `GetStatus(uid)` on `io.openhello.Biometrics1` (face enrolled) and `io.openhello.Keyd1` (key, PIN). No polkit for the caller's own uid.
 
-## T-061 — Typed failure causes over D-Bus [pending]
-
+## T-061 — Typed failure causes over D-Bus [done]
 - Refs: AC-069
 - Files: crates/openhellod/src/backends.rs, crates/openhellod/src/dbus_service.rs, crates/openhello-cli/src/dbus_client.rs
 - Model: claude-sonnet-5

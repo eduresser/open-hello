@@ -1,6 +1,6 @@
 use std::os::raw::{c_char, c_void};
 
-pub const ABI_VERSION: u32 = 5;
+pub const ABI_VERSION: u32 = 6;
 
 pub const SENSOR_ENTRY_SYMBOL: &str = "openhello_sensor_interface";
 pub const ENGINE_ENTRY_SYMBOL: &str = "openhello_engine_interface";
@@ -20,6 +20,10 @@ pub enum Status {
     AuthenticationFailed = 5,
     BufferTooSmall = 6,
     Internal = 7,
+    DeviceBusy = 8,
+    NoDevice = 9,
+    SensorStuck = 10,
+    TpmUnavailable = 11,
 }
 
 impl Status {

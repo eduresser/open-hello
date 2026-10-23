@@ -178,6 +178,96 @@ fn unknown_session_handles_are_rejected_with_a_generic_error() {
     assert!(!error.contains("enroll-999"));
 }
 
+struct FailingSensor(fn() -> DaemonError);
+
+impl SensorBackend for FailingSensor {
+    fn capture(&mut self) -> Result<CapturedFrame, DaemonError> {
+        Err((self.0)())
+    }
+}
+
+struct FailingStorage(fn() -> DaemonError);
+
+impl StorageBackend for FailingStorage {
+    fn put(&mut self, _: u32, _: &[u8]) -> Result<(), DaemonError> {
+        Err((self.0)())
+    }
+
+    fn get(&mut self, _: u32) -> Result<Vec<u8>, DaemonError> {
+        Err((self.0)())
+    }
+
+    fn list_uids(&mut self) -> Result<Vec<u32>, DaemonError> {
+        Err((self.0)())
+    }
+
+    fn purge(&mut self, _: u32) -> Result<(), DaemonError> {
+        Err((self.0)())
+    }
+}
+
+fn verify_error_name(sensor: Box<dyn SensorBackend>, storage: Box<dyn StorageBackend>) -> (String, String) {
+    let bus = PrivateBus::start();
+    let engine = Engine { begins: Arc::new(AtomicUsize::new(0)), candidates: Vec::new() };
+    serve_core(&bus, Arc::new(AllowAll), Biometrics::new(sensor, Box::new(engine), storage, DEFAULT_TARGET_FAR));
+    let conn = client(&bus);
+    let error = proxy(&conn).call::<_, _, bool>("Verify", &(1000u32,)).unwrap_err();
+    match error {
+        zbus::Error::MethodError(name, detail, _) => (name.to_string(), detail.unwrap_or_default()),
+        other => panic!("expected a D-Bus method error, got {other}"),
+    }
+}
+
+fn enrolled_storage() -> Box<dyn StorageBackend> {
+    let mut storage = Storage::default();
+    storage.put(1000, b"secret-template-bytes").unwrap();
+    Box::new(storage)
+}
+
+// @spec:AC-069
+#[test]
+fn a_busy_camera_reaches_the_client_as_camera_busy_without_internal_detail() {
+    let sensor = FailingSensor(|| DaemonError::CameraBusy("sensor capture: /dev/video2 held by pid 4242".into()));
+    let (name, detail) = verify_error_name(Box::new(sensor), enrolled_storage());
+    assert_eq!(name, "io.openhello.Error.CameraBusy");
+    assert!(!detail.contains("/dev/video2") && !detail.contains("4242"), "{detail}");
+}
+
+// @spec:AC-069
+#[test]
+fn a_stuck_infrared_stream_reaches_the_client_as_sensor_stuck() {
+    let sensor = FailingSensor(|| DaemonError::SensorStuck("sensor capture: no alternation".into()));
+    let (name, detail) = verify_error_name(Box::new(sensor), enrolled_storage());
+    assert_eq!(name, "io.openhello.Error.SensorStuck");
+    assert!(!detail.contains("alternation"), "{detail}");
+}
+
+// @spec:AC-069
+#[test]
+fn a_missing_camera_reaches_the_client_as_no_camera() {
+    let sensor = FailingSensor(|| DaemonError::NoCamera("sensor open: /dev/video2 does not exist".into()));
+    let (name, detail) = verify_error_name(Box::new(sensor), enrolled_storage());
+    assert_eq!(name, "io.openhello.Error.NoCamera");
+    assert!(!detail.contains("/dev/video2"), "{detail}");
+}
+
+// @spec:AC-069
+#[test]
+fn an_unavailable_tpm_reaches_the_client_as_tpm_unavailable() {
+    let storage = FailingStorage(|| DaemonError::TpmUnavailable("storage get: tpm2_getcap failed: no TCTI".into()));
+    let (name, detail) = verify_error_name(Box::new(Sensor), Box::new(storage));
+    assert_eq!(name, "io.openhello.Error.TpmUnavailable");
+    assert!(!detail.contains("tpm2_getcap"), "{detail}");
+}
+
+// @spec:AC-069
+#[test]
+fn other_backend_failures_keep_the_generic_failed_error() {
+    let sensor = FailingSensor(|| DaemonError::Backend("camera unplugged".into()));
+    let (name, _) = verify_error_name(Box::new(sensor), enrolled_storage());
+    assert_eq!(name, "org.freedesktop.DBus.Error.Failed");
+}
+
 // @principle:P-003
 #[test]
 fn no_method_returns_embeddings_templates_or_byte_arrays() {

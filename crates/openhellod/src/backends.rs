@@ -12,6 +12,14 @@ pub enum DaemonError {
     Backend(String),
     #[error("the caller left before the attempt finished")]
     Cancelled,
+    #[error("camera busy: {0}")]
+    CameraBusy(String),
+    #[error("infrared stream stuck: {0}")]
+    SensorStuck(String),
+    #[error("no camera: {0}")]
+    NoCamera(String),
+    #[error("TPM unavailable: {0}")]
+    TpmUnavailable(String),
 }
 
 impl DaemonError {
@@ -21,6 +29,10 @@ impl DaemonError {
             DaemonError::Tampered | DaemonError::Backend(_) => "the biometric service could not complete the operation",
             DaemonError::InvalidRequest(_) => "the request was not valid in the current state",
             DaemonError::Cancelled => "the request was cancelled",
+            DaemonError::CameraBusy(_) => "the camera is in use by another program",
+            DaemonError::SensorStuck(_) => "the infrared stream is stuck and the computer must be powered off completely",
+            DaemonError::NoCamera(_) => "no infrared camera was found",
+            DaemonError::TpmUnavailable(_) => "the TPM is unavailable",
         }
     }
 }
