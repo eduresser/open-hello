@@ -36,51 +36,8 @@ impl Default for EnrollmentConfig {
     }
 }
 
-const IDEAL_HEIGHT_ENV: &str = "OPENHELLO_ENROLL_IDEAL_HEIGHT";
-const SIZE_TOLERANCE_ENV: &str = "OPENHELLO_ENROLL_SIZE_TOLERANCE";
-const POSITION_TOLERANCE_ENV: &str = "OPENHELLO_ENROLL_POSITION_TOLERANCE";
-
-impl EnrollmentConfig {
-    pub fn from_env() -> Result<Self, EngineError> {
-        Self::from_lookup(|name| std::env::var(name).ok())
-    }
-
-    pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Result<Self, EngineError> {
-        let defaults = Self::default();
-        let ideal = ratio(&lookup, IDEAL_HEIGHT_ENV, defaults.ideal_face_height_ratio, 1.0, false)?;
-        let size = ratio(&lookup, SIZE_TOLERANCE_ENV, defaults.size_tolerance, 0.5, true)?;
-        let position = ratio(&lookup, POSITION_TOLERANCE_ENV, defaults.position_tolerance, 0.5, true)?;
-        if ideal - size <= 0.0 || ideal + size > 1.0 {
-            return Err(EngineError::InvalidInput(format!(
-                "{IDEAL_HEIGHT_ENV} ({ideal}) plus and minus {SIZE_TOLERANCE_ENV} ({size}) must stay within (0, 1]"
-            )));
-        }
-        Ok(Self { ideal_face_height_ratio: ideal, size_tolerance: size, position_tolerance: position, ..defaults })
-    }
-}
-
 pub trait OcclusionDetector {
     fn is_occluded(&self, image: &GrayImage, detection: &Detection) -> bool;
-}
-
-fn ratio(
-    lookup: &impl Fn(&str) -> Option<String>,
-    name: &str,
-    default: f32,
-    upper: f32,
-    upper_inclusive: bool,
-) -> Result<f32, EngineError> {
-    let Some(text) = lookup(name) else {
-        return Ok(default);
-    };
-    let in_range = |value: f32| value > 0.0 && (value < upper || (upper_inclusive && value == upper));
-    match text.trim().parse::<f32>() {
-        Ok(value) if in_range(value) => Ok(value),
-        _ => Err(EngineError::InvalidInput(format!(
-            "{name} must be a decimal number in (0, {upper}{}; got '{text}'",
-            if upper_inclusive { "]" } else { ")" }
-        ))),
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -413,11 +370,6 @@ mod tests {
         session(false).submit(1_000, &textured_image(), &detection, || panic!("a misplaced face must not be embedded")).unwrap()
     }
 
-    fn lookup(pairs: &[(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
-        let pairs = pairs.to_vec();
-        move |name| pairs.iter().find(|(key, _)| *key == name).map(|(_, value)| value.to_string())
-    }
-
     fn accepted(detection: Detection) -> bool {
         session(false).submit(1_000, &textured_image(), &detection, embed).unwrap() == FrameOutcome::Accepted
     }
@@ -452,17 +404,6 @@ mod tests {
         assert_eq!(verdict(&at(0.5, 0.5, 0.25 - 1.0 / 64.0)), Some(FrameOutcome::TooFar));
     }
 
-    // @spec:AC-050
-    #[test]
-    fn the_ideal_height_can_be_read_from_the_environment() {
-        let config = EnrollmentConfig::from_lookup(lookup(&[(IDEAL_HEIGHT_ENV, "0.5")])).unwrap();
-        assert_eq!(config.ideal_face_height_ratio, 0.5);
-        assert_eq!(config.size_tolerance, 0.13);
-        for value in ["0", "1", "abc", ""] {
-            let error = EnrollmentConfig::from_lookup(lookup(&[(IDEAL_HEIGHT_ENV, value)])).unwrap_err();
-            assert!(error.to_string().contains(IDEAL_HEIGHT_ENV), "{value}");
-        }
-    }
 
     // @spec:AC-051
     #[test]
@@ -472,18 +413,6 @@ mod tests {
         assert_eq!(verdict(&at(0.5, 0.5, 0.75 + 1.0 / 64.0)), Some(FrameOutcome::TooClose));
     }
 
-    // @spec:AC-051
-    #[test]
-    fn the_size_tolerance_can_be_read_and_must_keep_the_range_inside_the_frame() {
-        let config = EnrollmentConfig::from_lookup(lookup(&[(IDEAL_HEIGHT_ENV, "0.5"), (SIZE_TOLERANCE_ENV, "0.45")])).unwrap();
-        assert_eq!(config.size_tolerance, 0.45);
-        for value in ["0", "0.51", "-0.1", "x"] {
-            let error = EnrollmentConfig::from_lookup(lookup(&[(SIZE_TOLERANCE_ENV, value)])).unwrap_err();
-            assert!(error.to_string().contains(SIZE_TOLERANCE_ENV), "{value}");
-        }
-        let error = EnrollmentConfig::from_lookup(lookup(&[(SIZE_TOLERANCE_ENV, "0.5")])).unwrap_err();
-        assert!(error.to_string().contains(SIZE_TOLERANCE_ENV) && error.to_string().contains(IDEAL_HEIGHT_ENV));
-    }
 
     // @spec:AC-052
     #[test]
@@ -547,32 +476,19 @@ mod tests {
 
     // @spec:AC-052
     #[test]
+    fn the_enrollment_defaults_are_the_chosen_ideal_and_tolerances() {
+        let defaults = EnrollmentConfig::default();
+        assert_eq!((defaults.ideal_face_height_ratio, defaults.size_tolerance, defaults.position_tolerance), (0.55, 0.13, 0.10));
+    }
+
+    // @spec:AC-052
+    #[test]
     fn a_face_in_a_corner_is_rejected_with_a_direction() {
         assert_eq!(guidance_for(at(0.2, 0.2, 0.55)), FrameOutcome::MoveLeft);
         assert_eq!(guidance_for(at(0.5, 0.8, 0.55)), FrameOutcome::MoveUp);
     }
 
-    // @spec:AC-052
-    #[test]
-    fn the_position_tolerance_can_be_read_from_the_environment() {
-        let config = EnrollmentConfig::from_lookup(lookup(&[(POSITION_TOLERANCE_ENV, "0.5")])).unwrap();
-        assert_eq!(config.position_tolerance, 0.5);
-        for value in ["0", "0.51", "x", ""] {
-            let error = EnrollmentConfig::from_lookup(lookup(&[(POSITION_TOLERANCE_ENV, value)])).unwrap_err();
-            assert!(error.to_string().contains(POSITION_TOLERANCE_ENV), "{value}");
-        }
-    }
 
-    // @spec:AC-052
-    #[test]
-    fn absent_environment_variables_keep_the_defaults() {
-        let config = EnrollmentConfig::from_lookup(|_| None).unwrap();
-        let defaults = EnrollmentConfig::default();
-        assert_eq!(config.ideal_face_height_ratio, defaults.ideal_face_height_ratio);
-        assert_eq!(config.size_tolerance, defaults.size_tolerance);
-        assert_eq!(config.position_tolerance, defaults.position_tolerance);
-        assert_eq!((defaults.ideal_face_height_ratio, defaults.size_tolerance, defaults.position_tolerance), (0.55, 0.13, 0.10));
-    }
 
     fn uniform_image(level: u8) -> GrayImage {
         GrayImage::new(64, 64, vec![level; 64 * 64]).unwrap()
