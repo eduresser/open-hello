@@ -17,7 +17,7 @@
 
 ## Context
 
-Users with a fingerprint reader manage their fingers with open-hello (`openhello-cli enroll finger`, status, purge) while the login itself stays with the system's own `fprintd` and `pam_fprintd`. Owner decision (2026-10-22): the native mechanism already unlocks `sudo`, polkit, the lock screen and the greeter with the same practical effect, and two owners of one reader conflict (seen on the KDE lock screen, where `pam_fprintd` takes the reader first), so open-hello is a manager for `fprintd` and does not authenticate fingers itself. The face keeps the TPM key, the ticket and the PAM module. Earlier in the feature a finger authentication path inside `openhellod` was built and verified on the VM (`sudo`, polkit); it is removed by T-063 and the stories that described it (US-019, US-020, AC-048 to AC-054) are retired.
+Users with a fingerprint reader manage their fingers with open-hello (`openhello-cli enroll finger`, status, purge) and log in with the system's own `fprintd` and `pam_fprintd`, which open-hello switches on in the common PAM stack when the system has the module and does not use it yet. Owner decision (2026-10-22, after the finger authentication path was built and verified on the VM): the native mechanism already unlocks `sudo`, polkit, the lock screen and the greeter with the same practical effect; two owners of one reader conflict (seen on the KDE lock screen, where a parallel `pam_fprintd` service takes the reader first); and the owner refuses per-desktop code. So open-hello is a manager for `fprintd` and does not authenticate fingers itself. The face keeps the TPM key, the ticket and the PAM module. Face and finger run one after the other in the stack, because PAM is serial. The stories that described the finger authentication path (US-019, US-020, AC-048 to AC-054) are retired; T-063 removes that path.
 
 ## Stories
 
@@ -65,27 +65,47 @@ As a user, I want purge and logs to treat fingerprints with the same care as the
 - **When** the logs and journal output are read
 - **Then** they carry only counts, labels and the uid (outcome, attempts), never scan data, template data or `fprintd` print contents (P-010)
 
-### US-023 — The finger is used by the system's own login
+### US-023 — Switch on and see the system's fingerprint login
 
-As a user, I want open-hello to stay out of the way of the system's fingerprint login and to tell me whether it is on, so that my enrolled finger works where the system supports it and open-hello never competes for the reader.
+As a user, I want open-hello to turn on the system's fingerprint login where it is available and to tell me where it stands, so that my enrolled finger works in `sudo`, polkit and the login screens without me editing PAM files.
 
-#### AC-061 — Enrolling a finger says whether the system's fingerprint login is on
+#### AC-061 — Enabling open-hello also switches on the system's fingerprint login
+
+- **Given** a machine where the PAM module `pam_fprintd.so` exists and the common authentication stack has no `pam_fprintd` line
+- **When** an administrator runs `openhello-cli pam enable`
+- **Then** the stack gets one `auth sufficient pam_fprintd.so max-tries=3 timeout=10` line right after the `pam_openhello` line (face first, finger second), a plain sentence says so, running the command again adds nothing, and a backup of the file is kept as for the open-hello line
+
+#### AC-072 — Disabling removes only the fingerprint line open-hello added
+
+- **Given** the stack contains a `pam_fprintd` line that `pam enable` added, or one that was there before
+- **When** the administrator runs `openhello-cli pam disable`
+- **Then** only a line that `pam enable` added is removed, a `pam_fprintd` line that existed before is kept, and `openhello-cli pam status` reports whether the fingerprint line is present and who added it
+
+#### AC-074 — Without the module, or when declined, the stack is left as it was
+
+- **Given** a machine without `pam_fprintd.so`, or `pam enable` run with `--no-fingerprint`
+- **When** `openhello-cli pam enable` runs
+- **Then** no `pam_fprintd` line is written, the open-hello line is handled exactly as before, and one plain sentence says why the fingerprint login was not switched on
+
+#### AC-073 — Enrolling a finger says whether the system's fingerprint login is on
 
 - **Given** a user who has just enrolled a finger with `openhello-cli enroll finger`
 - **When** the command ends
-- **Then** one plain line says whether the system's PAM configuration uses the fingerprint reader for login (the module `pam_fprintd` appears in a PAM service file) and, when it does not, that enabling it is done with the system's own tools, and the command never edits the PAM configuration for the finger
+- **Then** it prints one plain line saying whether the common stack uses `pam_fprintd`, and when it does not, that `sudo openhello-cli pam enable` switches it on; the command itself never edits the PAM configuration
 
 #### AC-062 — An authentication request never takes the fingerprint reader
 
 - **Given** a machine with a fingerprint reader and an enrolled finger
 - **When** an authentication request runs through `pam_openhello` and `openhellod` `Verify`
-- **Then** `openhellod` makes no `Claim`, `VerifyStart` or any other verification call to `fprintd`, so the system's own fingerprint login keeps the reader (the face decides alone)
+- **Then** `openhellod` makes no `Claim`, `VerifyStart` or any other verification call to `fprintd`, so the system's own fingerprint login keeps the reader and the face decides alone
 
 ## Out of scope
 
 - Authenticating a finger inside open-hello: no ticket, no TPM signature and no parallel run with the face for the finger (owner decision, 2026-10-22; the system's `pam_fprintd` does it).
 - A fingerprint engine of our own, or talking to `libfprint` directly (owner decision, 2026-10-22).
-- Enabling or editing the system's PAM configuration for the fingerprint.
+- Knowing about parallel PAM services of a desktop (such as a separate fingerprint service run next to the password one): no per-desktop code.
+- Editing the PAM stack of one specific service for the fingerprint: only the common stack is touched, by `pam enable`.
+- Running the face and the finger at the same time: they run one after the other in the stack.
 - Sealing fingerprint templates in our TPM-sealed store: `fprintd` keeps them in `/var/lib/fprint` (see ASM-019).
 - Phone sensors as a reader; they cannot be exposed to Linux.
 - A password prompt that stays available while face and finger listen in parallel, and a fingerprint wait with no time limit. Owner target (2026-10-22), deferred: it needs a mechanism inside `pam_openhello` that works in every PAM application, because the owner ruled out per-desktop code (no `kde-fingerprint`, `gdm-fingerprint` or other per-environment PAM services). Until a spike proves such a mechanism, face and finger each wait at most 10 s (ASM-022).
@@ -103,6 +123,9 @@ As a user, I want open-hello to stay out of the way of the system's fingerprint 
 | ASM-021 | Face and finger can be armed in one `Verify` call without contention. | invalidated | Retired 2026-10-22: the finger no longer takes part in `Verify` (AC-062). |
 
 | ASM-022 | The face waits at most 10 s per request on every surface, because PAM is serial and the module blocks the password prompt while it waits; the timing of the finger belongs to the system's `pam_fprintd`. | confirmed | Owner decision 2026-10-22: the parallel target (password always available, finger without limit) is wanted, but only through a universal mechanism in `pam_openhello`; per-desktop PAM services are refused. The research found (confidence medium, several primary sources were blocked) that sudo and polkit run one serial PAM conversation, that a `grosshack`-style thread plus password prompt inside the module is the only universal route, and that it is unproven (risks: terminal echo not restored, `pam_faillock` counting). The lock screen and GDM have native parallel services, but using them is per-desktop code. Next step is a separate feature starting with a spike on the VM. See the memory `parallel-password-and-biometrics-target`. |
+| ASM-026 | The common stack order face first, `pam_fprintd` second is the better default: a face in view unlocks at once, and the finger is the alternative once the face budget of 10 s has ended. | open | Owner target (password always available, face and finger in parallel) is deferred, see the memory `parallel-password-and-biometrics-target`. To confirm on the VM how long a finger-only user waits behind the face on `sudo`. |
+| ASM-027 | `pam_fprintd` of the installed `fprintd` accepts the options `max-tries` and `timeout`. | open | Documented for fprintd 1.94 in `pam_fprintd(8)`; to confirm on the VM from the manual and from a run. |
+| ASM-028 | A line added to `common-auth` survives until the system regenerates the file (for example `pam-auth-update` on Debian and Ubuntu), the same risk the open-hello line already has. | open | Not measured; `openhello-cli pam status` shows whether the lines are still there and `pam enable` is idempotent, so running it again restores them. |
 | ASM-023 | The system's own `pam_fprintd` unlocks `sudo`, polkit, the lock screen and the greeter with the same practical effect as an open-hello finger path, without the TPM key. | confirmed | Owner reasoning 2026-10-22, supported by the research of that day (confidence medium): `pam_fprintd` returns a yes or no to PAM, which is all these surfaces need; the keyring still asks for the password, as with the face. Seen on the VM: the KDE lock screen runs `kde-fingerprint` with `pam_fprintd` and takes the reader before `openhellod` can (log of 2026-10-22 21:07:56). Loss accepted: the finger is not tied to the TPM key. |
 
 ## Open questions
