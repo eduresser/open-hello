@@ -1,0 +1,92 @@
+import { Palette } from "std-widgets.slint";
+import { T } from "texts.slint";
+import { WelcomePage } from "welcome.slint";
+import { IdentityPage } from "identity.slint";
+import { CapturePage } from "capture.slint";
+import { RecoveryPage } from "recovery.slint";
+import { DonePage } from "done.slint";
+import { ErrorPage } from "error.slint";
+import { ManagePage } from "manage.slint";
+
+export { T }
+
+export enum Page { welcome, identity, capture, recovery, done, error, manage }
+
+export component MainWindow inherits Window {
+    in property <Page> page: Page.welcome;
+    in property <bool> blocked;
+    in property <string> blocked-title;
+    in property <string> blocked-body;
+    in property <image> frame;
+    in property <string> guidance;
+    in property <string> progress-text;
+    in property <float> progress;
+    in property <bool> accepted;
+    in property <string> recovery-code;
+    in property <string> error-title;
+    in property <string> error-body;
+    in property <bool> busy;
+    in property <bool> testing;
+    in property <string> test-result;
+    in-out property <bool> confirming;
+
+    callback get-started();
+    callback retry();
+    callback cancel();
+    callback acknowledge();
+    callback finish();
+    callback test();
+    callback remove();
+    callback set-up-again();
+
+    title: T.window-title;
+    preferred-width: 640px;
+    preferred-height: 640px;
+    min-width: 600px;
+    min-height: 560px;
+    background: Palette.background;
+
+    if root.page == Page.welcome: WelcomePage {
+        blocked: root.blocked;
+        blocked-title: root.blocked-title;
+        blocked-body: root.blocked-body;
+        get-started => { root.get-started(); }
+        retry => { root.retry(); }
+    }
+
+    if root.page == Page.identity: IdentityPage {}
+
+    if root.page == Page.capture: CapturePage {
+        frame: root.frame;
+        guidance: root.guidance;
+        progress-text: root.progress-text;
+        progress: root.progress;
+        accepted: root.accepted;
+        cancel => { root.cancel(); }
+    }
+
+    if root.page == Page.recovery: RecoveryPage {
+        code: root.recovery-code;
+        acknowledge => { root.acknowledge(); }
+    }
+
+    if root.page == Page.done: DonePage {
+        finish => { root.finish(); }
+    }
+
+    if root.page == Page.error: ErrorPage {
+        title: root.error-title;
+        body: root.error-body;
+        retry => { root.retry(); }
+    }
+
+    if root.page == Page.manage: ManagePage {
+        busy: root.busy;
+        testing: root.testing;
+        result: root.test-result;
+        confirming <=> root.confirming;
+        test => { root.test(); }
+        remove => { root.remove(); }
+        set-up-again => { root.set-up-again(); }
+    }
+}

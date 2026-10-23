@@ -1,0 +1,25 @@
+import { Button } from "std-widgets.slint";
+import { ActionButton, Body, ButtonRow, Column, Heading } from "components.slint";
+import { T } from "texts.slint";
+
+export component WelcomePage inherits Column {
+    in property <bool> blocked;
+    in property <string> blocked-title;
+    in property <string> blocked-body;
+    callback get-started();
+    callback retry();
+
+    Heading { text: root.blocked ? root.blocked-title : T.welcome-title; }
+    Body { text: root.blocked ? root.blocked-body : T.welcome-body; }
+    ButtonRow {
+        ActionButton {
+            text: T.get-started;
+            enabled: !root.blocked;
+            clicked => { root.get-started(); }
+        }
+        if root.blocked: Button {
+            text: T.try-again;
+            clicked => { root.retry(); }
+        }
+    }
+}

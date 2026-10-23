@@ -1,38 +1,92 @@
 mod backend;
-mod capture_view;
+mod capture;
 mod demo;
-mod geometry;
-mod pages;
-mod window;
+mod options;
+mod stats;
+mod view;
 
-use adw::prelude::*;
-use gtk::glib;
+use std::process::ExitCode;
+use std::sync::atomic::AtomicBool;
+use std::sync::mpsc::Sender;
+use std::sync::Arc;
+
 use openhello_cli::Bus;
-use openhello_gui_core::client::DaemonClient;
-use openhello_gui_core::{Language, Strings};
+use openhello_gui_core::{DaemonClient, Language, Strings};
+use slint::ComponentHandle;
 
-const APP_ID: &str = "io.openhello.Gui";
+use backend::{Backend, Command};
+use options::{DemoMode, Options};
 
-fn main() -> glib::ExitCode {
-    let demo = std::env::args().any(|arg| arg == "--demo") || std::env::var("OPENHELLO_GUI_DEMO").is_ok_and(|value| value == "1");
-    let enrolled = std::env::args().any(|arg| arg == "--demo-enrolled");
-    let app = adw::Application::builder().application_id(APP_ID).build();
-    app.connect_activate(move |app| activate(app, demo, enrolled));
-    app.run_with_args::<&str>(&[])
+slint::include_modules!();
+
+fn main() -> ExitCode {
+    let options = Options::parse(std::env::args().skip(1));
+    let window = match MainWindow::new() {
+        Ok(window) => window,
+        Err(error) => {
+            eprintln!("cannot open the window: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let strings = Strings::new(Language::detect());
+    view::init(&window, &strings);
+    let mut backend = launch(&options, &window, strings);
+    wire(&window, &backend.sender());
+    let _stats = options.stats.then(|| stats::start(&window));
+    let result = window.run();
+    backend.shutdown();
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("the window stopped with an error: {error}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
-fn activate(app: &adw::Application, demo: bool, enrolled: bool) {
-    if let Some(existing) = app.active_window() {
-        existing.present();
-        return;
-    }
-    let language = Language::detect();
+fn launch(options: &Options, window: &MainWindow, strings: Strings) -> Backend {
     let uid = unsafe { libc::getuid() };
-    let (sender, events) = async_channel::unbounded();
-    let backend = if demo {
-        backend::spawn(move || Ok(demo::DemoClient::new(enrolled)), uid, language, sender)
-    } else {
-        backend::spawn(|| DaemonClient::connect(Bus::System), uid, language, sender)
-    };
-    window::build(app, Strings::new(language), backend, events);
+    let language = strings.language();
+    let weak = window.as_weak();
+    let emit = move |event| weak.upgrade_in_event_loop(move |window| view::apply(&window, &strings, event)).is_ok();
+    match options.demo {
+        Some(mode) => backend::spawn(demo_factory(mode), uid, language, emit),
+        None => backend::spawn(|| DaemonClient::connect(Bus::System), uid, language, emit),
+    }
+}
+
+fn demo_factory(mode: DemoMode) -> impl Fn() -> Result<demo::DemoClient, openhello_gui_core::ClientError> + Send + 'static {
+    let face = Arc::new(AtomicBool::new(mode.enrolled));
+    move || Ok(demo::DemoClient::new(mode, face.clone()))
+}
+
+fn wire(window: &MainWindow, commands: &Sender<Command>) {
+    window.on_get_started(sender(commands, || Command::Start));
+    window.on_retry(sender(commands, || Command::Retry));
+    window.on_cancel(sender(commands, || Command::Cancel));
+    window.on_acknowledge(sender(commands, || Command::AcknowledgeRecovery));
+    window.on_set_up_again(busy_sender(window, commands, false, || Command::Start));
+    window.on_test(busy_sender(window, commands, true, || Command::Test));
+    window.on_remove(busy_sender(window, commands, false, || Command::Remove));
+    window.on_finish(|| {
+        let _ = slint::quit_event_loop();
+    });
+}
+
+fn sender(commands: &Sender<Command>, command: fn() -> Command) -> impl Fn() + 'static {
+    let commands = commands.clone();
+    move || {
+        let _ = commands.send(command());
+    }
+}
+
+fn busy_sender(window: &MainWindow, commands: &Sender<Command>, testing: bool, command: fn() -> Command) -> impl Fn() + 'static {
+    let (weak, send) = (window.as_weak(), sender(commands, command));
+    move || {
+        if let Some(window) = weak.upgrade() {
+            window.set_busy(true);
+            window.set_testing(testing);
+        }
+        send();
+    }
 }

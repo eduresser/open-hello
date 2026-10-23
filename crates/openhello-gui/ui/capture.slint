@@ -1,0 +1,131 @@
+import { Button, Palette } from "std-widgets.slint";
+import { Brand, Heading } from "components.slint";
+import { T } from "texts.slint";
+
+component Preview inherits Rectangle {
+    in property <image> frame;
+    in property <float> progress;
+    in property <bool> accepted;
+
+    property <length> vw: 560px;
+    property <length> vh: 315px;
+    property <length> cx: vw / 2;
+    property <length> cy: vh / 2;
+    property <length> orx: 92px;
+    property <length> ory: 122px;
+    property <length> rrx: orx + 12px;
+    property <length> rry: ory + 12px;
+    property <angle> sweep: min(progress, 0.9999) * 360deg;
+    property <length> ex: cx + rrx * sin(sweep);
+    property <length> ey: cy - rry * cos(sweep);
+    property <string> oval: "M \{cx / 1px} \{cy / 1px - ory / 1px} A \{orx / 1px} \{ory / 1px} 0 1 1 \{cx / 1px} \{cy / 1px + ory / 1px} A \{orx / 1px} \{ory / 1px} 0 1 1 \{cx / 1px} \{cy / 1px - ory / 1px} Z";
+    property <string> track: "M \{cx / 1px} \{cy / 1px - rry / 1px} A \{rrx / 1px} \{rry / 1px} 0 1 1 \{cx / 1px} \{cy / 1px + rry / 1px} A \{rrx / 1px} \{rry / 1px} 0 1 1 \{cx / 1px} \{cy / 1px - rry / 1px} Z";
+
+    width: vw;
+    height: vh;
+    border-radius: 18px;
+    background: #000000;
+    clip: true;
+
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: root.frame;
+        image-fit: cover;
+        transform-scale-x: -1;
+    }
+
+    Path {
+        width: parent.width;
+        height: parent.height;
+        viewbox-width: root.vw / 1px;
+        viewbox-height: root.vh / 1px;
+        fill: #000000a0;
+        fill-rule: evenodd;
+        commands: "M 0 0 L \{root.vw / 1px} 0 L \{root.vw / 1px} \{root.vh / 1px} L 0 \{root.vh / 1px} Z " + root.oval;
+    }
+
+    Path {
+        width: parent.width;
+        height: parent.height;
+        viewbox-width: root.vw / 1px;
+        viewbox-height: root.vh / 1px;
+        stroke: root.accepted ? Brand.accepted : #ffffffd0;
+        stroke-width: 2px;
+        animate stroke { duration: 250ms; }
+        commands: root.oval;
+    }
+
+    Path {
+        width: parent.width;
+        height: parent.height;
+        viewbox-width: root.vw / 1px;
+        viewbox-height: root.vh / 1px;
+        stroke: #ffffff40;
+        stroke-width: 5px;
+        commands: root.track;
+    }
+
+    Path {
+        width: parent.width;
+        height: parent.height;
+        viewbox-width: root.vw / 1px;
+        viewbox-height: root.vh / 1px;
+        stroke: Brand.accent;
+        stroke-width: 5px;
+        stroke-line-cap: round;
+        commands: root.progress <= 0.001 ? "" : "M \{root.cx / 1px} \{root.cy / 1px - root.rry / 1px} A \{root.rrx / 1px} \{root.rry / 1px} 0 \{root.sweep > 180deg ? 1 : 0} 1 \{root.ex / 1px} \{root.ey / 1px}";
+        animate stroke { duration: 150ms; }
+    }
+}
+
+export component CapturePage inherits Rectangle {
+    in property <image> frame;
+    in property <string> guidance;
+    in property <string> progress-text;
+    in property <float> progress;
+    in property <bool> accepted;
+    callback cancel();
+
+    VerticalLayout {
+        alignment: center;
+        padding: 24px;
+        spacing: 20px;
+
+        Heading { text: T.capture-title; }
+
+        HorizontalLayout {
+            alignment: center;
+            Preview {
+                frame: root.frame;
+                progress: root.progress;
+                accepted: root.accepted;
+            }
+        }
+
+        Text {
+            text: root.guidance;
+            font-size: 18px;
+            font-weight: 600;
+            color: Palette.foreground;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+            min-height: 48px;
+        }
+
+        Text {
+            text: root.progress-text;
+            font-size: 14px;
+            color: Palette.foreground.with-alpha(0.7);
+            horizontal-alignment: center;
+        }
+
+        HorizontalLayout {
+            alignment: center;
+            Button {
+                text: T.cancel;
+                clicked => { root.cancel(); }
+            }
+        }
+    }
+}

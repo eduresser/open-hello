@@ -1,0 +1,127 @@
+import { Button, Palette, Spinner } from "std-widgets.slint";
+import { ActionButton, Body, ButtonRow, Brand, Column, Heading } from "components.slint";
+import { T } from "texts.slint";
+
+component ConfirmRemoval inherits Rectangle {
+    callback confirmed();
+    callback dismissed();
+
+    background: #000000a0;
+
+    TouchArea {}
+
+    scope := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.dismissed();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    HorizontalLayout {
+        alignment: center;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: min(440px, root.width - 48px);
+                background: Palette.background;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: Palette.foreground.with-alpha(0.2);
+                VerticalLayout {
+                    padding: 24px;
+                    spacing: 16px;
+                    Text {
+                        text: T.remove-confirm-title;
+                        font-size: 20px;
+                        font-weight: 700;
+                        color: Palette.foreground;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: T.remove-confirm-body;
+                        font-size: 15px;
+                        color: Palette.foreground.with-alpha(0.78);
+                        wrap: word-wrap;
+                    }
+                    ButtonRow {
+                        alignment: end;
+                        Button {
+                            text: T.cancel;
+                            clicked => { root.dismissed(); }
+                        }
+                        ActionButton {
+                            text: T.remove;
+                            tone: Brand.danger;
+                            clicked => { root.confirmed(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    init => { scope.focus(); }
+}
+
+export component ManagePage inherits Rectangle {
+    in property <bool> busy;
+    in property <bool> testing;
+    in property <string> result;
+    in-out property <bool> confirming;
+    callback test();
+    callback remove();
+    callback set-up-again();
+
+    Column {
+        Heading { text: T.window-title; }
+        Body { text: T.manage-body; }
+        HorizontalLayout {
+            alignment: center;
+            spacing: 12px;
+            min-height: 40px;
+            if root.busy: Spinner {
+                indeterminate: true;
+                width: 28px;
+                height: 28px;
+            }
+            Text {
+                text: root.testing ? T.testing : root.result;
+                font-size: 18px;
+                font-weight: 600;
+                color: Palette.foreground;
+                vertical-alignment: center;
+            }
+        }
+        ButtonRow {
+            ActionButton {
+                text: T.test;
+                enabled: !root.busy && !root.confirming;
+                clicked => { root.test(); }
+            }
+            ActionButton {
+                text: T.remove;
+                tone: Brand.danger;
+                enabled: !root.busy && !root.confirming;
+                clicked => { root.confirming = true; }
+            }
+        }
+        ButtonRow {
+            Button {
+                text: T.set-up-again;
+                enabled: !root.busy && !root.confirming;
+                clicked => { root.set-up-again(); }
+            }
+        }
+    }
+
+    if root.confirming: ConfirmRemoval {
+        confirmed => {
+            root.confirming = false;
+            root.remove();
+        }
+        dismissed => { root.confirming = false; }
+    }
+}
