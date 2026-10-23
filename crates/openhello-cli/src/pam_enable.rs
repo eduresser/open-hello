@@ -15,16 +15,7 @@ const LEGACY_SERVICES_PATH: &str = "/etc/openhello/pam-services";
 const LEGACY_SERVICES_HEADER: &str = "# Services where pam_openhello may use the camera";
 const FALLBACK: &str =
     "per-service fallback: sudo openhello-cli pam enable <service>... (one service per file in /etc/pam.d)";
-const COMMON_STACKS: &[&str] = &[
-    "common-auth",
-    "system-auth",
-    "password-auth",
-    "common-account",
-    "common-session",
-    "common-password",
-    "system-login",
-    "postlogin",
-];
+const STACK_DISCOVERY_SERVICE: &str = "sudo";
 const OLD_STACK_FILES: &[&str] = &["sudo-openhello", "openhello-lockscreen"];
 const OLD_INCLUDES: &[&str] = &["sudo-openhello", "openhello-lockscreen"];
 const BACKUP_SUFFIX: &str = ".openhello.bak";
@@ -135,7 +126,7 @@ fn validate_module_arg(pair: &str) -> Result<(), PamFailure> {
     }
 }
 
-fn validate_service(name: &str) -> Result<(), String> {
+fn validate_service(dirs: &Dirs, name: &str) -> Result<(), String> {
     let valid_chars = name
         .bytes()
         .all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'.' | b'_' | b'-'));
@@ -144,8 +135,8 @@ fn validate_service(name: &str) -> Result<(), String> {
             "`{name}` is not a valid service name (only a-z, 0-9, `.`, `_`, `-`; no `/`)"
         ));
     }
-    if COMMON_STACKS.contains(&name) {
-        return Err(format!("`{name}` is a shared stack; shared stacks are never edited, enable the services that include it instead"));
+    if is_shared_stack(dirs, name) {
+        return Err(format!("`{name}` is a shared stack (another service includes it); shared stacks are never edited by name, enable the services that include it instead"));
     }
     Ok(())
 }
@@ -183,7 +174,7 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), PamFailure> {
             }
             let mut problems = Vec::new();
             for service in &request.services {
-                let outcome = validate_service(service).and_then(|_| match request.action {
+                let outcome = validate_service(&dirs, service).and_then(|_| match request.action {
                     Action::Enable => enable_one(&dirs, service, &request.module_args),
                     _ => disable_one(&dirs, service),
                 });
@@ -430,6 +421,34 @@ fn include_target(line: &str) -> Option<&str> {
     }
 }
 
+fn any_include_target(line: &str) -> Option<&str> {
+    if let Some(name) = include_target(line) {
+        return Some(name);
+    }
+    let tokens: Vec<&str> = line.split_whitespace().collect();
+    match tokens.as_slice() {
+        ["account" | "-account" | "session" | "-session" | "password" | "-password", "include" | "substack", name] => {
+            Some(name)
+        }
+        _ => None,
+    }
+}
+
+fn is_shared_stack(dirs: &Dirs, name: &str) -> bool {
+    let mut others = list_names(&dirs.etc).unwrap_or_default();
+    others.extend(list_names(&dirs.vendor).unwrap_or_default());
+    others.retain(|n| n != name && !n.ends_with(BACKUP_SUFFIX) && !n.starts_with('.'));
+    others.sort();
+    others.dedup();
+    others.iter().any(|other| {
+        read_service(dirs, other).is_some_and(|text| {
+            text.lines()
+                .filter_map(any_include_target)
+                .any(|t| t == name)
+        })
+    })
+}
+
 fn has_auth_line(text: &str) -> bool {
     text.lines()
         .any(|l| matches!(first_token(l), Some("auth" | "-auth")))
@@ -442,15 +461,15 @@ fn read_service(dirs: &Dirs, name: &str) -> Option<String> {
 }
 
 fn discover_common_stack(dirs: &Dirs) -> Result<String, String> {
-    let sudo = read_service(dirs, "sudo").ok_or_else(|| {
-        "no PAM service file for `sudo`, so the common auth stack cannot be discovered".to_string()
+    let sudo = read_service(dirs, STACK_DISCOVERY_SERVICE).ok_or_else(|| {
+        format!("no PAM service file for `{STACK_DISCOVERY_SERVICE}`, so the common auth stack cannot be discovered")
     })?;
     sudo.lines()
         .filter_map(include_target)
         .filter(|name| !name.contains('/'))
         .find(|name| read_service(dirs, name).is_some_and(|t| has_auth_line(&t)))
         .map(str::to_string)
-        .ok_or_else(|| "sudo includes no common auth stack (no `@include X` or `auth include X` pointing to a file with `auth` lines)".to_string())
+        .ok_or_else(|| format!("{STACK_DISCOVERY_SERVICE} includes no common auth stack (no `@include X` or `auth include X` pointing to a file with `auth` lines)"))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]

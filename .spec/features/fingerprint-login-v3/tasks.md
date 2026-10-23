@@ -50,8 +50,7 @@
 - Files: crates/openhello-cli/src/lib.rs, crates/openhello-cli/tests/end_to_end.rs
 - Notes: depends on T-064 (reuse its detection of a `pam_fprintd` line in the common stack). After `enroll finger` print one plain line; never edit PAM from this command. Follow the minimal-comments skill.
 
-## T-066 — Remove distribution and desktop names from production code [pending]
-
+## T-066 — Remove distribution and desktop names from production code [done]
 - Refs: US-023, AC-075
 - Files: crates/openhello-cli/src/pam_enable.rs, crates/openhello-cli/tests/pam_enable.rs, crates/openhello-cli/tests/pam_sudo.rs, scripts/install.sh, packaging/openhello-keyd.service
 - Notes: owner rule 2026-10-22: production code must be as general as possible, with no name of a distribution, desktop, package manager or PAM stack file. Replace the fixed `COMMON_STACKS` list (used only by `validate_service` to refuse editing a shared stack) with a structural test: a service file is a shared stack when another service file includes it (`@include`, `include`, `substack`). Remove the distribution names from comments in `scripts/install.sh` and `packaging/openhello-keyd.service`. In the tests rename `DEBIAN_COMMON_AUTH` and similar fixtures to neutral names, and add the AC-075 tests with arbitrary stack file names (the `sudo` service including a file such as `base-auth`, another service including `extra-auth`). `scripts/pam-survey.sh` and `scripts/spike-pkcs11.sh` are development tools, leave their content. Follow the minimal-comments skill.

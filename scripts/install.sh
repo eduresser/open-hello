@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PAM directory = dirname of libpam.so.0 from the loader cache + /security: covers openSUSE (/usr/lib64), Debian/Ubuntu (multiarch) and Arch (/usr/lib).
+# PAM module directory = dirname of libpam.so.0 from the loader cache + /security, whatever the library layout.
 # Installs open-hello without touching the system's package manager: it checks capabilities, builds, and installs to neutral locations.
 # usage: sudo scripts/install.sh [--dry-run] [--skip-checks] [--no-pam] [--calibration-images DIR | --calibration-url URL]
 # The PAM module (and pam_fprintd, when installed) is enabled once in the common auth stack unless --no-pam is given; undo with `sudo openhello-cli pam disable`.

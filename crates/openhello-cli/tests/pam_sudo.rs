@@ -895,7 +895,9 @@ fn the_module_waits_for_the_daemon_attempt_budget_and_gives_up_only_within_its_o
         assert_eq!(silent.verify_calls, 1);
         assert!(silent.showed_no_message());
         assert!(
-            silent.elapsed >= openhello_auth_proto::FACE_ATTEMPT_BUDGET + openhello_auth_proto::FACE_DECISION_BUDGET,
+            silent.elapsed
+                >= openhello_auth_proto::FACE_ATTEMPT_BUDGET
+                    + openhello_auth_proto::FACE_DECISION_BUDGET,
             "the module gave up before the daemon's budget: {:?}",
             silent.elapsed
         );
@@ -1307,7 +1309,8 @@ fn write_frame(stream: &mut UnixStream, tag: u8, body: &[u8]) -> std::io::Result
 
 // @spec:AC-041
 #[test]
-fn an_interrupt_while_the_camera_waits_ends_the_module_at_once_and_hands_the_signal_back_to_the_caller() {
+fn an_interrupt_while_the_camera_waits_ends_the_module_at_once_and_hands_the_signal_back_to_the_caller(
+) {
     let rig = rig();
     with_fixture(&rig, |fixture| {
         let services = services(&rig, fixture);
