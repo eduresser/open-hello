@@ -1,7 +1,7 @@
 {
   "feature": "enrollment-ui",
-  "timestamp": "2026-10-23T15:08:22.508Z",
-  "gitRev": "0468ce8",
+  "timestamp": "2026-10-23T15:17:25.810Z",
+  "gitRev": "a2f0a98",
   "command": "cargo test",
   "reporter": "exitcode",
   "exitCode": 0,
@@ -13,6 +13,31 @@
       "method": "exitcode"
     },
     "AC-057": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-058": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-059": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-060": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-061": {
+      "status": "pass",
+      "testName": null,
+      "method": "exitcode"
+    },
+    "AC-062": {
       "status": "pass",
       "testName": null,
       "method": "exitcode"
