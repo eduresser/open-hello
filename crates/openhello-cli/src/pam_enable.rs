@@ -2,10 +2,15 @@ use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
-pub const PAM_USAGE: &str = "usage: openhello-cli pam <enable [service...] | disable [service...] | status | migrate> [--root DIR] [--arg flag|key=value]...";
+pub const PAM_USAGE: &str = "usage: openhello-cli pam <enable [service...] | disable [service...] | status | migrate> [--root DIR] [--arg flag|key=value]... [--no-fingerprint]";
 
 const MODULE: &str = "pam_openhello.so";
+const FPRINTD_MODULE: &str = "pam_fprintd.so";
+const FPRINTD_MARKER: &str = "# added by open-hello";
+const FPRINTD_LINE: &str = "auth sufficient pam_fprintd.so max-tries=3 timeout=10";
+const INCLUDE_DEPTH: usize = 8;
 const LEGACY_SERVICES_PATH: &str = "/etc/openhello/pam-services";
 const LEGACY_SERVICES_HEADER: &str = "# Services where pam_openhello may use the camera";
 const FALLBACK: &str =
@@ -57,9 +62,11 @@ struct Request {
     root: Option<PathBuf>,
     module_args: Vec<String>,
     services: Vec<String>,
+    fingerprint: bool,
 }
 
 struct Dirs {
+    root: PathBuf,
     etc: PathBuf,
     vendor: PathBuf,
 }
@@ -77,6 +84,7 @@ fn parse(args: &[String]) -> Result<Request, PamFailure> {
     let mut root = None;
     let mut module_args = Vec::new();
     let mut services = Vec::new();
+    let mut fingerprint = true;
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--root" => {
@@ -85,6 +93,7 @@ fn parse(args: &[String]) -> Result<Request, PamFailure> {
                         .ok_or_else(|| usage("--root needs a directory"))?,
                 ))
             }
+            "--no-fingerprint" => fingerprint = false,
             "--arg" => {
                 let pair = iter
                     .next()
@@ -106,6 +115,7 @@ fn parse(args: &[String]) -> Result<Request, PamFailure> {
         root,
         module_args,
         services,
+        fingerprint,
     })
 }
 
@@ -145,6 +155,7 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), PamFailure> {
     let injected = request.root.is_some();
     let root = request.root.clone().unwrap_or_else(|| PathBuf::from("/"));
     let dirs = Dirs {
+        root: root.clone(),
         etc: root.join("etc/pam.d"),
         vendor: root.join("usr/lib/pam.d"),
     };
@@ -163,7 +174,9 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), PamFailure> {
             }
             if request.services.is_empty() {
                 let result = match request.action {
-                    Action::Enable => enable_common(&dirs, &request.module_args, &mut say),
+                    Action::Enable => {
+                        enable_common(&dirs, &request.module_args, request.fingerprint, &mut say)
+                    }
                     _ => disable_everywhere(&dirs, &mut say),
                 };
                 return result.map_err(failed);
@@ -201,6 +214,21 @@ fn is_our_line(line: &str) -> bool {
         && tokens.next() == Some(MODULE)
 }
 
+fn is_fprintd_line(line: &str) -> bool {
+    let code = line.split('#').next().unwrap_or("");
+    let mut tokens = code.split_whitespace();
+    matches!(tokens.next(), Some("auth" | "-auth"))
+        && tokens.any(|t| {
+            Path::new(t)
+                .file_name()
+                .is_some_and(|n| n == FPRINTD_MODULE)
+        })
+}
+
+fn is_our_fprintd_line(line: &str) -> bool {
+    is_fprintd_line(line) && line.contains(FPRINTD_MARKER)
+}
+
 fn is_old_include(line: &str) -> bool {
     let tokens: Vec<&str> = line.split_whitespace().collect();
     matches!(tokens.as_slice(), ["auth", "include", name] if OLD_INCLUDES.contains(name))
@@ -230,6 +258,23 @@ fn insert_before(content: &str, line: &str, anchors: &[&str]) -> String {
         }
         result.push_str(line);
         result.push('\n');
+    }
+    result
+}
+
+fn insert_after_our_line(content: &str, line: &str) -> String {
+    let mut result = String::with_capacity(content.len() + line.len() + 2);
+    let mut placed = false;
+    for existing in content.split_inclusive('\n') {
+        result.push_str(existing);
+        if !placed && is_our_line(existing) {
+            if !existing.ends_with('\n') {
+                result.push('\n');
+            }
+            result.push_str(line);
+            result.push('\n');
+            placed = true;
+        }
     }
     result
 }
@@ -408,26 +453,104 @@ fn discover_common_stack(dirs: &Dirs) -> Result<String, String> {
         .ok_or_else(|| "sudo includes no common auth stack (no `@include X` or `auth include X` pointing to a file with `auth` lines)".to_string())
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum FingerprintLine {
+    Absent,
+    System,
+    Ours,
+}
+
+fn fingerprint_line_reached(dirs: &Dirs, text: &str, depth: usize) -> FingerprintLine {
+    let own = text
+        .lines()
+        .map(|l| match (is_our_fprintd_line(l), is_fprintd_line(l)) {
+            (true, _) => FingerprintLine::Ours,
+            (_, true) => FingerprintLine::System,
+            _ => FingerprintLine::Absent,
+        })
+        .max()
+        .unwrap_or(FingerprintLine::Absent);
+    if depth == 0 {
+        return own;
+    }
+    text.lines()
+        .filter_map(include_target)
+        .filter(|name| !name.contains('/'))
+        .filter_map(|name| read_service(dirs, name))
+        .map(|included| fingerprint_line_reached(dirs, &included, depth - 1))
+        .fold(own, FingerprintLine::max)
+}
+
+pub fn security_dir() -> Option<PathBuf> {
+    let listing = ["ldconfig", "/sbin/ldconfig"]
+        .iter()
+        .find_map(|program| Command::new(program).arg("-p").output().ok())?;
+    let text = String::from_utf8_lossy(&listing.stdout);
+    let libpam = text
+        .lines()
+        .find(|l| l.contains("libpam.so.0"))?
+        .rsplit("=> ")
+        .next()?
+        .trim();
+    Some(fs::canonicalize(libpam).ok()?.parent()?.join("security"))
+}
+
+fn fprintd_module_present(dirs: &Dirs) -> bool {
+    security_dir().is_some_and(|dir| {
+        let relative = dir.strip_prefix("/").unwrap_or(&dir);
+        is_regular(&dirs.root.join(relative).join(FPRINTD_MODULE))
+    })
+}
+
+fn fingerprint_report(dirs: &Dirs, updated: &mut String, requested: bool) -> &'static str {
+    if !requested {
+        return "fingerprint login not switched on: --no-fingerprint was given";
+    }
+    match fingerprint_line_reached(dirs, updated, INCLUDE_DEPTH) {
+        FingerprintLine::Ours => {
+            "fingerprint login already switched on (pam_fprintd after the open-hello line)"
+        }
+        FingerprintLine::System => {
+            "the system already uses pam_fprintd in the common auth stack; it was left as it is"
+        }
+        FingerprintLine::Absent if !fprintd_module_present(dirs) => {
+            "fingerprint login not switched on: pam_fprintd.so is not installed on this machine"
+        }
+        FingerprintLine::Absent => {
+            let line = format!("{FPRINTD_LINE} {FPRINTD_MARKER}");
+            *updated = insert_after_our_line(updated, &line);
+            "fingerprint login switched on: pam_fprintd was added right after the open-hello line (face first, finger second)"
+        }
+    }
+}
+
 fn enable_common(
     dirs: &Dirs,
     module_args: &[String],
+    fingerprint: bool,
     say: &mut dyn FnMut(String),
 ) -> Result<(), String> {
     let with_fallback = |e: String| format!("{e}\n{FALLBACK}");
     let name = discover_common_stack(dirs).map_err(with_fallback)?;
     let path = materialize(dirs, &name).map_err(with_fallback)?;
     let content = read_text(&path)?;
-    if content.lines().any(is_our_line) {
-        say(format!("{name}: already enabled in {}", path.display()));
+    let already = content.lines().any(is_our_line);
+    let mut updated = if already {
+        content.clone()
     } else {
-        let line = our_line(module_args);
-        rewrite(
-            &path,
-            &name,
-            &insert_before(&content, &line, &["auth", "-auth"]),
-        )?;
-        say(format!("{name}: enabled in {}", path.display()));
+        insert_before(&content, &our_line(module_args), &["auth", "-auth"])
+    };
+    let fingerprint_note = fingerprint_report(dirs, &mut updated, fingerprint);
+    if updated != content {
+        rewrite(&path, &name, &updated)?;
     }
+    let verb = if already {
+        "already enabled in"
+    } else {
+        "enabled in"
+    };
+    say(format!("{name}: {verb} {}", path.display()));
+    say(fingerprint_note.to_string());
     for service in editable_names(dirs)? {
         if service != name {
             remove_service_lines(dirs, &service, say)?;
@@ -507,7 +630,7 @@ fn disable_everywhere(dirs: &Dirs, say: &mut dyn FnMut(String)) -> Result<(), St
         else {
             continue;
         };
-        let (kept, removed) = remove_lines(&content, is_our_line);
+        let (kept, removed) = remove_lines(&content, |l| is_our_line(l) || is_our_fprintd_line(l));
         if removed > 0 {
             rewrite(&path, &name, &kept)?;
             say(format!("{name}: disabled, removed {removed} line(s)"));
@@ -532,6 +655,14 @@ fn report_common_stack(dirs: &Dirs, say: &mut dyn FnMut(String)) {
                 _ => "line absent",
             };
             say(format!("common stack: {name}, {state}"));
+            let fingerprint = match read_service(dirs, &name)
+                .map(|t| fingerprint_line_reached(dirs, &t, INCLUDE_DEPTH))
+            {
+                Some(FingerprintLine::Ours) => "present, added by open-hello",
+                Some(FingerprintLine::System) => "present, not added by open-hello",
+                _ => "absent",
+            };
+            say(format!("fingerprint line (pam_fprintd): {fingerprint}"));
         }
         Err(reason) => say(format!("common stack: not found ({reason})")),
     }

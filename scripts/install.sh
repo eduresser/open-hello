@@ -2,7 +2,7 @@
 # PAM directory = dirname of libpam.so.0 from the loader cache + /security: covers openSUSE (/usr/lib64), Debian/Ubuntu (multiarch) and Arch (/usr/lib).
 # Installs open-hello without touching the system's package manager: it checks capabilities, builds, and installs to neutral locations.
 # usage: sudo scripts/install.sh [--dry-run] [--skip-checks] [--no-pam] [--calibration-images DIR | --calibration-url URL]
-# The PAM module is enabled once in the common auth stack unless --no-pam is given; undo with `sudo openhello-cli pam disable`.
+# The PAM module (and pam_fprintd, when installed) is enabled once in the common auth stack unless --no-pam is given; undo with `sudo openhello-cli pam disable`.
 set -euo pipefail
 
 DRY_RUN=0
@@ -261,6 +261,9 @@ if command -v fprintd-list >/dev/null 2>&1 || [ -x /usr/libexec/fprintd ] || [ -
   echo "Fingerprint: fprintd found. With a reader, add a finger with: openhello-cli enroll"
 else
   echo "Fingerprint: fprintd not found; the face and the password work as usual. Install fprintd to use a fingerprint reader."
+fi
+if [ "$PAM_ENABLED" = 1 ] && [ "$DRY_RUN" != 1 ]; then
+  /usr/local/bin/openhello-cli pam status 2>/dev/null | grep '^fingerprint line' || true
 fi
 if [ "$PAM_ENABLED" = 1 ] || { [ "$DRY_RUN" = 1 ] && [ "$ENABLE_PAM" = 1 ]; }; then
   echo "PAM module enabled once in the common auth stack (every local service except login, su, sshd, cron and similar). It only acts for users who enrolled a face; passwords keep working. Undo with: sudo openhello-cli pam disable (check with: openhello-cli pam status)"

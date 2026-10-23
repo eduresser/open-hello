@@ -39,8 +39,7 @@
 - Files: crates/openhellod/src/core.rs, crates/openhellod/src/fingerprint.rs, crates/openhellod/src/main.rs, crates/openhellod/tests/fingerprint.rs, crates/openhellod/tests/fingerprint_enroll.rs, crates/openhellod/tests/fingerprint_purge.rs
 - Notes: owner decision 2026-10-22: open-hello manages fingers (enroll, status, purge) and the system's `pam_fprintd` authenticates them. A paused attempt is in `git stash list` ("T-063 WIP"): `git stash pop` restores it (removal in core.rs, verify half gone from fingerprint.rs with `FingerprintReader`/`FprintdReader` renames, main.rs wiring, the AC-062 tests); review it, finish it, run the tests. `Verify` must never call Claim or VerifyStart (AC-062). Face-only behaviour of `Verify` must stay exactly as before T-058. Follow the minimal-comments skill.
 
-## T-064 — pam enable, disable and status handle the system's fingerprint line [pending]
-
+## T-064 — pam enable, disable and status handle the system's fingerprint line [done]
 - Refs: US-023, AC-061, AC-072, AC-074
 - Files: crates/openhello-cli/src/pam_enable.rs, crates/openhello-cli/tests/pam_enable.rs, crates/openhello-cli/src/lib.rs, scripts/install.sh
 - Notes: reuse the existing common-stack discovery, backup, atomic write and undo in `pam_enable.rs` (the `enable_common` path). Insert `auth sufficient pam_fprintd.so max-tries=3 timeout=10` right after our line, only when the module file `pam_fprintd.so` exists in the PAM module directory the CLI already discovers and no `pam_fprintd` line reaches the common stack. Mark the line it adds so `disable` removes only that one. Add `--no-fingerprint`. Extend `status`. The installer's fprintd line reports what `pam enable` did. No desktop or distribution names in the code. Follow the minimal-comments skill.

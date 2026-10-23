@@ -660,3 +660,229 @@ fn status_reports_the_common_stack_and_per_service_lines() {
     assert!(out.contains("common stack: common-auth, line present"));
     assert!(out.contains("polkit-1: enabled (per-service line)"));
 }
+
+const FPRINTD_LINE: &str =
+    "auth sufficient pam_fprintd.so max-tries=3 timeout=10 # added by open-hello";
+const SYSTEM_FPRINTD: &str = "auth      sufficient  pam_fprintd.so\n";
+
+fn with_fprintd_module(tree: &Tree) {
+    let dir = openhello_cli::pam_enable::security_dir().expect(
+        "libpam.so.0 not found in the loader cache; install the PAM runtime to run the PAM tests",
+    );
+    let target = tree.dir.path().join(dir.strip_prefix("/").unwrap_or(&dir));
+    fs::create_dir_all(&target).unwrap();
+    fs::write(target.join("pam_fprintd.so"), b"").unwrap();
+}
+
+fn fingerprint_lines(text: &str) -> usize {
+    text.lines()
+        .filter(|l| l.contains("pam_fprintd.so"))
+        .count()
+}
+
+fn fingerprint_stacks() -> Vec<Tree> {
+    let debian = debian();
+    let suse = Tree::new();
+    suse.put("sudo", SUSE_SUDO);
+    fs::write(suse.vendor("system-auth"), SYSTEM_AUTH).unwrap();
+    vec![debian, suse]
+}
+
+fn stack_name(tree: &Tree) -> &'static str {
+    if tree.etc("common-auth").exists() {
+        "common-auth"
+    } else {
+        "system-auth"
+    }
+}
+
+// @spec:AC-061
+#[test]
+fn enable_adds_the_fingerprint_line_right_after_ours_in_both_stack_styles() {
+    for tree in fingerprint_stacks() {
+        with_fprintd_module(&tree);
+        let (result, out) = tree.pam(&["enable"]);
+        result.unwrap();
+        let after = tree.read(stack_name(&tree));
+        let expected = format!("{COMMON_LINE}\n{FPRINTD_LINE}\n");
+        assert!(after.contains(&expected), "{after}");
+        assert_eq!(fingerprint_lines(&after), 1);
+        assert!(out.contains("fingerprint login switched on"), "{out}");
+    }
+}
+
+// @spec:AC-061
+#[test]
+fn enable_twice_adds_nothing_and_keeps_one_backup() {
+    for tree in fingerprint_stacks() {
+        with_fprintd_module(&tree);
+        let name = stack_name(&tree);
+        tree.pam(&["enable"]).0.unwrap();
+        let once = tree.read(name);
+        let (result, out) = tree.pam(&["enable"]);
+        result.unwrap();
+        assert_eq!(tree.read(name), once);
+        assert_eq!(fingerprint_lines(&once), 1);
+        assert!(
+            out.contains("fingerprint login already switched on"),
+            "{out}"
+        );
+        let original = if name == "common-auth" {
+            DEBIAN_COMMON_AUTH
+        } else {
+            SYSTEM_AUTH
+        };
+        let backup = tree.read(&format!("{name}.openhello.bak"));
+        assert_eq!(backup, original);
+    }
+}
+
+// @spec:AC-061
+#[test]
+fn enable_adds_the_fingerprint_line_when_our_line_was_already_there() {
+    let tree = debian();
+    tree.pam(&["enable"]).0.unwrap();
+    with_fprintd_module(&tree);
+    tree.pam(&["enable"]).0.unwrap();
+    let after = tree.read("common-auth");
+    assert!(after.contains(&format!("{COMMON_LINE}\n{FPRINTD_LINE}\n")));
+    assert_eq!(after.matches(COMMON_LINE).count(), 1);
+}
+
+// @spec:AC-061
+#[test]
+fn the_backup_keeps_the_stack_as_it_was_before_the_fingerprint_line() {
+    let tree = debian();
+    with_fprintd_module(&tree);
+    tree.pam(&["enable"]).0.unwrap();
+    assert_eq!(tree.read("common-auth.openhello.bak"), DEBIAN_COMMON_AUTH);
+}
+
+// @spec:AC-074
+#[test]
+fn no_fingerprint_flag_writes_no_line_and_says_why() {
+    let tree = debian();
+    with_fprintd_module(&tree);
+    let (result, out) = tree.pam(&["enable", "--no-fingerprint"]);
+    result.unwrap();
+    let after = tree.read("common-auth");
+    assert_eq!(fingerprint_lines(&after), 0);
+    assert_eq!(
+        after.replacen(&format!("{COMMON_LINE}\n"), "", 1),
+        DEBIAN_COMMON_AUTH
+    );
+    assert!(
+        out.contains("not switched on: --no-fingerprint was given"),
+        "{out}"
+    );
+}
+
+// @spec:AC-074
+#[test]
+fn a_machine_without_the_module_gets_no_line_and_a_reason() {
+    let tree = debian();
+    let (result, out) = tree.pam(&["enable"]);
+    result.unwrap();
+    let after = tree.read("common-auth");
+    assert_eq!(fingerprint_lines(&after), 0);
+    assert!(after.contains(COMMON_LINE));
+    assert!(
+        out.contains("not switched on: pam_fprintd.so is not installed"),
+        "{out}"
+    );
+}
+
+// @spec:AC-061
+// @spec:AC-072
+#[test]
+fn an_existing_fingerprint_line_is_left_alone_directly_and_through_an_include() {
+    let direct = debian();
+    with_fprintd_module(&direct);
+    direct.put(
+        "common-auth",
+        &format!("{SYSTEM_FPRINTD}{DEBIAN_COMMON_AUTH}"),
+    );
+    let included = Tree::new();
+    included.put("sudo", SUSE_SUDO);
+    with_fprintd_module(&included);
+    included.put(
+        "system-auth",
+        &format!("auth include fprintd-auth\n{SYSTEM_AUTH}"),
+    );
+    included.put("fprintd-auth", SYSTEM_FPRINTD);
+    for (tree, name) in [(&direct, "common-auth"), (&included, "system-auth")] {
+        let (result, out) = tree.pam(&["enable"]);
+        result.unwrap();
+        assert_eq!(
+            fingerprint_lines(&tree.read(name)),
+            usize::from(name == "common-auth")
+        );
+        assert!(!tree.read(name).contains("# added by open-hello"));
+        assert!(out.contains("the system already uses pam_fprintd"), "{out}");
+        tree.pam(&["disable"]).0.unwrap();
+        assert!(!tree.read(name).contains("pam_openhello"));
+    }
+    assert!(direct.read("common-auth").contains(SYSTEM_FPRINTD));
+    assert_eq!(included.read("fprintd-auth"), SYSTEM_FPRINTD);
+}
+
+// @spec:AC-072
+#[test]
+fn disable_removes_only_the_line_open_hello_added() {
+    let tree = debian();
+    with_fprintd_module(&tree);
+    tree.pam(&["enable"]).0.unwrap();
+    tree.pam(&["disable"]).0.unwrap();
+    assert_eq!(tree.read("common-auth"), DEBIAN_COMMON_AUTH);
+
+    let kept = debian();
+    kept.put(
+        "common-auth",
+        &format!("{SYSTEM_FPRINTD}{DEBIAN_COMMON_AUTH}"),
+    );
+    kept.pam(&["enable"]).0.unwrap();
+    kept.pam(&["disable"]).0.unwrap();
+    assert_eq!(
+        kept.read("common-auth"),
+        format!("{SYSTEM_FPRINTD}{DEBIAN_COMMON_AUTH}")
+    );
+}
+
+// @spec:AC-072
+#[test]
+fn status_reports_the_fingerprint_line_in_all_three_states() {
+    let absent = debian();
+    absent.pam(&["enable"]).0.unwrap();
+    assert!(absent
+        .pam(&["status"])
+        .1
+        .contains("fingerprint line (pam_fprintd): absent\n"));
+
+    let added = debian();
+    with_fprintd_module(&added);
+    added.pam(&["enable"]).0.unwrap();
+    assert!(added
+        .pam(&["status"])
+        .1
+        .contains("fingerprint line (pam_fprintd): present, added by open-hello\n"));
+
+    let system = debian();
+    system.put(
+        "common-auth",
+        &format!("{SYSTEM_FPRINTD}{DEBIAN_COMMON_AUTH}"),
+    );
+    assert!(system
+        .pam(&["status"])
+        .1
+        .contains("fingerprint line (pam_fprintd): present, not added by open-hello\n"));
+}
+
+// @spec:AC-061
+#[test]
+fn per_service_enable_never_writes_the_fingerprint_line() {
+    let tree = debian();
+    with_fprintd_module(&tree);
+    tree.pam(&["enable", "sudo"]).0.unwrap();
+    assert_eq!(fingerprint_lines(&tree.read("sudo")), 0);
+    assert_eq!(tree.read("common-auth"), DEBIAN_COMMON_AUTH);
+}
