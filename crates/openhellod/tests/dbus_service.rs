@@ -268,6 +268,9 @@ fn other_backend_failures_keep_the_generic_failed_error() {
     assert_eq!(name, "org.freedesktop.DBus.Error.Failed");
 }
 
+const ONLY_METHOD_ALLOWED_TO_RETURN_IMAGE_DATA: &str = "EnrollFrame";
+
+// @spec:AC-064
 // @principle:P-003
 #[test]
 fn no_method_returns_embeddings_templates_or_byte_arrays() {
@@ -282,13 +285,27 @@ fn no_method_returns_embeddings_templates_or_byte_arrays() {
         .unwrap();
     let our_interface = xml.split("<interface name=\"io.openhello.Biometrics1\">").nth(1).expect("interface introspected");
     let our_interface = our_interface.split("</interface>").next().unwrap();
-    let out_types: Vec<&str> = our_interface
-        .lines()
-        .filter(|line| line.contains("direction=\"out\""))
-        .filter_map(|line| line.split("type=\"").nth(1)?.split('"').next())
-        .collect();
+    let mut method = "";
+    let mut out_types: Vec<(&str, &str)> = Vec::new();
+    for line in our_interface.lines() {
+        if let Some(name) = line.split("<method name=\"").nth(1).and_then(|rest| rest.split('"').next()) {
+            method = name;
+        }
+        if line.contains("direction=\"out\"") {
+            if let Some(kind) = line.split("type=\"").nth(1).and_then(|rest| rest.split('"').next()) {
+                out_types.push((method, kind));
+            }
+        }
+    }
     assert!(out_types.len() >= 8, "{out_types:?}");
-    assert!(out_types.iter().all(|t| matches!(*t, "s" | "b" | "u")), "{out_types:?}");
+    let offenders: Vec<_> = out_types
+        .iter()
+        .filter(|(method, _)| *method != ONLY_METHOD_ALLOWED_TO_RETURN_IMAGE_DATA)
+        .filter(|(_, kind)| !matches!(*kind, "s" | "b" | "u"))
+        .collect();
+    assert!(offenders.is_empty(), "{offenders:?}");
+    let allowed: Vec<_> = out_types.iter().filter(|(method, _)| *method == ONLY_METHOD_ALLOWED_TO_RETURN_IMAGE_DATA).map(|(_, kind)| *kind).collect();
+    assert_eq!(allowed, ["h", "u", "u"]);
 
     let handle: String = proxy(&conn).call("EnrollBegin", &(1000u32,)).unwrap();
     assert!(!handle.contains("secret-template-bytes"));
@@ -560,4 +577,123 @@ fn an_enrollment_that_is_committed_or_discarded_by_its_owner_is_not_discarded_ag
     std::thread::sleep(std::time::Duration::from_millis(500));
     assert_eq!(probe.enroll_discards.load(Ordering::SeqCst), 1);
     assert_eq!(probe.releases.load(Ordering::SeqCst), 1);
+}
+
+const PREVIEW_PIXELS: [u8; 6] = [10, 20, 30, 40, 50, 60];
+
+struct PreviewSensor;
+
+impl SensorBackend for PreviewSensor {
+    fn capture(&mut self) -> Result<CapturedFrame, DaemonError> {
+        Ok(CapturedFrame { width: 3, height: 2, pixels: PREVIEW_PIXELS.to_vec() })
+    }
+}
+
+fn preview_core() -> Biometrics {
+    let engine = Engine { begins: Arc::new(AtomicUsize::new(0)), candidates: Vec::new() };
+    Biometrics::new(Box::new(PreviewSensor), Box::new(engine), Box::new(Storage::default()), DEFAULT_TARGET_FAR)
+}
+
+fn serve_preview(authorized: bool) -> (PrivateBus, Arc<ScriptedPolkit>) {
+    let bus = PrivateBus::start();
+    let polkit = Arc::new(ScriptedPolkit { authorized, asked: Default::default() });
+    serve_core(&bus, Arc::new(PolkitAuthorizer::new(polkit.clone())), preview_core());
+    (bus, polkit)
+}
+
+fn read_frame(reply: (zbus::zvariant::OwnedFd, u32, u32)) -> (std::fs::File, u32, u32) {
+    (std::fs::File::from(std::os::fd::OwnedFd::from(reply.0)), reply.1, reply.2)
+}
+
+fn capture_once(proxy: &zbus::blocking::Proxy<'_>, handle: &str) {
+    proxy.call::<_, _, (String, String, u32, u32)>("EnrollCapture", &(handle,)).unwrap();
+}
+
+// @spec:AC-063
+#[test]
+fn the_owner_receives_the_latest_frame_as_a_sealed_read_only_memory_file() {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::FileExt;
+
+    let (bus, polkit) = serve_preview(true);
+    let conn = client(&bus);
+    let proxy = proxy(&conn);
+    let handle: String = proxy.call("EnrollBegin", &(my_uid(),)).unwrap();
+    capture_once(&proxy, &handle);
+
+    let (file, width, height) = read_frame(proxy.call("EnrollFrame", &(handle.as_str(),)).unwrap());
+    assert_eq!((width, height), (3, 2));
+    let mut pixels = vec![0u8; (width * height) as usize];
+    file.read_exact_at(&mut pixels, 0).unwrap();
+    assert_eq!(pixels, PREVIEW_PIXELS);
+    assert_eq!(file.metadata().unwrap().len(), PREVIEW_PIXELS.len() as u64);
+    assert!(polkit.asked.lock().unwrap().contains(&"io.openhello.biometrics.enroll-frame".to_string()));
+
+    let flags = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFD) };
+    assert_ne!(flags & libc::FD_CLOEXEC, 0);
+    assert!(file.write_at(&[1], 0).is_err());
+    assert!(file.set_len(0).is_err());
+    assert!(file.set_len(100).is_err());
+    file.read_exact_at(&mut pixels, 0).unwrap();
+    assert_eq!(pixels, PREVIEW_PIXELS);
+}
+
+type FrameReply = (zbus::zvariant::OwnedFd, u32, u32);
+
+fn serve_with_captured_session(owner_uid: u32, authorized: bool) -> (PrivateBus, Arc<ScriptedPolkit>, String) {
+    let bus = PrivateBus::start();
+    let polkit = Arc::new(ScriptedPolkit { authorized, asked: Default::default() });
+    let mut core = preview_core();
+    let handle = core.enroll_begin(owner_uid).unwrap();
+    core.enroll_capture(&handle).unwrap();
+    serve_core(&bus, Arc::new(PolkitAuthorizer::new(polkit.clone())), core);
+    (bus, polkit, handle)
+}
+
+// @spec:AC-063
+#[test]
+fn the_preview_refuses_unknown_handles_and_sessions_without_a_frame() {
+    let (bus, _) = serve_preview(true);
+    let conn = client(&bus);
+    let proxy = proxy(&conn);
+    let unknown = proxy.call::<_, _, FrameReply>("EnrollFrame", &("enroll-999",)).unwrap_err();
+    assert!(unknown.to_string().contains("not valid in the current state"), "{unknown}");
+    let handle: String = proxy.call("EnrollBegin", &(my_uid(),)).unwrap();
+    let early = proxy.call::<_, _, FrameReply>("EnrollFrame", &(handle.as_str(),)).unwrap_err();
+    assert!(early.to_string().contains("not valid in the current state"), "{early}");
+}
+
+// @spec:AC-063
+// @principle:P-009
+#[test]
+fn the_preview_is_refused_to_another_user_and_without_polkit_authorization() {
+    let (bus, polkit, handle) = serve_with_captured_session(my_uid() + 1, true);
+    let conn = client(&bus);
+    let error = proxy(&conn).call::<_, _, FrameReply>("EnrollFrame", &(handle.as_str(),)).unwrap_err();
+    assert!(error.to_string().contains("AuthFailed"), "{error}");
+    assert!(polkit.asked.lock().unwrap().is_empty());
+
+    let (bus, polkit, handle) = serve_with_captured_session(my_uid(), false);
+    let conn = client(&bus);
+    let error = proxy(&conn).call::<_, _, FrameReply>("EnrollFrame", &(handle.as_str(),)).unwrap_err();
+    assert!(error.to_string().contains("AuthFailed"), "{error}");
+    assert!(error.to_string().contains("io.openhello.biometrics.enroll-frame"), "{error}");
+    assert_eq!(*polkit.asked.lock().unwrap(), vec!["io.openhello.biometrics.enroll-frame"]);
+}
+
+// @spec:AC-063
+#[test]
+fn a_committed_or_discarded_session_no_longer_serves_its_preview() {
+    let (bus, _) = serve_preview(true);
+    let conn = client(&bus);
+    let proxy = proxy(&conn);
+    for finish in ["EnrollCommit", "EnrollDiscard"] {
+        let handle: String = proxy.call("EnrollBegin", &(my_uid(),)).unwrap();
+        capture_once(&proxy, &handle);
+        let (kept, _, _) = read_frame(proxy.call("EnrollFrame", &(handle.as_str(),)).unwrap());
+        proxy.call_method(finish, &(handle.as_str(),)).unwrap();
+        let error = proxy.call::<_, _, FrameReply>("EnrollFrame", &(handle.as_str(),)).unwrap_err();
+        assert!(error.to_string().contains("not valid in the current state"), "{finish}: {error}");
+        drop(kept);
+    }
 }
