@@ -39,7 +39,15 @@ pub enum Verdict {
     Occluded,
     NoFace,
     YawOutOfRange,
-    BucketAlreadyFilled,
+    TooSoon,
+    TooDark,
+    TooBright,
+    MoveLeft,
+    MoveRight,
+    MoveUp,
+    MoveDown,
+    TooClose,
+    TooFar,
 }
 
 impl Verdict {
@@ -50,7 +58,15 @@ impl Verdict {
             Verdict::Occluded => "occluded",
             Verdict::NoFace => "no-face",
             Verdict::YawOutOfRange => "yaw-out-of-range",
-            Verdict::BucketAlreadyFilled => "pose-already-captured",
+            Verdict::TooSoon => "too-soon",
+            Verdict::TooDark => "too-dark",
+            Verdict::TooBright => "too-bright",
+            Verdict::MoveLeft => "move-left",
+            Verdict::MoveRight => "move-right",
+            Verdict::MoveUp => "move-up",
+            Verdict::MoveDown => "move-down",
+            Verdict::TooClose => "too-close",
+            Verdict::TooFar => "too-far",
         }
     }
 }

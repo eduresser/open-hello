@@ -37,7 +37,7 @@ crates/
   failure reason is exported through the optional `openhello_sensor_last_error` symbol and logged by the daemon.
   MIPI/IPU6 cameras are out of scope.
 - **`engine-adapter-face`** — YuNet detection + AuraFace (`glintr100`) embedding via `ort` (ONNX Runtime),
-  pose-bucket/blur/occlusion quality gating for enrollment (AC-001–AC-004), FAR-calibrated match decision
+  frontal-sample/blur/occlusion quality gating for enrollment (AC-001–AC-004, AC-048, AC-049), FAR-calibrated match decision
   (AC-005/AC-006/P-007), and 1:N identify (AC-007/AC-008). It has no anti-spoofing in v1a (ASM-005).
 - **`storage-adapter-templates`** — per-UID template file store under AEAD (AC-009/AC-010/P-006). The
   encryption key is sealed by a dedicated TPM2 object created directly via `tpm2-tools`/`tss-esapi`, scoped
