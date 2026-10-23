@@ -79,8 +79,7 @@
 - Effort: medium
 - Notes: ideal crop centered with face height 55% of the frame; independent indicators, size within 13% of the ideal and center distance within 10% of the frame height, both required, size evaluated first; enrollment only, authentication untouched; the three values overridable by validated environment variables; the window's guide oval matches the ideal height.
 
-## T-071 — Original wording for the window and the CLI [pending]
-
+## T-071 — Original wording for the window and the CLI [done]
 - Refs: AC-060, ASM-022
 - Files: crates/openhello-gui-core/src/strings.rs, crates/openhello-gui-core/tests/strings.rs, crates/openhello-cli/src/lib.rs
 - Model: claude-sonnet-5

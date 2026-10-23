@@ -199,7 +199,7 @@ fn enroll(
     say: &mut dyn FnMut(String) -> Result<(), String>,
 ) -> Result<Outcome, String> {
     let handle = client.enroll_begin(uid)?;
-    say(format!("enrolling uid {uid}: look straight at the camera and hold still"))?;
+    say(ENROLL_INTRO.to_string())?;
     let mut last_line = String::new();
     for _ in 0..MAX_CAPTURES {
         let progress = client.enroll_capture(&handle)?;
@@ -222,21 +222,23 @@ fn enroll(
     Err(format!("enrollment abandoned after {MAX_CAPTURES} captures without enough frontal samples"))
 }
 
+const ENROLL_INTRO: &str = "Sit about 40 to 60 cm from the screen, face the camera and keep your face in the center of the frame";
+
 pub fn enroll_guidance(verdict: &str) -> &str {
     match verdict {
-        "accepted" | "too-soon" => "Keep looking directly at the camera",
-        "no-face" => "Face not detected: make sure your face is centered in the frame",
+        "accepted" | "too-soon" => "Hold still and look at the camera",
+        "no-face" => "No face found. Center your face in the oval",
         "move-left" => "Move a little to your left",
         "move-right" => "Move a little to your right",
         "move-up" => "Move up a little",
         "move-down" => "Move down a little",
-        "too-close" => "Too close: move a little farther away",
-        "too-far" => "Too far: move a bit closer",
-        "too-dark" => "Too dark: move closer to the camera or add some light",
-        "too-bright" => "Too bright: avoid direct sunlight or a strong light behind you",
-        "yaw-out-of-range" => "Keep looking forward, facing the camera",
-        "blurred" => "Hold still: the image is not sharp enough",
-        "occluded" => "Remove anything that may be blocking your face",
+        "too-close" => "Too close. Move back a little",
+        "too-far" => "Too far. Move a little closer",
+        "too-dark" => "Not enough light on your face",
+        "too-bright" => "Too much light. Avoid glare in front of or behind you",
+        "yaw-out-of-range" => "Face the camera straight on",
+        "blurred" => "Hold still. The image is blurry",
+        "occluded" => "Something is covering your face. Clear it from view",
         other => other,
     }
 }
@@ -447,6 +449,41 @@ mod tests {
         items.iter().map(|s| s.to_string()).collect()
     }
 
+    // @spec:AC-060
+    #[test]
+    fn enroll_prints_one_original_intro_line_before_capturing() {
+        let mut client = FakeClient { progress: vec![progress("failed", 0)], ..Default::default() };
+        let (_, output) = run_command(&mut client, Command::Enroll { uid: 1000 });
+        let intro = "Sit about 40 to 60 cm from the screen, face the camera and keep your face in the center of the frame";
+        assert_eq!(output.lines().next(), Some(intro));
+        assert_eq!(output.matches(intro).count(), 1);
+        assert!(!output.contains("look straight at the camera"));
+    }
+
+    // @spec:AC-060
+    #[test]
+    fn enroll_guidance_uses_the_approved_sentences() {
+        let deck = [
+            ("accepted", "Hold still and look at the camera"),
+            ("too-soon", "Hold still and look at the camera"),
+            ("no-face", "No face found. Center your face in the oval"),
+            ("move-left", "Move a little to your left"),
+            ("move-right", "Move a little to your right"),
+            ("move-up", "Move up a little"),
+            ("move-down", "Move down a little"),
+            ("too-close", "Too close. Move back a little"),
+            ("too-far", "Too far. Move a little closer"),
+            ("too-dark", "Not enough light on your face"),
+            ("too-bright", "Too much light. Avoid glare in front of or behind you"),
+            ("yaw-out-of-range", "Face the camera straight on"),
+            ("blurred", "Hold still. The image is blurry"),
+            ("occluded", "Something is covering your face. Clear it from view"),
+        ];
+        for (verdict, sentence) in deck {
+            assert_eq!(enroll_guidance(verdict), sentence, "{verdict}");
+        }
+    }
+
     #[test]
     fn enroll_captures_until_complete_then_commits() {
         let mut client = FakeClient { progress: vec![progress("in-progress", 2), progress("in-progress", 5), progress("complete", 6)], ..Default::default() };
@@ -466,7 +503,7 @@ mod tests {
         };
         let (_, output) = run_command(&mut client, Command::Enroll { uid: 1000 });
         assert_eq!(output.matches("Move a little to your left").count(), 1);
-        assert!(output.contains("Too far: move a bit closer") && output.contains("Face not detected"));
+        assert!(output.contains("Too far. Move a little closer") && output.contains("No face found"));
         let verdicts = ["move-right", "move-up", "move-down", "too-close", "yaw-out-of-range", "blurred", "occluded", "accepted", "too-dark", "too-bright"];
         assert!(verdicts.iter().all(|v| enroll_guidance(v) != *v));
     }

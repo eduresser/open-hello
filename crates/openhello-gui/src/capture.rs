@@ -84,7 +84,7 @@ mod tests {
     fn the_view_carries_the_sentence_the_n_of_6_text_and_the_accepted_state() {
         let strings = Strings::new(Language::English);
         let accepted = CaptureView::new(update("accepted", 2, None), &strings);
-        assert_eq!(accepted.guidance, "Keep looking directly at your camera.");
+        assert_eq!(accepted.guidance, "Hold still and look at the camera");
         assert_eq!(accepted.progress_text, "2 of 6");
         assert!(accepted.accepted && accepted.frame.is_none());
         let moving = CaptureView::new(update("move-left", 2, Some(Frame { width: 2, height: 1, pixels: vec![1, 2] })), &strings);
