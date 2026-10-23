@@ -12,8 +12,7 @@ impl Language {
     }
 
     pub fn from_env(get: impl Fn(&str) -> Option<String>) -> Self {
-        let locale = ["LC_ALL", "LC_MESSAGES", "LANG"].iter().filter_map(|name| get(name)).find(|value| !value.is_empty());
-        match locale {
+        match get("OPENHELLO_GUI_LANG") {
             Some(value) if value.to_ascii_lowercase().starts_with("pt") => Language::PortugueseBr,
             _ => Language::English,
         }

@@ -60,13 +60,13 @@ fn an_unknown_verdict_gets_a_neutral_sentence_and_never_the_raw_text() {
 
 // @spec:AC-060
 #[test]
-fn the_language_comes_from_lc_all_then_lc_messages_then_lang_with_english_as_default() {
-    assert_eq!(Language::from_env(lookup(&[("LANG", "pt_BR.UTF-8")])), Language::PortugueseBr);
-    assert_eq!(Language::from_env(lookup(&[("LANG", "en_US.UTF-8")])), Language::English);
-    assert_eq!(Language::from_env(lookup(&[("LC_ALL", "en_US.UTF-8"), ("LANG", "pt_BR.UTF-8")])), Language::English);
-    assert_eq!(Language::from_env(lookup(&[("LC_MESSAGES", "pt_PT"), ("LANG", "en_US")])), Language::PortugueseBr);
-    assert_eq!(Language::from_env(lookup(&[("LC_ALL", ""), ("LANG", "pt_BR")])), Language::PortugueseBr);
-    assert_eq!(Language::from_env(lookup(&[("LANG", "de_DE")])), Language::English);
+fn the_interface_is_english_unless_openhello_gui_lang_asks_for_portuguese() {
+    assert_eq!(Language::from_env(lookup(&[("LANG", "pt_BR.UTF-8")])), Language::English);
+    assert_eq!(Language::from_env(lookup(&[("LC_ALL", "pt_BR.UTF-8"), ("LC_MESSAGES", "pt_BR")])), Language::English);
+    assert_eq!(Language::from_env(lookup(&[("OPENHELLO_GUI_LANG", "pt-BR")])), Language::PortugueseBr);
+    assert_eq!(Language::from_env(lookup(&[("OPENHELLO_GUI_LANG", "PT_br.UTF-8")])), Language::PortugueseBr);
+    assert_eq!(Language::from_env(lookup(&[("OPENHELLO_GUI_LANG", "en"), ("LANG", "pt_BR")])), Language::English);
+    assert_eq!(Language::from_env(lookup(&[("OPENHELLO_GUI_LANG", "de")])), Language::English);
     assert_eq!(Language::from_env(lookup(&[])), Language::English);
 }
 

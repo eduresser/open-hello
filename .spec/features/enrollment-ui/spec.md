@@ -41,9 +41,9 @@ As a laptop owner, I want a step-by-step window that shows me the camera and tel
 - **When** frames arrive from the daemon
 - **Then** the window shows the live camera image, one guidance sentence for the latest verdict, and "n of 6" progress that grows with each accepted sample
 
-#### AC-060 — Every verdict has a sentence in English and Brazilian Portuguese
+#### AC-060 — Every verdict has a sentence in English, with Brazilian Portuguese available
 
-- **Given** the interface language is English or Brazilian Portuguese
+- **Given** the interface language is English (the default) or Brazilian Portuguese (chosen only with `OPENHELLO_GUI_LANG=pt-BR`; the system locale is ignored for now)
 - **When** the daemon reports any enrollment verdict (accepted, too-soon, no-face, move-left, move-right, move-up, move-down, too-close, too-far, too-dark, too-bright, yaw-out-of-range, blurred, occluded)
 - **Then** the capture screen shows the sentence for that verdict in the interface language, taken from the Windows Hello wording where one exists
 
@@ -118,7 +118,7 @@ As a laptop owner on any distribution and desktop, I want to find the app in the
 - "Improve recognition" (adding a second recognition profile): see Q-004.
 - A page inside KDE System Settings or GNOME Settings (an optional thin layer later).
 - Flatpak packaging, display-manager greeter, fingerprint, gaze or eyes-open checks.
-- Languages other than English and Brazilian Portuguese.
+- Languages other than English and Brazilian Portuguese, and following the system locale (English only for now; Portuguese is opt-in).
 
 ## Assumptions
 
