@@ -34,8 +34,7 @@
 - Files: crates/openhello-cli/src/lib.rs, crates/openhello-cli/src/main.rs, crates/openhello-cli/tests/end_to_end.rs, crates/openhello-cli/tests/provisioning_flow.rs
 - Notes: owner request 2026-10-22 after seeing `enroll` open the camera before any finger step. `enroll face` is the face only (a bare `enroll` is its alias); `enroll finger` runs the finger step alone and provisions the TPM key if the user has none. Follow the minimal-comments skill.
 
-## T-063 — Remove the fingerprint authentication path from openhellod [pending]
-
+## T-063 — Remove the fingerprint authentication path from openhellod [done]
 - Refs: US-023, AC-062, AC-055, AC-056, AC-058, AC-059
 - Files: crates/openhellod/src/core.rs, crates/openhellod/src/fingerprint.rs, crates/openhellod/src/main.rs, crates/openhellod/tests/fingerprint.rs, crates/openhellod/tests/fingerprint_enroll.rs, crates/openhellod/tests/fingerprint_purge.rs
 - Notes: owner decision 2026-10-22: open-hello manages fingers (enroll, status, purge) and the system's `pam_fprintd` authenticates them. A paused attempt is in `git stash list` ("T-063 WIP"): `git stash pop` restores it (removal in core.rs, verify half gone from fingerprint.rs with `FingerprintReader`/`FprintdReader` renames, main.rs wiring, the AC-062 tests); review it, finish it, run the tests. `Verify` must never call Claim or VerifyStart (AC-062). Face-only behaviour of `Verify` must stay exactly as before T-058. Follow the minimal-comments skill.

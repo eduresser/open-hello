@@ -1,14 +1,13 @@
+use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 
-use openhellod::fingerprint::*;
-use openhellod::logging::{Level, LogSink, Logger};
-use zbus::object_server::SignalEmitter;
+use openhellod::backends::*;
+use openhellod::core::{Biometrics, DEFAULT_TARGET_FAR};
+use openhellod::fingerprint::{FprintdBus, FprintdReader};
 use zbus::zvariant::OwnedObjectPath;
-use zbus::{interface, Connection, DBusError};
+use zbus::{interface, Connection};
 
 const DEVICE_PATH: &str = "/net/reactivated/Fprint/Device/0";
 const OWNER_UID: u32 = 1000;
@@ -39,389 +38,165 @@ impl Drop for PrivateBus {
     }
 }
 
-#[derive(DBusError, Debug)]
-#[zbus(prefix = "net.reactivated.Fprint.Error")]
-enum FprintError {
-    #[zbus(error)]
-    ZBus(zbus::Error),
-    NoSuchDevice(String),
-    NoEnrolledPrints(String),
-    PermissionDenied(String),
-}
+type Calls = Arc<Mutex<Vec<&'static str>>>;
 
-#[derive(Default)]
-struct Behaviour {
-    no_device: bool,
-    claim_denied: bool,
-    no_enrolled: bool,
-    script: Vec<(u64, &'static str, bool)>,
-}
-
-#[derive(Default)]
-struct Fake {
-    behaviour: Mutex<Behaviour>,
-    claims: Mutex<Vec<String>>,
-    finger_args: Mutex<Vec<String>>,
-    starts: AtomicUsize,
-    stops: AtomicUsize,
-    releases: AtomicUsize,
-    stopped: AtomicBool,
-    connection: Mutex<Option<Connection>>,
-}
-
-struct Manager(Arc<Fake>);
-struct Device(Arc<Fake>);
+struct Manager(Calls);
+struct Device(Calls);
 
 #[interface(name = "net.reactivated.Fprint.Manager")]
 impl Manager {
-    async fn get_default_device(&self) -> Result<OwnedObjectPath, FprintError> {
-        if self.0.behaviour.lock().unwrap().no_device {
-            return Err(FprintError::NoSuchDevice("no devices".into()));
-        }
-        Ok(OwnedObjectPath::try_from(DEVICE_PATH).unwrap())
+    async fn get_default_device(&self) -> OwnedObjectPath {
+        self.0.lock().unwrap().push("GetDefaultDevice");
+        OwnedObjectPath::try_from(DEVICE_PATH).unwrap()
     }
 }
 
 #[interface(name = "net.reactivated.Fprint.Device")]
 impl Device {
-    async fn claim(&self, username: String) -> Result<(), FprintError> {
-        if self.0.behaviour.lock().unwrap().claim_denied {
-            return Err(FprintError::PermissionDenied("denied".into()));
-        }
-        self.0.claims.lock().unwrap().push(username);
-        Ok(())
+    async fn claim(&self, _username: String) {
+        self.0.lock().unwrap().push("Claim");
     }
 
     async fn release(&self) {
-        self.0.releases.fetch_add(1, Ordering::SeqCst);
+        self.0.lock().unwrap().push("Release");
     }
 
-    async fn verify_start(&self, finger: String) -> Result<(), FprintError> {
-        self.0.finger_args.lock().unwrap().push(finger);
-        if self.0.behaviour.lock().unwrap().no_enrolled {
-            return Err(FprintError::NoEnrolledPrints("none".into()));
-        }
-        self.0.starts.fetch_add(1, Ordering::SeqCst);
-        self.0.stopped.store(false, Ordering::SeqCst);
-        let fake = self.0.clone();
-        let script = fake.behaviour.lock().unwrap().script.clone();
-        std::thread::spawn(move || {
-            for (delay_ms, status, done) in script {
-                std::thread::sleep(Duration::from_millis(delay_ms));
-                if fake.stopped.load(Ordering::SeqCst) {
-                    return;
-                }
-                let connection = fake.connection.lock().unwrap().clone().unwrap();
-                async_io::block_on(async {
-                    let iface = connection.object_server().interface::<_, Device>(DEVICE_PATH).await.unwrap();
-                    Device::verify_status(iface.signal_emitter(), status, done).await.unwrap();
-                });
-            }
-        });
-        Ok(())
+    async fn list_enrolled_fingers(&self, _username: String) -> Vec<String> {
+        self.0.lock().unwrap().push("ListEnrolledFingers");
+        vec!["right-index-finger".to_string()]
+    }
+
+    async fn verify_start(&self, _finger: String) {
+        self.0.lock().unwrap().push("VerifyStart");
     }
 
     async fn verify_stop(&self) {
-        self.0.stops.fetch_add(1, Ordering::SeqCst);
-        self.0.stopped.store(true, Ordering::SeqCst);
+        self.0.lock().unwrap().push("VerifyStop");
     }
 
-    #[zbus(signal)]
-    async fn verify_status(emitter: &SignalEmitter<'_>, result: &str, done: bool) -> zbus::Result<()>;
+    async fn enroll_start(&self, _finger: String) {
+        self.0.lock().unwrap().push("EnrollStart");
+    }
+
+    async fn enroll_stop(&self) {
+        self.0.lock().unwrap().push("EnrollStop");
+    }
+
+    async fn delete_enrolled_fingers2(&self) {
+        self.0.lock().unwrap().push("DeleteEnrolledFingers2");
+    }
+}
+
+struct Sensor;
+
+impl SensorBackend for Sensor {
+    fn capture(&mut self) -> Result<CapturedFrame, DaemonError> {
+        Ok(CapturedFrame { width: 1, height: 1, pixels: vec![0] })
+    }
+}
+
+struct Engine {
+    verdict: AuthVerdict,
+}
+
+impl EngineBackend for Engine {
+    fn enroll_begin(&mut self, _: u64) -> Result<u64, DaemonError> {
+        unreachable!()
+    }
+
+    fn enroll_submit(&mut self, _: u64, _: u64, _: &CapturedFrame) -> Result<EnrollProgress, DaemonError> {
+        unreachable!()
+    }
+
+    fn enroll_commit(&mut self, _: u64) -> Result<Vec<u8>, DaemonError> {
+        unreachable!()
+    }
+
+    fn enroll_discard(&mut self, _: u64) -> Result<(), DaemonError> {
+        unreachable!()
+    }
+
+    fn auth_begin(&mut self, _: &[(u32, Vec<u8>)], _: f64, _: u32) -> Result<u64, DaemonError> {
+        Ok(1)
+    }
+
+    fn auth_submit(&mut self, _: u64, _: &CapturedFrame) -> Result<AuthProgress, DaemonError> {
+        Ok(AuthProgress { verdict: self.verdict, scored_frames: 1 })
+    }
+
+    fn auth_end(&mut self, _: u64) -> Result<(), DaemonError> {
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct Storage(BTreeMap<u32, Vec<u8>>);
+
+impl StorageBackend for Storage {
+    fn put(&mut self, uid: u32, template: &[u8]) -> Result<(), DaemonError> {
+        self.0.insert(uid, template.to_vec());
+        Ok(())
+    }
+
+    fn get(&mut self, uid: u32) -> Result<Vec<u8>, DaemonError> {
+        self.0.get(&uid).cloned().ok_or(DaemonError::NotFound)
+    }
+
+    fn list_uids(&mut self) -> Result<Vec<u32>, DaemonError> {
+        Ok(self.0.keys().copied().collect())
+    }
+
+    fn purge(&mut self, uid: u32) -> Result<(), DaemonError> {
+        self.0.remove(&uid);
+        Ok(())
+    }
 }
 
 struct Rig {
     _bus: PrivateBus,
-    fake: Arc<Fake>,
-    matcher: FprintdMatcher,
-    sink: Arc<CaptureSink>,
-    _connection: Connection,
+    _fprintd: Connection,
+    calls: Calls,
+    core: Biometrics,
 }
 
-#[derive(Default)]
-struct CaptureSink(Mutex<Vec<String>>);
-
-impl LogSink for CaptureSink {
-    fn write_line(&self, line: &str) {
-        self.0.lock().unwrap().push(line.to_string());
-    }
-}
-
-fn matcher_for(address: &str, sink: &Arc<CaptureSink>) -> FprintdMatcher {
-    FprintdMatcher::with_user_names(
-        FprintdBus::Address(address.to_string()),
-        Logger::new(Level::Debug, sink.clone()),
-        Box::new(|uid| (uid == OWNER_UID).then(|| OWNER_NAME.to_string())),
-    )
-}
-
-fn rig(behaviour: Behaviour) -> Rig {
+fn rig(verdict: AuthVerdict) -> Rig {
     let bus = PrivateBus::start();
-    let fake = Arc::new(Fake::default());
-    *fake.behaviour.lock().unwrap() = behaviour;
-    let connection = async_io::block_on(async {
+    let calls = Calls::default();
+    let fprintd = async_io::block_on(async {
         zbus::connection::Builder::address(bus.address.as_str())
             .unwrap()
             .name("net.reactivated.Fprint")
             .unwrap()
-            .serve_at("/net/reactivated/Fprint/Manager", Manager(fake.clone()))
+            .serve_at("/net/reactivated/Fprint/Manager", Manager(calls.clone()))
             .unwrap()
-            .serve_at(DEVICE_PATH, Device(fake.clone()))
+            .serve_at(DEVICE_PATH, Device(calls.clone()))
             .unwrap()
             .build()
             .await
             .unwrap()
     });
-    *fake.connection.lock().unwrap() = Some(connection.clone());
-    let sink = Arc::new(CaptureSink::default());
-    let matcher = matcher_for(&bus.address, &sink);
-    Rig { _bus: bus, fake, matcher, sink, _connection: connection }
-}
-
-fn scripted(script: Vec<(u64, &'static str, bool)>) -> Behaviour {
-    Behaviour { script, ..Behaviour::default() }
-}
-
-fn never() -> bool {
-    false
-}
-
-fn assert_released_once(fake: &Fake) {
-    assert_eq!(fake.releases.load(Ordering::SeqCst), 1, "Release must be called exactly once");
-}
-
-fn assert_clean_exit(fake: &Fake) {
-    assert_eq!(fake.stops.load(Ordering::SeqCst), 1, "VerifyStop must be called exactly once");
-    assert_released_once(fake);
-}
-
-// @spec:AC-048
-#[test]
-fn a_match_from_the_reader_is_reported_for_the_claimed_user() {
-    let mut rig = rig(scripted(vec![(20, "verify-match", true)]));
-    assert_eq!(rig.matcher.verify(OWNER_UID, &never), FingerprintResult::Match);
-    assert_eq!(*rig.fake.claims.lock().unwrap(), vec![OWNER_NAME.to_string()]);
-    assert_eq!(*rig.fake.finger_args.lock().unwrap(), vec!["any".to_string()]);
-    assert_clean_exit(&rig.fake);
-    let lines = rig.sink.0.lock().unwrap().join("\n");
-    assert!(lines.contains("fingerprint-verify uid=1000 outcome=match retries=0"), "{lines}");
-}
-
-// @spec:AC-048
-#[test]
-fn an_unknown_uid_is_never_claimed_and_ends_the_fingerprint_side() {
-    let mut rig = rig(scripted(vec![(20, "verify-match", true)]));
-    assert_eq!(rig.matcher.verify(4242, &never), FingerprintResult::Unavailable(Unavailability::Unknown));
-    assert!(rig.fake.claims.lock().unwrap().is_empty());
-    assert_eq!(rig.fake.starts.load(Ordering::SeqCst), 0);
-}
-
-// @spec:AC-048
-#[test]
-fn a_retry_status_is_not_an_attempt_and_the_wait_continues_to_a_match() {
-    let mut rig = rig(scripted(vec![
-        (10, "verify-swipe-too-short", false),
-        (10, "verify-remove-and-retry", false),
-        (10, "verify-retry-scan", false),
-        (10, "verify-finger-not-centered", false),
-        (10, "verify-match", true),
-    ]));
-    assert_eq!(rig.matcher.verify(OWNER_UID, &never), FingerprintResult::Match);
-    assert_clean_exit(&rig.fake);
-    let lines = rig.sink.0.lock().unwrap().join("\n");
-    assert!(lines.contains("outcome=match retries=4"), "{lines}");
-}
-
-// @spec:AC-049
-#[test]
-fn three_no_match_results_are_three_attempts_and_then_a_refusal() {
-    let mut rig = rig(scripted(vec![(10, "verify-no-match", true)]));
-    let decision = verify_default_attempts(&mut rig.matcher, OWNER_UID, &never);
-    assert_eq!(decision, FingerprintDecision::Refused);
-    assert_eq!(rig.fake.starts.load(Ordering::SeqCst), 3);
-    assert_eq!(rig.fake.stops.load(Ordering::SeqCst), 3);
-    assert_eq!(rig.fake.releases.load(Ordering::SeqCst), 3);
-}
-
-// @spec:AC-049
-#[test]
-fn one_no_match_is_reported_as_an_attempt_not_as_a_match() {
-    let mut rig = rig(scripted(vec![(10, "verify-no-match", true)]));
-    assert_eq!(rig.matcher.verify(OWNER_UID, &never), FingerprintResult::NoMatch);
-    assert_clean_exit(&rig.fake);
-}
-
-// @spec:AC-049
-#[test]
-fn a_match_on_the_third_attempt_is_accepted_and_stops_the_count() {
-    struct Sequence(Vec<FingerprintResult>, usize);
-    impl FingerprintMatcher for Sequence {
-        fn verify(&mut self, _: u32, _: openhellod::core::Cancel) -> FingerprintResult {
-            self.1 += 1;
-            self.0.remove(0)
-        }
-        fn delete_enrolled(&mut self, _: u32) -> FingerDeletion {
-            FingerDeletion::NothingToDelete
-        }
-    }
-    let mut sequence = Sequence(
-        vec![FingerprintResult::NoMatch, FingerprintResult::NoMatch, FingerprintResult::Match, FingerprintResult::NoMatch],
-        0,
+    let reader = FprintdReader::with_user_names(
+        FprintdBus::Address(bus.address.clone()),
+        Box::new(|uid| (uid == OWNER_UID).then(|| OWNER_NAME.to_string())),
     );
-    assert_eq!(verify_default_attempts(&mut sequence, OWNER_UID, &never), FingerprintDecision::Matched);
-    assert_eq!(sequence.1, 3);
+    let storage = Storage(BTreeMap::from([(OWNER_UID, b"face-template".to_vec())]));
+    let core = Biometrics::new(Box::new(Sensor), Box::new(Engine { verdict }), Box::new(storage), DEFAULT_TARGET_FAR)
+        .with_fingerprint_reader(Some(Box::new(reader)));
+    Rig { _bus: bus, _fprintd: fprintd, calls, core }
 }
 
-// @spec:AC-049
+// @spec:AC-062
 #[test]
-fn zero_allowed_attempts_refuse_without_touching_the_reader() {
-    struct AlwaysMatch;
-    impl FingerprintMatcher for AlwaysMatch {
-        fn verify(&mut self, _: u32, _: openhellod::core::Cancel) -> FingerprintResult {
-            FingerprintResult::Match
-        }
-        fn delete_enrolled(&mut self, _: u32) -> FingerDeletion {
-            FingerDeletion::NothingToDelete
-        }
-    }
-    assert_eq!(verify_with_attempts(&mut AlwaysMatch, OWNER_UID, 0, &never), FingerprintDecision::Refused);
+fn an_accepted_face_verify_makes_no_call_to_fprintd() {
+    let mut rig = rig(AuthVerdict::Accepted(OWNER_UID));
+    assert!(rig.core.verify(OWNER_UID).unwrap());
+    assert_eq!(*rig.calls.lock().unwrap(), Vec::<&str>::new());
 }
 
-// @spec:AC-049
+// @spec:AC-062
 #[test]
-fn attempts_stop_at_cancellation_and_at_infrastructure_errors() {
-    struct Fixed(FingerprintResult);
-    impl FingerprintMatcher for Fixed {
-        fn verify(&mut self, _: u32, _: openhellod::core::Cancel) -> FingerprintResult {
-            self.0
-        }
-        fn delete_enrolled(&mut self, _: u32) -> FingerDeletion {
-            FingerDeletion::NothingToDelete
-        }
-    }
-    assert_eq!(
-        verify_default_attempts(&mut Fixed(FingerprintResult::Cancelled), OWNER_UID, &never),
-        FingerprintDecision::Cancelled
-    );
-    assert_eq!(
-        verify_default_attempts(&mut Fixed(FingerprintResult::Unavailable(Unavailability::Disconnected)), OWNER_UID, &never),
-        FingerprintDecision::Unavailable(Unavailability::Disconnected)
-    );
-}
-
-// @spec:AC-050
-#[test]
-fn an_absent_fprintd_ends_the_fingerprint_side_quickly() {
-    let bus = PrivateBus::start();
-    let sink = Arc::new(CaptureSink::default());
-    let mut matcher = matcher_for(&bus.address, &sink);
-    let started = Instant::now();
-    assert_eq!(matcher.verify(OWNER_UID, &never), FingerprintResult::Unavailable(Unavailability::ServiceAbsent));
-    assert!(started.elapsed() < Duration::from_secs(2), "took {:?}", started.elapsed());
-}
-
-// @spec:AC-050
-#[test]
-fn an_unreachable_bus_ends_the_fingerprint_side_quickly() {
-    let sink = Arc::new(CaptureSink::default());
-    let mut matcher = matcher_for("unix:path=/nonexistent/openhello-fprint-bus", &sink);
-    let started = Instant::now();
-    assert_eq!(matcher.verify(OWNER_UID, &never), FingerprintResult::Unavailable(Unavailability::ServiceAbsent));
-    assert!(started.elapsed() < Duration::from_secs(2));
-}
-
-// @spec:AC-050
-#[test]
-fn a_missing_reader_ends_the_fingerprint_side_quickly() {
-    let mut rig = rig(Behaviour { no_device: true, ..Behaviour::default() });
-    let started = Instant::now();
-    assert_eq!(rig.matcher.verify(OWNER_UID, &never), FingerprintResult::Unavailable(Unavailability::NoDevice));
-    assert!(started.elapsed() < Duration::from_secs(2));
-    assert_eq!(rig.fake.releases.load(Ordering::SeqCst), 0);
-}
-
-// @spec:AC-050
-#[test]
-fn a_user_without_an_enrolled_finger_ends_the_fingerprint_side_and_releases_the_reader() {
-    let mut rig = rig(Behaviour { no_enrolled: true, ..Behaviour::default() });
-    let started = Instant::now();
-    assert_eq!(rig.matcher.verify(OWNER_UID, &never), FingerprintResult::Unavailable(Unavailability::NoEnrolledFinger));
-    assert!(started.elapsed() < Duration::from_secs(2));
-    assert_eq!(rig.fake.stops.load(Ordering::SeqCst), 0);
-    assert_released_once(&rig.fake);
-}
-
-// @spec:AC-050
-#[test]
-fn a_refused_claim_ends_the_fingerprint_side_without_starting_a_scan() {
-    let mut rig = rig(Behaviour { claim_denied: true, ..Behaviour::default() });
-    assert_eq!(rig.matcher.verify(OWNER_UID, &never), FingerprintResult::Unavailable(Unavailability::Unknown));
-    assert_eq!(rig.fake.starts.load(Ordering::SeqCst), 0);
-    assert_eq!(rig.fake.releases.load(Ordering::SeqCst), 0);
-}
-
-// @spec:AC-051
-#[test]
-fn reader_errors_and_disconnects_are_never_a_match() {
-    for (status, expected) in [
-        ("verify-disconnected", Unavailability::Disconnected),
-        ("verify-unknown-error", Unavailability::Unknown),
-        ("something-new", Unavailability::Unknown),
-    ] {
-        let mut rig = rig(scripted(vec![(10, status, true)]));
-        assert_eq!(rig.matcher.verify(OWNER_UID, &never), FingerprintResult::Unavailable(expected), "{status}");
-        assert_clean_exit(&rig.fake);
-    }
-}
-
-// @spec:AC-051
-#[test]
-fn retries_alone_never_produce_a_match() {
-    let mut rig = rig(scripted(vec![(10, "verify-retry-scan", false), (10, "verify-swipe-too-short", false)]));
-    let polls = AtomicUsize::new(0);
-    let cancel_after_a_while = || polls.fetch_add(1, Ordering::SeqCst) > 12;
-    assert_eq!(rig.matcher.verify(OWNER_UID, &cancel_after_a_while), FingerprintResult::Cancelled);
-    assert_clean_exit(&rig.fake);
-}
-
-// @spec:AC-051
-#[test]
-fn a_match_arriving_after_cancellation_is_not_reported() {
-    let mut rig = rig(scripted(vec![(400, "verify-match", true)]));
-    let began = Instant::now();
-    let cancel_at_100ms = || began.elapsed() > Duration::from_millis(100);
-    assert_eq!(rig.matcher.verify(OWNER_UID, &cancel_at_100ms), FingerprintResult::Cancelled);
-    assert_clean_exit(&rig.fake);
-    std::thread::sleep(Duration::from_millis(600));
-    assert_clean_exit(&rig.fake);
-}
-
-// @spec:AC-051
-#[test]
-fn a_match_that_lands_together_with_cancellation_is_not_reported() {
-    let mut rig = rig(scripted(vec![(150, "verify-match", true)]));
-    let began = Instant::now();
-    let cancel_at_140ms = || began.elapsed() > Duration::from_millis(140);
-    assert_eq!(rig.matcher.verify(OWNER_UID, &cancel_at_140ms), FingerprintResult::Cancelled);
-    assert_clean_exit(&rig.fake);
-}
-
-// @spec:AC-051
-#[test]
-fn cancellation_is_prompt_and_releases_the_reader() {
-    let mut rig = rig(scripted(vec![]));
-    let began = Instant::now();
-    let cancel_at_100ms = || began.elapsed() > Duration::from_millis(100);
-    assert_eq!(rig.matcher.verify(OWNER_UID, &cancel_at_100ms), FingerprintResult::Cancelled);
-    assert!(began.elapsed() < Duration::from_secs(1));
-    assert_clean_exit(&rig.fake);
-}
-
-// @spec:AC-051
-#[test]
-fn logs_carry_only_uid_outcome_and_counts() {
-    let mut rig = rig(scripted(vec![(10, "verify-no-match", true)]));
-    rig.matcher.verify(OWNER_UID, &never);
-    let lines = rig.sink.0.lock().unwrap().clone();
-    assert_eq!(lines, vec!["openhellod INFO fingerprint-verify uid=1000 outcome=no-match retries=0"]);
+fn a_rejected_face_verify_makes_no_call_to_fprintd_and_stays_rejected() {
+    let mut rig = rig(AuthVerdict::Rejected);
+    assert!(!rig.core.verify(OWNER_UID).unwrap());
+    assert_eq!(*rig.calls.lock().unwrap(), Vec::<&str>::new());
 }

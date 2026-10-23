@@ -62,7 +62,6 @@ struct Fake {
     no_device: bool,
     delete_denied: bool,
     marker_data: bool,
-    verify_script: Mutex<Vec<&'static str>>,
     enroll_script: Mutex<Vec<&'static str>>,
     enrolled: Mutex<Vec<String>>,
     claims: Mutex<Vec<String>>,
@@ -86,7 +85,7 @@ impl Manager {
 }
 
 impl Device {
-    fn emit_later(fake: Arc<Fake>, script: Vec<&'static str>, enroll: bool) {
+    fn emit_later(fake: Arc<Fake>, script: Vec<&'static str>) {
         std::thread::spawn(move || {
             for status in script {
                 std::thread::sleep(Duration::from_millis(20));
@@ -96,11 +95,7 @@ impl Device {
                 let connection = fake.connection.lock().unwrap().clone().unwrap();
                 async_io::block_on(async {
                     let iface = connection.object_server().interface::<_, Device>(DEVICE_PATH).await.unwrap();
-                    if enroll {
-                        Device::enroll_status(iface.signal_emitter(), status, false).await.unwrap();
-                    } else {
-                        Device::verify_status(iface.signal_emitter(), status, false).await.unwrap();
-                    }
+                    Device::enroll_status(iface.signal_emitter(), status, false).await.unwrap();
                 });
             }
         });
@@ -147,29 +142,15 @@ impl Device {
         Ok(())
     }
 
-    async fn verify_start(&self, _finger: String) -> Result<(), FprintError> {
-        self.0.stopped.store(false, Ordering::SeqCst);
-        let script = self.0.verify_script.lock().unwrap().clone();
-        Device::emit_later(self.0.clone(), script, false);
-        Ok(())
-    }
-
-    async fn verify_stop(&self) {
-        self.0.stopped.store(true, Ordering::SeqCst);
-    }
-
     async fn enroll_start(&self, _finger: String) {
         self.0.stopped.store(false, Ordering::SeqCst);
         let script = self.0.enroll_script.lock().unwrap().clone();
-        Device::emit_later(self.0.clone(), script, true);
+        Device::emit_later(self.0.clone(), script);
     }
 
     async fn enroll_stop(&self) {
         self.0.stopped.store(true, Ordering::SeqCst);
     }
-
-    #[zbus(signal)]
-    async fn verify_status(emitter: &SignalEmitter<'_>, result: &str, done: bool) -> zbus::Result<()>;
 
     #[zbus(signal)]
     async fn enroll_status(emitter: &SignalEmitter<'_>, result: &str, done: bool) -> zbus::Result<()>;
@@ -287,7 +268,7 @@ fn serve(bus: &PrivateBus, name: &str, build: impl FnOnce(zbus::connection::Buil
     async_io::block_on(async { build(builder).build().await.unwrap() })
 }
 
-fn rig(fake: Fake, key_destroys: bool, storage: Storage, with_matcher: bool) -> Rig {
+fn rig(fake: Fake, key_destroys: bool, storage: Storage, with_reader: bool) -> Rig {
     let fprint = PrivateBus::start();
     let keyd = PrivateBus::start();
     let fake = Arc::new(fake);
@@ -305,12 +286,12 @@ fn rig(fake: Fake, key_destroys: bool, storage: Storage, with_matcher: bool) -> 
     });
     let sink = Arc::new(CaptureSink::default());
     let logger = Logger::new(Level::Trace, sink.clone());
-    let matcher = FprintdMatcher::with_user_names(FprintdBus::Address(fprint.address.clone()), logger.clone(), resolver());
+    let reader = FprintdReader::with_user_names(FprintdBus::Address(fprint.address.clone()), resolver());
     let mut core = Biometrics::new(Box::new(Sensor), Box::new(Engine), Box::new(storage.clone()), DEFAULT_TARGET_FAR)
         .with_logger(logger)
         .with_keyd_client(Some(KeydClient::new(KeydBus::Address(keyd.address.clone()))));
-    if with_matcher {
-        core = core.with_fingerprint(Some(Box::new(matcher)));
+    if with_reader {
+        core = core.with_fingerprint_reader(Some(Box::new(reader)));
     }
     let fprint_address = fprint.address.clone();
     Rig { _fprint: fprint, _keyd: keyd, _connections: vec![fprintd, keyd_connection], fake, key_purges, storage, sink, fprint_address, core }
@@ -400,20 +381,16 @@ fn a_machine_without_a_reader_or_without_fprintd_purges_successfully() {
 
     let mut absent = rig(enrolled(&[INDEX]), true, stored(), false);
     let empty_bus = PrivateBus::start();
-    let mut matcher = FprintdMatcher::with_user_names(
-        FprintdBus::Address(empty_bus.address.clone()),
-        Logger::new(Level::Trace, absent.sink.clone()),
-        resolver(),
-    );
-    assert_eq!(matcher.delete_enrolled(OWNER_UID), FingerDeletion::NothingToDelete);
-    absent.core = absent.core.with_fingerprint(Some(Box::new(matcher)));
+    let mut reader = FprintdReader::with_user_names(FprintdBus::Address(empty_bus.address.clone()), resolver());
+    assert_eq!(reader.delete_enrolled(OWNER_UID), FingerDeletion::NothingToDelete);
+    absent.core = absent.core.with_fingerprint_reader(Some(Box::new(reader)));
     absent.core.purge(OWNER_UID).unwrap();
     assert!(purge_line(&absent).contains("fingers=none"));
 }
 
 // @spec:AC-058
 #[test]
-fn without_a_fingerprint_matcher_purge_behaves_as_before() {
+fn without_a_fingerprint_reader_purge_behaves_as_before() {
     let mut rig = rig(enrolled(&[INDEX]), true, stored(), false);
     rig.core.purge(OWNER_UID).unwrap();
     assert!(rig.storage.files.lock().unwrap().is_empty());
@@ -426,18 +403,14 @@ fn without_a_fingerprint_matcher_purge_behaves_as_before() {
 // @spec:AC-059
 // @principle:P-010
 #[test]
-fn fingerprint_request_enrollment_and_purge_never_log_fprintd_print_data() {
+fn fingerprint_enrollment_and_purge_never_log_fprintd_print_data() {
     let fake = Fake {
         marker_data: true,
         delete_denied: true,
-        verify_script: Mutex::new(vec![MARKER_STATUS, "verify-retry-scan", "verify-no-match", MARKER_STATUS]),
         enroll_script: Mutex::new(vec!["enroll-stage-passed", "enroll-retry-scan", MARKER_STATUS]),
         ..enrolled(&[INDEX])
     };
     let mut rig = rig(fake, false, stored(), true);
-
-    assert!(!rig.core.verify(OWNER_UID).unwrap());
-    assert!(!rig.core.verify(4242).unwrap());
 
     let enroller = FprintdEnroller::with_user_names(
         FprintdBus::Address(rig.fprint_address.clone()),
@@ -455,7 +428,7 @@ fn fingerprint_request_enrollment_and_purge_never_log_fprintd_print_data() {
     assert_incomplete(rig.core.purge(OWNER_UID));
 
     let lines = rig.sink.0.lock().unwrap();
-    for event in ["fingerprint-verify", "fingerprint-reader-status", "fingerprint-enroll-begin", "fingerprint-enroll ", "purge"] {
+    for event in ["fingerprint-reader-status", "fingerprint-enroll-begin", "fingerprint-enroll ", "purge"] {
         assert!(lines.iter().any(|line| line.contains(event)), "missing {event} in {lines:#?}");
     }
     for forbidden in [MARKER, "PRINT-MARKER", MARKER_STATUS, MARKER_HEX, "9f3a"] {
@@ -463,4 +436,4 @@ fn fingerprint_request_enrollment_and_purge_never_log_fprintd_print_data() {
     }
 }
 
-const MARKER_STATUS: &str = "verify-9f3a7c11d0e4-marker";
+const MARKER_STATUS: &str = "enroll-9f3a7c11d0e4-marker";
