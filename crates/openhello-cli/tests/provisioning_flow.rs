@@ -2,6 +2,7 @@
 mod support;
 
 use std::io::{BufRead, BufReader};
+use std::path::Path;
 use std::process::{Child, Command as Process, Stdio};
 use std::sync::Arc;
 
@@ -169,6 +170,7 @@ fn enroll_provisions_the_real_keyd_and_set_pin_unlocks_with_the_new_pin() {
             keys: &mut keys,
             pins: &mut typed,
             answers: &mut NoAnswers,
+            pam_root: Path::new("/nonexistent-pam-root"),
         };
         let outcome = execute(&mut services, command, &mut out);
         (outcome, String::from_utf8(out).unwrap())
@@ -206,6 +208,7 @@ fn enroll_reports_a_provision_failure_when_the_keyd_is_not_on_the_bus() {
         keys: &mut keys,
         pins: &mut typed,
         answers: &mut NoAnswers,
+        pam_root: Path::new("/nonexistent-pam-root"),
     };
     let outcome = execute(
         &mut services,
@@ -237,6 +240,7 @@ fn provision_command_creates_the_key_for_an_enrolled_user_and_refuses_a_second_r
             keys: &mut keys,
             pins: &mut typed,
             answers: &mut NoAnswers,
+            pam_root: Path::new("/nonexistent-pam-root"),
         };
         let outcome = execute(&mut services, Command::Provision { uid }, &mut out);
         (outcome, String::from_utf8(out).unwrap())
@@ -285,6 +289,7 @@ fn enroll_finger_provisions_the_real_keyd_for_a_user_without_a_face_and_a_second
             keys: &mut keys,
             pins: &mut typed,
             answers: &mut Replies(vec!["", "n"]),
+            pam_root: Path::new("/nonexistent-pam-root"),
         };
         let outcome = execute(&mut services, Command::EnrollFinger { uid }, &mut out);
         (outcome, String::from_utf8(out).unwrap())

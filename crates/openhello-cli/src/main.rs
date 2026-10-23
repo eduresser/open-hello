@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::process::ExitCode;
 
 use openhello_cli::dbus_client::DbusClient;
@@ -38,6 +39,7 @@ fn main() -> ExitCode {
         keys: &mut keys,
         pins: &mut TerminalPins,
         answers: &mut TerminalAnswers,
+        pam_root: Path::new("/"),
     };
     let outcome = execute(&mut services, invocation.command, &mut std::io::stdout());
     if let Outcome::Failed(problem) | Outcome::ProvisionFailed(problem) = &outcome {

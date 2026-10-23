@@ -1,4 +1,5 @@
 use std::io::{BufRead, BufReader};
+use std::path::Path;
 use std::process::{Child, Command as Process, Stdio};
 use std::sync::Arc;
 
@@ -150,6 +151,8 @@ fn serve_with(bus: &PrivateBus, enroller: Option<Arc<dyn FingerEnroller>>) {
     wait.recv_timeout(std::time::Duration::from_secs(10)).expect("service did not start");
 }
 
+const NO_PAM_ROOT: &str = "/nonexistent-pam-root";
+
 struct NoKeys;
 
 impl KeyClient for NoKeys {
@@ -180,7 +183,7 @@ impl Answers for NoAnswers {
 
 fn run_on(client: &mut DbusClient, command: Command) -> (Outcome, String) {
     let mut out = Vec::new();
-    let mut services = Services { biometrics: client, keys: &mut NoKeys, pins: &mut NoPins, answers: &mut NoAnswers };
+    let mut services = Services { biometrics: client, keys: &mut NoKeys, pins: &mut NoPins, answers: &mut NoAnswers, pam_root: Path::new(NO_PAM_ROOT) };
     let outcome = execute(&mut services, command, &mut out);
     (outcome, String::from_utf8(out).unwrap())
 }
@@ -263,8 +266,12 @@ impl Answers for Replies {
 }
 
 fn run_answering(client: &mut DbusClient, command: Command, replies: Vec<&'static str>) -> (Outcome, String) {
+    run_answering_in(client, command, replies, Path::new(NO_PAM_ROOT))
+}
+
+fn run_answering_in(client: &mut DbusClient, command: Command, replies: Vec<&'static str>, pam_root: &Path) -> (Outcome, String) {
     let mut out = Vec::new();
-    let mut services = Services { biometrics: client, keys: &mut NoKeys, pins: &mut NoPins, answers: &mut Replies(replies) };
+    let mut services = Services { biometrics: client, keys: &mut NoKeys, pins: &mut NoPins, answers: &mut Replies(replies), pam_root };
     let outcome = execute(&mut services, command, &mut out);
     (outcome, String::from_utf8(out).unwrap())
 }
@@ -304,4 +311,24 @@ fn cli_without_a_reader_says_so_in_one_line_and_enrolls_nothing_through_the_real
     assert_eq!(output.lines().count(), 1, "{output}");
     assert!(output.contains("no fingerprint reader was found"));
     assert_eq!(run_answering(&mut client, Command::Identify, vec![]).0, Outcome::Rejected);
+}
+
+// @spec:AC-073
+#[test]
+fn cli_enrolling_a_finger_through_the_real_dbus_interface_reports_the_fingerprint_login_and_leaves_the_pam_files_alone() {
+    let bus = PrivateBus::start();
+    serve_with(&bus, Some(Arc::new(Reader::default())));
+    let mut client = DbusClient::on_address(&bus.address).unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let etc = root.path().join("etc/pam.d");
+    std::fs::create_dir_all(&etc).unwrap();
+    std::fs::write(etc.join("sudo"), "#%PAM-1.0\n@include base-auth\n").unwrap();
+    std::fs::write(etc.join("base-auth"), "auth sufficient pam_fprintd.so\nauth required pam_unix.so\n").unwrap();
+    let before = (std::fs::read(etc.join("sudo")).unwrap(), std::fs::read(etc.join("base-auth")).unwrap());
+
+    let (outcome, output) = run_answering_in(&mut client, Command::EnrollFinger { uid: 1000 }, vec!["", "n"], root.path());
+    assert_eq!(outcome, Outcome::Success, "{output}");
+    assert_eq!(output.lines().filter(|line| line.contains("fingerprint login")).count(), 1, "{output}");
+    assert!(output.contains("the system's fingerprint login is on"), "{output}");
+    assert_eq!(before, (std::fs::read(etc.join("sudo")).unwrap(), std::fs::read(etc.join("base-auth")).unwrap()));
 }

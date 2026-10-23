@@ -1,4 +1,7 @@
 use std::io::Write;
+use std::path::Path;
+
+use pam_enable::{fingerprint_login, FingerprintLogin};
 
 pub mod dbus_client;
 pub mod keyd_client;
@@ -150,6 +153,7 @@ pub struct Services<'a> {
     pub keys: &'a mut dyn KeyClient,
     pub pins: &'a mut dyn PinPrompt,
     pub answers: &'a mut dyn Answers,
+    pub pam_root: &'a Path,
 }
 
 pub fn execute(services: &mut Services, command: Command, out: &mut dyn Write) -> Outcome {
@@ -160,11 +164,11 @@ pub fn execute(services: &mut Services, command: Command, out: &mut dyn Write) -
 }
 
 fn run(services: &mut Services, command: Command, out: &mut dyn Write) -> Result<Outcome, String> {
-    let Services { biometrics: client, keys, pins, answers } = services;
+    let Services { biometrics: client, keys, pins, answers, pam_root } = services;
     let mut say = |line: String| writeln!(out, "{line}").map_err(|e| format!("cannot write output: {e}"));
     match command {
         Command::Enroll { uid } => enroll(*client, *keys, uid, &mut say),
-        Command::EnrollFinger { uid } => enroll_finger_command(*client, *keys, *answers, uid, &mut say),
+        Command::EnrollFinger { uid } => enroll_finger_command(*client, *keys, *answers, pam_root, uid, &mut say),
         Command::Verify { uid } => {
             if client.verify(uid)? {
                 say(format!("verified uid {uid}"))?;
@@ -257,6 +261,7 @@ fn enroll_finger_command(
     client: &mut dyn BiometricsClient,
     keys: &mut dyn KeyClient,
     answers: &mut dyn Answers,
+    pam_root: &Path,
     uid: u32,
     say: Say,
 ) -> Result<Outcome, String> {
@@ -267,6 +272,7 @@ fn enroll_finger_command(
     }
     let mut enrolled = reader.enrolled;
     let mut first = true;
+    let mut added = 0;
     for _ in 0..MAX_FINGER_OFFERS {
         let remaining: Vec<&str> = FINGERS.iter().copied().filter(|finger| !enrolled.iter().any(|done| done == finger)).collect();
         if remaining.is_empty() {
@@ -279,15 +285,27 @@ fn enroll_finger_command(
         let Some(finger) = choose_finger(answers, &remaining, say)? else { break };
         if enroll_finger(client, uid, finger, say)? {
             enrolled.push(finger.to_string());
+            added += 1;
             first = false;
         }
     }
     if enrolled.is_empty() {
         return Ok(Outcome::Success);
     }
+    if added > 0 {
+        say(fingerprint_login_line(fingerprint_login(pam_root)).to_string())?;
+    }
     match provision(keys, uid, &finger_failure(uid), say) {
         Ok(Outcome::ProvisionFailed(failure)) if failure == ALREADY_PROVISIONED => Ok(Outcome::Success),
         other => other,
+    }
+}
+
+fn fingerprint_login_line(state: FingerprintLogin) -> &'static str {
+    match state {
+        FingerprintLogin::On => "the system's fingerprint login is on: your enrolled finger can be used where the system asks for it",
+        FingerprintLogin::Off => "the system's fingerprint login is not on, so your finger is not asked for yet; an administrator switches it on with `sudo openhello-cli pam enable`",
+        FingerprintLogin::Unknown => "could not check whether the system's fingerprint login is on; an administrator can switch it on with `sudo openhello-cli pam enable`",
     }
 }
 
@@ -555,9 +573,15 @@ mod tests {
         run_asked(client, keys, pins, &mut Replies(vec![], vec![]), command)
     }
 
+    const NO_PAM_ROOT: &str = "/nonexistent-pam-root";
+
     fn run_asked(client: &mut FakeClient, keys: &mut FakeKeys, pins: &mut TypedPins, answers: &mut Replies, command: Command) -> (Outcome, String) {
+        run_asked_in(Path::new(NO_PAM_ROOT), client, keys, pins, answers, command)
+    }
+
+    fn run_asked_in(pam_root: &Path, client: &mut FakeClient, keys: &mut FakeKeys, pins: &mut TypedPins, answers: &mut Replies, command: Command) -> (Outcome, String) {
         let mut out = Vec::new();
-        let mut services = Services { biometrics: client, keys, pins, answers };
+        let mut services = Services { biometrics: client, keys, pins, answers, pam_root };
         let outcome = execute(&mut services, command, &mut out);
         (outcome, String::from_utf8(out).unwrap())
     }
@@ -736,7 +760,7 @@ mod tests {
         let mut client = reader_client(vec![]);
         let mut keys = HasKey(vec![]);
         let mut out = Vec::new();
-        let mut services = Services { biometrics: &mut client, keys: &mut keys, pins: &mut TypedPins(vec![]), answers: &mut Replies(vec!["", "n"], vec![]) };
+        let mut services = Services { biometrics: &mut client, keys: &mut keys, pins: &mut TypedPins(vec![]), answers: &mut Replies(vec!["", "n"], vec![]), pam_root: Path::new(NO_PAM_ROOT) };
         let outcome = execute(&mut services, Command::EnrollFinger { uid: 1000 }, &mut out);
         let output = String::from_utf8(out).unwrap();
         assert_eq!(outcome, Outcome::Success, "{output}");
@@ -978,6 +1002,137 @@ mod tests {
 
         for bad in [vec!["enroll", "voice"], vec!["enroll", "face", "finger"], vec!["verify", "face"], vec![], vec!["dance"], vec!["verify", "--uid", "-1"], vec!["--bus", "mars", "verify"], vec!["identify", "--uid", "5"], vec!["verify", "extra"], vec!["--uid"]] {
             assert!(parse_args(args(&bad), 1000).is_err(), "{bad:?}");
+        }
+    }
+
+    fn pam_tree(files: &[(&str, &str)]) -> tempfile::TempDir {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("etc/pam.d")).unwrap();
+        for (name, content) in files {
+            std::fs::write(root.path().join("etc/pam.d").join(name), content).unwrap();
+        }
+        root
+    }
+
+    fn pam_snapshot(root: &Path) -> Vec<(String, Vec<u8>)> {
+        let mut files: Vec<(String, Vec<u8>)> = std::fs::read_dir(root.join("etc/pam.d"))
+            .unwrap()
+            .map(|e| e.unwrap())
+            .map(|e| (e.file_name().into_string().unwrap(), std::fs::read(e.path()).unwrap()))
+            .collect();
+        files.sort();
+        files
+    }
+
+    fn finger_run_in(root: &Path, client: &mut FakeClient, replies: Vec<&'static str>) -> (Outcome, String) {
+        let mut answers = Replies(replies, vec![]);
+        run_asked_in(root, client, &mut FakeKeys::default(), &mut TypedPins(vec![]), &mut answers, Command::EnrollFinger { uid: 1000 })
+    }
+
+    fn login_lines(output: &str) -> Vec<&str> {
+        output.lines().filter(|line| line.contains("fingerprint login")).collect()
+    }
+
+    const SUDO_WITH_STACK: &str = "#%PAM-1.0\n@include base-auth\n";
+
+    // @spec:AC-073
+    #[test]
+    fn enrolling_a_finger_says_the_login_is_on_when_the_common_stack_has_our_marked_line() {
+        let root = pam_tree(&[("sudo", SUDO_WITH_STACK), ("base-auth", "auth sufficient pam_openhello.so\nauth sufficient pam_fprintd.so max-tries=3 # added by open-hello\nauth required pam_unix.so\n")]);
+        let (outcome, output) = finger_run_in(root.path(), &mut reader_client(vec![]), vec!["", "n"]);
+        assert_eq!(outcome, Outcome::Success, "{output}");
+        assert_eq!(login_lines(&output), vec!["the system's fingerprint login is on: your enrolled finger can be used where the system asks for it"]);
+    }
+
+    // @spec:AC-073
+    #[test]
+    fn enrolling_a_finger_says_the_login_is_on_when_a_system_line_is_reached_through_an_include() {
+        let root = pam_tree(&[("sudo", SUDO_WITH_STACK), ("base-auth", "auth substack extra-auth\nauth required pam_unix.so\n"), ("extra-auth", "auth sufficient pam_fprintd.so\n")]);
+        let (_, output) = finger_run_in(root.path(), &mut reader_client(vec![]), vec!["", "n"]);
+        assert_eq!(login_lines(&output).len(), 1, "{output}");
+        assert!(output.contains("the system's fingerprint login is on"), "{output}");
+    }
+
+    // @spec:AC-073
+    #[test]
+    fn enrolling_a_finger_says_the_login_is_off_and_how_to_switch_it_on_when_the_stack_has_no_fingerprint_line() {
+        let root = pam_tree(&[("sudo", SUDO_WITH_STACK), ("base-auth", "auth required pam_unix.so\n")]);
+        let (outcome, output) = finger_run_in(root.path(), &mut reader_client(vec![]), vec!["", "n"]);
+        assert_eq!(outcome, Outcome::Success, "{output}");
+        let lines = login_lines(&output);
+        assert_eq!(lines.len(), 1, "{output}");
+        assert!(lines[0].contains("is not on") && lines[0].contains("sudo openhello-cli pam enable"), "{output}");
+    }
+
+    // @spec:AC-073
+    #[test]
+    fn enrolling_a_finger_says_the_check_could_not_be_made_when_the_stack_cannot_be_found() {
+        let missing_sudo = pam_tree(&[("base-auth", "auth sufficient pam_fprintd.so\n")]);
+        let no_include = pam_tree(&[("sudo", "#%PAM-1.0\nauth required pam_unix.so\n"), ("base-auth", "auth sufficient pam_fprintd.so\n")]);
+        for root in [missing_sudo, no_include] {
+            let (outcome, output) = finger_run_in(root.path(), &mut reader_client(vec![]), vec!["", "n"]);
+            assert_eq!(outcome, Outcome::Success, "{output}");
+            let lines = login_lines(&output);
+            assert_eq!(lines.len(), 1, "{output}");
+            assert!(lines[0].contains("could not check") && lines[0].contains("sudo openhello-cli pam enable"), "{output}");
+        }
+    }
+
+    // @spec:AC-073
+    #[test]
+    fn no_login_line_is_printed_when_no_finger_was_enrolled() {
+        let root = pam_tree(&[("sudo", SUDO_WITH_STACK), ("base-auth", "auth sufficient pam_fprintd.so\n")]);
+
+        let mut no_reader = FakeClient::default();
+        let (_, output) = finger_run_in(root.path(), &mut no_reader, vec!["", "n"]);
+        assert!(login_lines(&output).is_empty() && output.lines().count() == 1, "{output}");
+
+        let mut failing = reader_client(vec![]);
+        failing.finger_begin_fails = true;
+        let (_, output) = finger_run_in(root.path(), &mut failing, vec!["", "n"]);
+        assert!(login_lines(&output).is_empty(), "{output}");
+
+        let mut failed_step = reader_client(vec![]);
+        failed_step.finger_step_fails = true;
+        let (_, output) = finger_run_in(root.path(), &mut failed_step, vec!["", "n"]);
+        assert!(login_lines(&output).is_empty(), "{output}");
+
+        let mut cancelled = reader_client(vec![]);
+        let (_, output) = finger_run_in(root.path(), &mut cancelled, vec![]);
+        assert!(login_lines(&output).is_empty(), "{output}");
+
+        let mut already = reader_client(vec!["left-thumb"]);
+        let (_, output) = finger_run_in(root.path(), &mut already, vec!["", "", "n"]);
+        assert_eq!(login_lines(&output).len(), 1, "{output}");
+        let mut only_existing = reader_client(vec!["left-thumb"]);
+        let (_, output) = finger_run_in(root.path(), &mut only_existing, vec![]);
+        assert!(login_lines(&output).is_empty(), "{output}");
+    }
+
+    // @spec:AC-073
+    #[test]
+    fn several_fingers_in_one_run_print_the_login_line_once_at_the_end_of_the_enrollment() {
+        let root = pam_tree(&[("sudo", SUDO_WITH_STACK), ("base-auth", "auth required pam_unix.so\n")]);
+        let mut client = reader_client(vec![]);
+        client.finger_steps = [five_stages(), five_stages()].concat();
+        let (outcome, output) = finger_run_in(root.path(), &mut client, vec!["", "y", "1", "n"]);
+        assert_eq!(outcome, Outcome::Success, "{output}");
+        assert_eq!(login_lines(&output).len(), 1, "{output}");
+        let line_at = output.lines().position(|line| line.contains("fingerprint login")).unwrap();
+        let last_enrolled = output.lines().enumerate().filter(|(_, line)| line.contains("enrolled the")).map(|(i, _)| i).last().unwrap();
+        assert!(line_at > last_enrolled, "{output}");
+        assert_eq!(output.lines().last().unwrap(), RECOVERY_CODE);
+    }
+
+    // @spec:AC-073
+    #[test]
+    fn enrolling_a_finger_never_edits_the_pam_files() {
+        for stack in ["auth required pam_unix.so\n", "auth sufficient pam_fprintd.so\n"] {
+            let root = pam_tree(&[("sudo", SUDO_WITH_STACK), ("base-auth", stack), ("other", "auth required pam_unix.so\n")]);
+            let before = pam_snapshot(root.path());
+            let (_, output) = finger_run_in(root.path(), &mut reader_client(vec![]), vec!["", "n"]);
+            assert_eq!(login_lines(&output).len(), 1, "{output}");
+            assert_eq!(pam_snapshot(root.path()), before);
         }
     }
 }

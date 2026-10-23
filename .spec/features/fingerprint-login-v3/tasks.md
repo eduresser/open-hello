@@ -44,8 +44,7 @@
 - Files: crates/openhello-cli/src/pam_enable.rs, crates/openhello-cli/tests/pam_enable.rs, crates/openhello-cli/src/lib.rs, scripts/install.sh
 - Notes: reuse the existing common-stack discovery, backup, atomic write and undo in `pam_enable.rs` (the `enable_common` path). Insert `auth sufficient pam_fprintd.so max-tries=3 timeout=10` right after our line, only when the module file `pam_fprintd.so` exists in the PAM module directory the CLI already discovers and no `pam_fprintd` line reaches the common stack. Mark the line it adds so `disable` removes only that one. Add `--no-fingerprint`. Extend `status`. The installer's fprintd line reports what `pam enable` did. No desktop or distribution names in the code. Follow the minimal-comments skill.
 
-## T-065 — Report whether the system's fingerprint login is on after enrolling a finger [pending]
-
+## T-065 — Report whether the system's fingerprint login is on after enrolling a finger [done]
 - Refs: US-023, AC-073
 - Files: crates/openhello-cli/src/lib.rs, crates/openhello-cli/tests/end_to_end.rs
 - Notes: depends on T-064 (reuse its detection of a `pam_fprintd` line in the common stack). After `enroll finger` print one plain line; never edit PAM from this command. Follow the minimal-comments skill.

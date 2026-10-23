@@ -62,6 +62,16 @@ struct Dirs {
     vendor: PathBuf,
 }
 
+impl Dirs {
+    fn under(root: &Path) -> Dirs {
+        Dirs {
+            root: root.to_path_buf(),
+            etc: root.join("etc/pam.d"),
+            vendor: root.join("usr/lib/pam.d"),
+        }
+    }
+}
+
 fn parse(args: &[String]) -> Result<Request, PamFailure> {
     let mut iter = args.iter();
     let action = match iter.next().map(String::as_str) {
@@ -145,11 +155,7 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), PamFailure> {
     let request = parse(args)?;
     let injected = request.root.is_some();
     let root = request.root.clone().unwrap_or_else(|| PathBuf::from("/"));
-    let dirs = Dirs {
-        root: root.clone(),
-        etc: root.join("etc/pam.d"),
-        vendor: root.join("usr/lib/pam.d"),
-    };
+    let dirs = Dirs::under(&root);
     if request.action != Action::Status && !injected && unsafe { libc::geteuid() } != 0 {
         return Err(failed("changing /etc/pam.d requires root; run with sudo"));
     }
@@ -498,6 +504,27 @@ fn fingerprint_line_reached(dirs: &Dirs, text: &str, depth: usize) -> Fingerprin
         .filter_map(|name| read_service(dirs, name))
         .map(|included| fingerprint_line_reached(dirs, &included, depth - 1))
         .fold(own, FingerprintLine::max)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FingerprintLogin {
+    On,
+    Off,
+    Unknown,
+}
+
+pub fn fingerprint_login(root: &Path) -> FingerprintLogin {
+    let dirs = Dirs::under(root);
+    let Some(text) = discover_common_stack(&dirs)
+        .ok()
+        .and_then(|name| read_service(&dirs, &name))
+    else {
+        return FingerprintLogin::Unknown;
+    };
+    match fingerprint_line_reached(&dirs, &text, INCLUDE_DEPTH) {
+        FingerprintLine::Absent => FingerprintLogin::Off,
+        _ => FingerprintLogin::On,
+    }
 }
 
 pub fn security_dir() -> Option<PathBuf> {
