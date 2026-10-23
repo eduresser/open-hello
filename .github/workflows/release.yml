@@ -1,0 +1,83 @@
+name: release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+env:
+  NFPM_VERSION: 2.48.0
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Oldest glibc among supported distros (AlmaLinux/RHEL 9, 2.34): binaries built here also run on every newer one.
+    container: almalinux:9
+    steps:
+      - name: Install build tools
+        run: |
+          dnf install -y --setopt=install_weak_deps=False \
+            gcc git pkgconf-pkg-config fontconfig-devel freetype-devel pam binutils tar gzip findutils
+          curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          dnf install -y "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm-${NFPM_VERSION}-1.x86_64.rpm"
+      - uses: actions/checkout@v4
+      - name: Build packages
+        run: scripts/package.sh "${{ github.event.release.tag_name }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.pkg.tar.zst
+            dist/SHA256SUMS
+
+  install-test:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {image: "debian:12-slim", install: "apt-get update && apt-get install -y ./dist/openhello_*.deb"}
+          - {image: "debian:13-slim", install: "apt-get update && apt-get install -y ./dist/openhello_*.deb"}
+          - {image: "ubuntu:22.04", install: "apt-get update && apt-get install -y ./dist/openhello_*.deb"}
+          - {image: "ubuntu:24.04", install: "apt-get update && apt-get install -y ./dist/openhello_*.deb"}
+          - {image: "ubuntu:26.04", install: "apt-get update && apt-get install -y ./dist/openhello_*.deb"}
+          - {image: "registry.fedoraproject.org/fedora-minimal:latest", install: "dnf install -y --setopt=install_weak_deps=False ./dist/openhello-*.rpm"}
+          - {image: "almalinux/9-minimal", install: "P=$(ls dist/openhello-*.rpm) && microdnf install -y --setopt=install_weak_deps=0 $(rpm -qpR $P | grep -v ^rpmlib) && rpm -i $P"}
+          - {image: "almalinux/10-minimal", install: "P=$(ls dist/openhello-*.rpm) && microdnf install -y --setopt=install_weak_deps=0 $(rpm -qpR $P | grep -v ^rpmlib) && rpm -i $P"}
+          - {image: "opensuse/leap:16.0", install: "zypper --non-interactive install --no-recommends --allow-unsigned-rpm ./dist/openhello-*.rpm"}
+          - {image: "opensuse/tumbleweed", install: "zypper --non-interactive install --no-recommends --allow-unsigned-rpm ./dist/openhello-*.rpm"}
+          - {image: "archlinux:base", install: "pacman -Syu --noconfirm && pacman -U --noconfirm ./dist/openhello-*.pkg.tar.zst"}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: dist
+      - name: Install the package on a minimal system and check its runtime dependencies
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w -e DEBIAN_FRONTEND=noninteractive "${{ matrix.image }}" \
+            sh -c '${{ matrix.install }} && bash scripts/check-package-deps.sh'
+
+  publish:
+    needs: install-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: dist
+      - name: Attach packages to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
