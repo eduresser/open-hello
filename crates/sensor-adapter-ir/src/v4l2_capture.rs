@@ -234,6 +234,7 @@ impl FrameSource for V4l2Camera {
     }
 
     fn next_frame(&mut self) -> Result<Frame, SensorError> {
+        let mut last_bad = (0, 0);
         for _ in 0..MAX_CONSECUTIVE_BAD_FRAMES {
             let mut buffer: Buffer = zeroed();
             buffer.type_ = BUF_TYPE_VIDEO_CAPTURE;
@@ -256,9 +257,14 @@ impl FrameSource for V4l2Camera {
             if let Some(frame) = frame {
                 return Ok(frame);
             }
+            last_bad = (buffer.bytesused, buffer.flags);
         }
-        Err(SensorError::Device("camera keeps delivering incomplete frames".into()))
+        Err(incomplete_frames_error(last_bad.0, last_bad.1, self.format.sizeimage))
     }
+}
+
+fn incomplete_frames_error(bytes_used: u32, flags: u32, size_image: u32) -> SensorError {
+    SensorError::IncompleteFrames { count: MAX_CONSECUTIVE_BAD_FRAMES, bytes_used, size_image, flags }
 }
 
 // USB cameras occasionally deliver a short frame; the engine rejects it and would abort the session
@@ -310,6 +316,16 @@ mod tests {
         assert!(!is_complete(125_524, 0, 230_400));
         assert!(!is_complete(230_400, BUF_FLAG_ERROR, 230_400));
         assert!(!is_complete(0, 0, 230_400));
+    }
+
+    // @spec:AC-075
+    #[test]
+    fn the_incomplete_frames_error_carries_the_count_and_the_last_bad_buffer() {
+        let error = incomplete_frames_error(125_524, BUF_FLAG_ERROR, 230_400);
+        assert_eq!(
+            error.to_string(),
+            "camera device error: camera keeps delivering incomplete frames (30 in a row; last: bytesused=125524 of 230400, flags=0x40)"
+        );
     }
 
     #[test]

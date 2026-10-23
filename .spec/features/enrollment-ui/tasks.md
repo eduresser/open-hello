@@ -114,3 +114,10 @@
 - Model: claude-sonnet-5
 - Effort: high
 - Notes: depends on T-074. Product owner decision 2026-10-23: three states (welcome without a face with a single Set up button; main screen with a face with Test, Set up again and Delete face data; screen after setup with Test and Set up again); no Close button; a test always returns to the main screen with the result at its top (never a full-screen error); the main screen opens with the cause and Test and Set up again disabled when recognition is unavailable, Delete stays; Set up again goes straight to the identity step; "Remove" becomes "Delete" in every text; the welcome screen no longer offers deletion. Demo flags: `--demo-test` cycles recognized, not recognized and camera in use; `--demo-enrolled` opens the main screen; with `--demo-blocked` it opens blocked.
+
+## T-076 — Camera diagnostics and a bounded stream restart [done]
+- Refs: AC-075, AC-011, AC-015
+- Files: crates/sensor-adapter-ir/src/session_log.rs, crates/sensor-adapter-ir/src/lazy.rs, crates/sensor-adapter-ir/src/lib.rs, crates/sensor-adapter-ir/src/v4l2_capture.rs, crates/openhellod/src/core.rs, crates/openhellod/tests/logging_redaction.rs, .spec/features/face-recognition-proof/spec.md
+- Model: claude-sonnet-5
+- Effort: high
+- Notes: VM kde-neon 2026-10-23: right after a window enrollment, Test (`Verify`) failed 3 of 3 for about 40 s with "camera keeps delivering incomplete frames" (kernel: xhci short packet), then recovered alone; cause not confirmed. Diagnostics: the error now carries the count and the last bytesused/flags, and the sensor plugin logs `camera-open`, `camera-open-failed` and `camera-release` lines (reason, since_release_ms, open_ms, good_frames); the daemon logs `sensor-release reason=`. Mitigation: only the incomplete-frames start failure reopens the session, up to 2 times with 500 ms and 1500 ms pauses (injectable); everything else fails at once.

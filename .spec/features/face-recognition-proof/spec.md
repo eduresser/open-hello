@@ -160,6 +160,14 @@ that matching runs against a trustworthy IR signal instead of one lit only by am
   dark gets its emitter control activated (Microsoft face-auth control, or a configured vendor control) and
   verified; if illumination cannot be established, an explicit error is surfaced rather than unlit frames
 
+#### AC-075 — A transient camera start failure is retried
+
+- **Given** the camera delivers only incomplete frames when the stream starts
+- **When** a capture is requested
+- **Then** the daemon restarts the stream up to twice (500 ms and 1.5 s pauses) before reporting the device
+  error, and it never returns a frame without confirmed illumination; every camera session open and release
+  is logged with its reason, timings and good-frame count, and never with frame bytes
+
 ### US-007 — Authorization on sensitive biometric operations
 
 As the device owner, I want enrollment and deletion of biometric identities restricted to the authorized

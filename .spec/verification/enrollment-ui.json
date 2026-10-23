@@ -1,7 +1,7 @@
 {
   "feature": "enrollment-ui",
-  "timestamp": "2026-10-23T19:35:17.299Z",
-  "gitRev": "4ceaa7b",
+  "timestamp": "2026-10-23T20:12:25.192Z",
+  "gitRev": "3b6396b",
   "command": "cargo test",
   "reporter": "exitcode",
   "exitCode": 0,

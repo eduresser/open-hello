@@ -118,7 +118,7 @@ fn a_full_cycle_at_trace_verbosity_never_logs_frame_or_template_bytes() {
     core.purge(1000).unwrap();
 
     let lines = capture.0.lock().unwrap();
-    for event in ["enroll-begin", "enroll-frame", "enroll-commit", "verify", "identify", "purge", "verify-template-unavailable"] {
+    for event in ["enroll-begin", "enroll-frame", "enroll-commit", "verify", "identify", "purge", "verify-template-unavailable", "sensor-release"] {
         assert!(lines.iter().any(|l| l.contains(event)), "missing {event} in {lines:#?}");
     }
     for rendering in forbidden_renderings() {
