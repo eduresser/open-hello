@@ -15,6 +15,18 @@ pub struct Progress {
     pub required: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refusal {
+    pub error_name: Option<String>,
+    pub message: String,
+}
+
+impl Refusal {
+    pub fn local(message: impl Into<String>) -> Self {
+        Self { error_name: None, message: message.into() }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KeyStatus {
     pub key: bool,
