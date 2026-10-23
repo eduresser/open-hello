@@ -697,3 +697,118 @@ fn a_committed_or_discarded_session_no_longer_serves_its_preview() {
         drop(kept);
     }
 }
+
+struct ReadinessSensor {
+    probe: fn() -> Result<(), DaemonError>,
+    captures: Arc<AtomicUsize>,
+}
+
+impl SensorBackend for ReadinessSensor {
+    fn capture(&mut self) -> Result<CapturedFrame, DaemonError> {
+        self.captures.fetch_add(1, Ordering::SeqCst);
+        Err(DaemonError::Backend("capture must not be called by the readiness check".into()))
+    }
+
+    fn probe(&mut self) -> Result<(), DaemonError> {
+        (self.probe)()
+    }
+}
+
+struct ReadinessStorage(fn() -> Result<(), DaemonError>);
+
+impl StorageBackend for ReadinessStorage {
+    fn put(&mut self, _: u32, _: &[u8]) -> Result<(), DaemonError> {
+        Ok(())
+    }
+
+    fn get(&mut self, _: u32) -> Result<Vec<u8>, DaemonError> {
+        Err(DaemonError::NotFound)
+    }
+
+    fn list_uids(&mut self) -> Result<Vec<u32>, DaemonError> {
+        Ok(Vec::new())
+    }
+
+    fn purge(&mut self, _: u32) -> Result<(), DaemonError> {
+        Ok(())
+    }
+
+    fn probe(&mut self) -> Result<(), DaemonError> {
+        (self.0)()
+    }
+}
+
+struct CountingAuthorizer(Arc<AtomicUsize>);
+
+impl Authorizer for CountingAuthorizer {
+    fn authorize<'a>(&'a self, _: Action, _: &'a Caller, _: u32) -> AuthFuture<'a> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { Err("refused".to_string()) })
+    }
+}
+
+struct Readiness {
+    outcome: Result<(), (String, String)>,
+    captures: usize,
+    authorizations: usize,
+}
+
+fn check_ready(sensor_probe: fn() -> Result<(), DaemonError>, storage_probe: fn() -> Result<(), DaemonError>) -> Readiness {
+    let bus = PrivateBus::start();
+    let (captures, authorizations) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+    let sensor = ReadinessSensor { probe: sensor_probe, captures: captures.clone() };
+    let engine = Engine { begins: Arc::new(AtomicUsize::new(0)), candidates: Vec::new() };
+    let core = Biometrics::new(Box::new(sensor), Box::new(engine), Box::new(ReadinessStorage(storage_probe)), DEFAULT_TARGET_FAR);
+    serve_core(&bus, Arc::new(CountingAuthorizer(authorizations.clone())), core);
+    let conn = client(&bus);
+    let outcome = match proxy(&conn).call::<_, _, ()>("CheckReady", &()) {
+        Ok(()) => Ok(()),
+        Err(zbus::Error::MethodError(name, detail, _)) => Err((name.to_string(), detail.unwrap_or_default())),
+        Err(other) => panic!("expected a D-Bus method error, got {other}"),
+    };
+    Readiness { outcome, captures: captures.load(Ordering::SeqCst), authorizations: authorizations.load(Ordering::SeqCst) }
+}
+
+fn healthy() -> Result<(), DaemonError> {
+    Ok(())
+}
+
+// @spec:AC-070
+#[test]
+fn check_ready_succeeds_with_a_healthy_camera_and_tpm_without_capturing_or_asking_polkit() {
+    let readiness = check_ready(healthy, healthy);
+    assert!(readiness.outcome.is_ok(), "{:?}", readiness.outcome);
+    assert_eq!(readiness.captures, 0);
+    assert_eq!(readiness.authorizations, 0);
+}
+
+// @spec:AC-070
+// @spec:AC-069
+#[test]
+fn check_ready_reports_a_missing_camera_as_no_camera() {
+    let readiness = check_ready(|| Err(DaemonError::NoCamera("/dev/video2 does not exist".into())), healthy);
+    let (name, detail) = readiness.outcome.unwrap_err();
+    assert_eq!(name, "io.openhello.Error.NoCamera");
+    assert!(!detail.contains("/dev/video2"), "{detail}");
+    assert_eq!(readiness.captures, 0);
+}
+
+// @spec:AC-070
+// @spec:AC-069
+#[test]
+fn check_ready_reports_a_busy_camera_as_camera_busy() {
+    let readiness = check_ready(|| Err(DaemonError::CameraBusy("VIDIOC_S_FMT: busy".into())), healthy);
+    assert_eq!(readiness.outcome.unwrap_err().0, "io.openhello.Error.CameraBusy");
+    assert_eq!(readiness.captures, 0);
+}
+
+// @spec:AC-070
+// @spec:AC-069
+#[test]
+fn check_ready_reports_an_unavailable_tpm_as_tpm_unavailable() {
+    let readiness = check_ready(healthy, || Err(DaemonError::TpmUnavailable("tpm2_getcap failed".into())));
+    let (name, detail) = readiness.outcome.unwrap_err();
+    assert_eq!(name, "io.openhello.Error.TpmUnavailable");
+    assert!(!detail.contains("tpm2_getcap"), "{detail}");
+    assert_eq!(readiness.captures, 0);
+}

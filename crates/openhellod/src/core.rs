@@ -133,6 +133,11 @@ impl Biometrics {
         &self.logger
     }
 
+    pub fn check_ready(&mut self) -> Result<(), DaemonError> {
+        self.sensor.probe()?;
+        self.storage.probe()
+    }
+
     pub fn enroll_begin(&mut self, uid: u32) -> Result<String, DaemonError> {
         let engine_session = self.engine.enroll_begin(self.now_ms())?;
         let handle = format!("enroll-{}", self.next_session);

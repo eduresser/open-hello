@@ -106,6 +106,16 @@ unsafe extern "C" fn storage_purge(handle: StorageHandle, uid: u32) -> Status {
     }
 }
 
+unsafe extern "C" fn storage_probe(handle: StorageHandle) -> Status {
+    let Some(store) = store(handle) else {
+        return Status::InvalidArgument;
+    };
+    match store.probe() {
+        Ok(()) => Status::Ok,
+        Err(error) => status_of(&error),
+    }
+}
+
 unsafe extern "C" fn storage_close(handle: StorageHandle) {
     if !handle.is_null() {
         drop(Box::from_raw(handle as *mut TemplateStore));
@@ -120,6 +130,7 @@ static STORAGE_INTERFACE: StorageInterface = StorageInterface {
     list_uids: storage_list_uids,
     purge: storage_purge,
     close: storage_close,
+    probe: storage_probe,
 };
 
 #[no_mangle]

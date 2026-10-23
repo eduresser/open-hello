@@ -9,6 +9,9 @@ pub struct Calls {
     pub discards: u32,
     pub commits: u32,
     pub provisions: u32,
+    pub begins: u32,
+    pub ready_error: Option<ClientErrorKind>,
+    pub status_error: bool,
     pub events: Vec<&'static str>,
 }
 
@@ -39,13 +42,29 @@ pub fn error(kind: ClientErrorKind) -> ClientResult<Progress> {
 }
 
 impl EnrollClient for FakeClient {
+    fn check_ready(&mut self) -> ClientResult<()> {
+        let mut calls = self.calls.borrow_mut();
+        calls.events.push("ready");
+        match calls.ready_error {
+            Some(kind) => Err(ClientError::new(kind, "detail")),
+            None => Ok(()),
+        }
+    }
+
     fn status(&mut self, _uid: u32) -> ClientResult<Status> {
-        self.calls.borrow_mut().events.push("status");
+        let mut calls = self.calls.borrow_mut();
+        calls.events.push("status");
+        if calls.status_error {
+            return Err(ClientError::new(ClientErrorKind::AuthDenied, "keyd unreachable"));
+        }
         Ok(self.status)
     }
 
     fn enroll_begin(&mut self, _uid: u32) -> ClientResult<String> {
-        self.calls.borrow_mut().events.push("begin");
+        let mut calls = self.calls.borrow_mut();
+        calls.begins += 1;
+        calls.events.push("begin");
+        drop(calls);
         match self.begin_error {
             Some(kind) => Err(ClientError::new(kind, "detail")),
             None => Ok("session-1".into()),

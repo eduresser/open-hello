@@ -43,6 +43,10 @@ pub fn classify(refusal: Refusal) -> ClientError {
 }
 
 impl EnrollClient for DaemonClient {
+    fn check_ready(&mut self) -> ClientResult<()> {
+        self.biometrics.call::<_, ()>("CheckReady", &()).map_err(classify)
+    }
+
     fn status(&mut self, uid: u32) -> ClientResult<Status> {
         self.read_status(uid)
     }

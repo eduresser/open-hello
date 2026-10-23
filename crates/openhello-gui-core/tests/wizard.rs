@@ -29,7 +29,7 @@ fn the_full_flow_visits_every_step_in_the_windows_hello_order() {
     flow.acknowledge_recovery_code();
     visited.push(flow.step());
     assert_eq!(visited, [Step::Welcome, Step::Identity, Step::Capture, Step::RecoveryCode, Step::Done]);
-    assert_eq!(calls.borrow().events, ["status", "begin", "commit", "provision"]);
+    assert_eq!(calls.borrow().events, ["ready", "status", "begin", "commit", "provision"]);
     assert_eq!(flow.recovery_code(), None);
 }
 
@@ -178,4 +178,69 @@ fn nothing_is_discarded_after_a_commit_or_when_no_session_was_started() {
     let (flow, calls) = open(fresh(), vec![]);
     drop(flow);
     assert_eq!(calls.borrow().discards, 0);
+}
+
+// @spec:AC-070
+#[test]
+fn an_unavailable_recognition_blocks_the_welcome_screen_with_the_cause_and_creates_no_session() {
+    for (kind, cause) in [
+        (ClientErrorKind::NoCamera, FailureCause::NoCamera),
+        (ClientErrorKind::CameraBusy, FailureCause::CameraBusy),
+        (ClientErrorKind::TpmUnavailable, FailureCause::TpmUnavailable),
+        (ClientErrorKind::Other, FailureCause::Other),
+    ] {
+        let (mut flow, calls) = open(fresh(), vec![]);
+        calls.borrow_mut().ready_error = Some(kind);
+        flow.start();
+        assert_eq!(flow.step(), Step::Welcome);
+        assert_eq!(flow.blocked(), Some(cause));
+        assert!(!flow.strings().failure_explanation(cause).is_empty());
+        assert!(!flow.strings().blocked_title().is_empty());
+        flow.confirm_identity();
+        assert_eq!(flow.step(), Step::Welcome);
+        assert_eq!(calls.borrow().begins, 0);
+        assert_eq!(calls.borrow().events, ["ready"]);
+        drop(flow);
+        assert_eq!(calls.borrow().discards, 0);
+    }
+}
+
+// @spec:AC-070
+#[test]
+fn a_ready_computer_is_not_blocked_and_the_flow_proceeds_after_the_check() {
+    let (mut flow, calls) = open(fresh(), vec![]);
+    flow.start();
+    assert_eq!(flow.blocked(), None);
+    assert_eq!(flow.step(), Step::Identity);
+    flow.confirm_identity();
+    assert_eq!(flow.step(), Step::Capture);
+    assert_eq!(calls.borrow().events, ["ready", "status", "begin"]);
+}
+
+// @spec:AC-070
+#[test]
+fn a_status_that_cannot_be_read_blocks_with_the_generic_cause() {
+    let (mut flow, calls) = open(fresh(), vec![]);
+    calls.borrow_mut().status_error = true;
+    flow.start();
+    assert_eq!(flow.step(), Step::Welcome);
+    assert_eq!(flow.blocked(), Some(FailureCause::Other));
+    flow.confirm_identity();
+    assert_eq!(calls.borrow().begins, 0);
+}
+
+// @spec:AC-070
+#[test]
+fn retry_rechecks_and_unblocks_once_the_cause_is_fixed() {
+    let (mut flow, calls) = open(fresh(), vec![]);
+    calls.borrow_mut().ready_error = Some(ClientErrorKind::CameraBusy);
+    flow.start();
+    flow.retry();
+    assert_eq!(flow.blocked(), Some(FailureCause::CameraBusy));
+    assert_eq!(calls.borrow().events, ["ready", "ready"]);
+    calls.borrow_mut().ready_error = None;
+    flow.retry();
+    assert_eq!(flow.blocked(), None);
+    assert_eq!(flow.step(), Step::Identity);
+    assert_eq!(calls.borrow().begins, 0);
 }

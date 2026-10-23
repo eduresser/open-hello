@@ -15,6 +15,7 @@ impl Language {
 pub enum Text {
     WelcomeTitle,
     WelcomeBody,
+    BlockedTitle,
     GetStarted,
     Next,
     Done,
@@ -76,6 +77,7 @@ impl Text {
         match self {
             Text::WelcomeTitle => "Welcome to OpenHello",
             Text::WelcomeBody => "Your device just got more personal. Start using your face to unlock your device, verify your identity, and buy things in the Store.",
+            Text::BlockedTitle => "Face recognition isn't available on this computer",
             Text::GetStarted => "Get started",
             Text::Next => "Next",
             Text::Done => "Done",
@@ -162,6 +164,10 @@ impl Strings {
         match self.language {
             Language::English => format!("{filled} of {required}"),
         }
+    }
+
+    pub fn blocked_title(&self) -> &'static str {
+        self.get(Text::BlockedTitle)
     }
 
     pub fn failure_title(&self, cause: FailureCause) -> &'static str {

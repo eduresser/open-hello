@@ -54,6 +54,7 @@ impl fmt::Debug for Frame {
 }
 
 pub trait EnrollClient {
+    fn check_ready(&mut self) -> ClientResult<()>;
     fn status(&mut self, uid: u32) -> ClientResult<Status>;
     fn enroll_begin(&mut self, uid: u32) -> ClientResult<String>;
     fn enroll_capture(&mut self, handle: &str) -> ClientResult<Progress>;
@@ -172,11 +173,12 @@ pub struct EnrollmentFlow<C: EnrollClient> {
     session: Option<String>,
     committed: bool,
     recovery_code: Option<String>,
+    blocked: Option<FailureCause>,
 }
 
 impl<C: EnrollClient> EnrollmentFlow<C> {
     pub fn new(client: C, uid: u32, language: Language) -> Self {
-        Self { client, uid, strings: Strings::new(language), wizard: Wizard::new(), session: None, committed: false, recovery_code: None }
+        Self { client, uid, strings: Strings::new(language), wizard: Wizard::new(), session: None, committed: false, recovery_code: None, blocked: None }
     }
 
     pub fn step(&self) -> Step {
@@ -191,16 +193,27 @@ impl<C: EnrollClient> EnrollmentFlow<C> {
         self.recovery_code.as_deref()
     }
 
+    pub fn blocked(&self) -> Option<FailureCause> {
+        self.blocked
+    }
+
     pub fn start(&mut self) {
         if self.step() != Step::Welcome {
             return;
         }
+        self.blocked = self.client.check_ready().err().map(|error| error.kind.into());
+        if self.blocked.is_none() {
+            self.read_status();
+        }
+    }
+
+    fn read_status(&mut self) {
         match self.client.status(self.uid) {
             Ok(status) => {
                 self.wizard.set_plan(Plan { key: !status.key });
                 self.wizard.advance();
             }
-            Err(error) => self.wizard.fail(error.kind.into()),
+            Err(_) => self.blocked = Some(FailureCause::Other),
         }
     }
 
@@ -249,6 +262,7 @@ impl<C: EnrollClient> EnrollmentFlow<C> {
         match self.step() {
             Step::Error(FailureCause::KeyFailed) if self.committed => self.provision(Step::Capture),
             Step::Error(_) => self.restart(),
+            Step::Welcome if self.blocked.is_some() => self.start(),
             _ => {}
         }
     }
