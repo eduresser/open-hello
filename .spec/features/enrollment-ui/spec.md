@@ -101,11 +101,11 @@ As a laptop owner on any distribution and desktop, I want to find the app in the
 - **When** the user searches for "Face recognition" in the menu or settings of any desktop that follows the freedesktop standard
 - **Then** an entry in the Settings category launches the app (valid `.desktop` file whose `Exec` resolves)
 
-#### AC-068 — The installer builds the window with cargo and degrades if that fails
+#### AC-068 — The installer builds the window when fontconfig and FreeType headers exist
 
 - **Given** the machine has the Rust toolchain the installer already requires
 - **When** the installer runs
-- **Then** it builds and installs the window with no extra development packages; if that build fails it says so, installs everything else, and the CLI keeps working
+- **Then** it builds and installs the window if the fontconfig and FreeType development files are present; if they are missing it installs everything else, says the window was skipped, names the two packages for the detected distribution, and the CLI keeps working
 
 #### AC-069 — The daemon tells the client the cause of a failure
 
@@ -136,7 +136,7 @@ As a laptop owner, I want the app to refuse to enroll when face recognition cann
 
 | ID | Assumption | Status | Resolution |
 |---|---|---|---|
-| ASM-020 | A Slint app (winit backend, fluent style, GPL-3.0-only crate) talking to the daemons over the D-Bus system bus is acceptable on any desktop; it has its own look, identical everywhere, and follows only the system light/dark setting. | confirmed | Chosen by the product owner on 2026-10-23 after comparing a Slint prototype (30 fps preview at about 7% of one core, 23 MB stripped binary, only runtime libraries) with the GTK build. The window crate is GPL-3.0-only; the rest of the project stays Apache-2.0. |
+| ASM-020 | A Slint app (winit backend, fluent style, GPL-3.0-only crate) talking to the daemons over the D-Bus system bus is acceptable on any desktop; it has its own look, identical everywhere, and follows only the system light/dark setting. | confirmed | Chosen by the product owner on 2026-10-23 after comparing a Slint prototype (30 fps preview at about 7% of one core, 23 MB stripped binary, only runtime libraries to run; building it needs the fontconfig and FreeType development files, which the prototype build had only because the GTK packages had pulled them in) with the GTK build. The window crate is GPL-3.0-only; the rest of the project stays Apache-2.0. |
 | ASM-021 | One 640x360 8-bit grayscale frame per call, handed over as a sealed memory file descriptor in a method reply, is fast enough for a smooth preview. | open | Method replies carry descriptors reliably; signals do not. Measure on the VM. |
 | ASM-022 | The wizard wording reuses the Windows Hello strings extracted from `BioEnrollment` (English wording only for now). | confirmed | Extracted 2026-10-23 from the local Windows install; used for wording only. |
 | ASM-023 | GTK 4 and libadwaita development packages are installable on the VM. | invalidated | The window no longer uses GTK. |
