@@ -19,6 +19,8 @@ sudo scripts/install.sh
 
 The script builds the project, downloads the models and ONNX Runtime with checksum verification, installs the services and enables the PAM module in the common authentication stack.
 
+The face recognition window is optional: when the fontconfig and FreeType development files are installed, the script also builds it and installs the `openhello-gui` command and a menu entry; otherwise it skips the window, names the packages to install for your distribution, and everything else works.
+
 Options:
 
 | Option | Effect |
@@ -26,6 +28,7 @@ Options:
 | `--dry-run` | Shows what would be done without changing the system |
 | `--skip-checks` | Skips the requirements check |
 | `--no-pam` | Installs without enabling PAM |
+| `--no-gui` | Skips the face recognition window |
 
 ## Usage
 
