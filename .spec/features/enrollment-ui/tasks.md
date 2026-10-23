@@ -30,8 +30,7 @@
 - Effort: high
 - Notes: depends on T-060, T-062. No GTK: pure logic and a client trait, fully testable headless.
 
-## T-064 — GUI core: daemon client, test and remove [pending]
-
+## T-064 — GUI core: daemon client, test and remove [done]
 - Refs: AC-065, AC-066
 - Files: crates/openhello-gui-core/src/client.rs, crates/openhello-gui-core/src/manage.rs
 - Model: claude-sonnet-5

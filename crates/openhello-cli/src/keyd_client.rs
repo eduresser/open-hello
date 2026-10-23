@@ -1,6 +1,8 @@
 use zbus::blocking::{Connection, Proxy};
 
-use crate::{Bus, KeyClient, KeyStatus};
+use zbus::zvariant::{DynamicDeserialize, DynamicType};
+
+use crate::{Bus, KeyClient, KeyStatus, Refusal};
 
 const BUS_NAME: &str = "io.openhello.Keyd1";
 const OBJECT_PATH: &str = "/io/openhello/Keyd1";
@@ -30,13 +32,25 @@ impl KeydClient {
         Proxy::new(&self.connection, BUS_NAME, OBJECT_PATH, BUS_NAME)
             .map_err(|e| format!("cannot reach {BUS_NAME}: {e}"))
     }
+
+    pub fn call<B, R>(&self, method: &str, body: &B) -> Result<R, Refusal>
+    where
+        B: serde::Serialize + DynamicType,
+        R: for<'d> DynamicDeserialize<'d>,
+    {
+        self.proxy().map_err(Refusal::local)?.call(method, body).map_err(|e| refuse(method, e))
+    }
+}
+
+fn refuse(method: &str, error: zbus::Error) -> Refusal {
+    match error {
+        zbus::Error::MethodError(name, _, _) => Refusal { error_name: Some(name.to_string()), message: format!("{method} refused ({})", name.as_str()) },
+        other => Refusal::local(format!("{method} failed: {other}")),
+    }
 }
 
 fn describe(method: &str, error: zbus::Error) -> String {
-    match error {
-        zbus::Error::MethodError(name, _, _) => format!("{method} refused ({})", name.as_str()),
-        other => format!("{method} failed: {other}"),
-    }
+    refuse(method, error).message
 }
 
 impl KeyClient for KeydClient {
