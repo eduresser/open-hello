@@ -39,7 +39,7 @@ As a laptop owner, I want a step-by-step window that shows me the camera and tel
 
 - **Given** the capture step is active
 - **When** frames arrive from the daemon
-- **Then** the window shows the live camera image, one guidance sentence for the latest verdict, and "n of 6" progress that grows with each accepted sample
+- **Then** the window shows the live camera image, one guidance sentence for the latest verdict, and a progress ring around the guide oval that grows with each accepted sample, with no sample counts
 
 #### AC-060 — Every verdict has a sentence in English
 

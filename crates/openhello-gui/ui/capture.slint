@@ -11,8 +11,8 @@ component Preview inherits Rectangle {
     property <length> vh: 315px;
     property <length> cx: vw / 2;
     property <length> cy: vh / 2;
-    property <length> orx: 67px;
-    property <length> ory: 86px;
+    property <length> orx: 76px;
+    property <length> ory: 97.5px;
     property <length> rrx: orx + 12px;
     property <length> rry: ory + 12px;
     property <angle> sweep: min(progress, 0.9999) * 360deg;
@@ -82,7 +82,6 @@ component Preview inherits Rectangle {
 export component CapturePage inherits Rectangle {
     in property <image> frame;
     in property <string> guidance;
-    in property <string> progress-text;
     in property <float> progress;
     in property <bool> accepted;
     callback cancel();
@@ -111,13 +110,6 @@ export component CapturePage inherits Rectangle {
             horizontal-alignment: center;
             wrap: word-wrap;
             min-height: 48px;
-        }
-
-        Text {
-            text: root.progress-text;
-            font-size: 14px;
-            color: Palette.foreground.with-alpha(0.7);
-            horizontal-alignment: center;
         }
 
         HorizontalLayout {

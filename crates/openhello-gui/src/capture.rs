@@ -4,7 +4,6 @@ use slint::{Rgb8Pixel, SharedPixelBuffer};
 pub struct CaptureView {
     pub guidance: &'static str,
     pub accepted: bool,
-    pub progress_text: String,
     pub progress: f32,
     pub frame: Option<SharedPixelBuffer<Rgb8Pixel>>,
 }
@@ -14,7 +13,6 @@ impl CaptureView {
         Self {
             guidance: update.guidance,
             accepted: update.guidance == strings.guidance("accepted"),
-            progress_text: update.progress_text,
             progress: progress_fraction(update.filled, update.required),
             frame: update.frame.as_ref().and_then(to_buffer),
         }
@@ -48,7 +46,7 @@ mod tests {
 
     fn update(verdict: &str, filled: u32, frame: Option<Frame>) -> CaptureUpdate {
         let strings = Strings::new(Language::English);
-        CaptureUpdate { guidance: strings.guidance(verdict), progress_text: strings.progress(filled, 6), filled, required: 6, frame }
+        CaptureUpdate { guidance: strings.guidance(verdict), filled, required: 6, frame }
     }
 
     // @spec:AC-059
@@ -85,7 +83,6 @@ mod tests {
         let strings = Strings::new(Language::English);
         let accepted = CaptureView::new(update("accepted", 2, None), &strings);
         assert_eq!(accepted.guidance, "Hold still and look at the camera");
-        assert_eq!(accepted.progress_text, "2 of 6");
         assert!(accepted.accepted && accepted.frame.is_none());
         let moving = CaptureView::new(update("move-left", 2, Some(Frame { width: 2, height: 1, pixels: vec![1, 2] })), &strings);
         assert_eq!(moving.guidance, "Move a little to your left");

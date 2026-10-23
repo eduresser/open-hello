@@ -213,7 +213,7 @@ mod tests {
         assert_eq!((first.guidance, first.progress), ("Move a little to your left", 0.0));
         assert!(views.iter().all(|view| view.frame.is_some() && !view.guidance.is_empty()));
         assert!(views.windows(2).all(|pair| pair[1].progress >= pair[0].progress));
-        assert_eq!(views.last().map(|view| view.progress_text.as_str()), Some("6 of 6"));
+        assert_eq!(views.last().map(|view| view.progress), Some(1.0));
     }
 
     // @spec:AC-070

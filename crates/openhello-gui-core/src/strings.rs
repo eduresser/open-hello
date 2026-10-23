@@ -166,7 +166,7 @@ impl Text {
             Text::GuidanceOccluded => "Something is covering your face. Clear it from view",
             Text::GuidanceNeutral => "Look at the camera and keep your face in the oval",
             Text::TimeoutTitle => "Setup timed out",
-            Text::TimeoutBody => "Not enough clear samples were collected in 20 seconds. Sit 40 to 60 cm from the screen, face the camera and try again.",
+            Text::TimeoutBody => "Not enough clear samples were collected in 30 seconds. Face the camera, keep your face centered and try again.",
             Text::CameraBusyTitle => "Camera in use",
             Text::CameraBusyBody => "Another program is using the camera. Close it and try again.",
             Text::NoCameraTitle => "Camera not found",
@@ -218,12 +218,6 @@ impl Strings {
 
     pub fn guidance(&self, verdict: &str) -> &'static str {
         self.get(guidance_text(verdict))
-    }
-
-    pub fn progress(&self, filled: u32, required: u32) -> String {
-        match self.language {
-            Language::English => format!("{filled} of {required}"),
-        }
     }
 
     pub fn blocked_title(&self) -> &'static str {

@@ -77,7 +77,7 @@
 - Files: crates/engine-adapter-face/src/enrollment_quality.rs, crates/engine-adapter-face/src/ffi.rs, crates/openhello-gui/ui/capture.slint, README.md
 - Model: claude-sonnet-5
 - Effort: medium
-- Notes: ideal crop centered with face height 55% of the frame; independent indicators, size within 13% of the ideal and center distance within 10% of the frame height, both required, size evaluated first; enrollment only, authentication untouched; the values are fixed in code; the window's guide oval matches the ideal height.
+- Notes: ideal crop centered with face height 55% of the frame (raised to 62% by T-072); independent indicators, size within 13% of the ideal and center distance within 10% of the frame height, both required, size evaluated first; enrollment only, authentication untouched; the values are fixed in code; the window's guide oval matches the ideal height.
 
 ## T-071 — Original wording for the window and the CLI [done]
 - Refs: AC-060, ASM-022
@@ -86,3 +86,10 @@
 - Effort: low
 - Notes: depends on T-070. Replaces the sentences taken from Windows Hello with original ones (a given copy deck), in the window and in the CLI guidance.
 
+
+## T-072 — Larger face, longer window and no sample counts [done]
+- Refs: AC-004, AC-053, AC-059, AC-060, ASM-018
+- Files: crates/engine-adapter-face/src/enrollment_quality.rs, crates/openhello-gui-core/src/strings.rs, crates/openhello-gui-core/src/wizard.rs, crates/openhello-gui-core/tests/strings.rs, crates/openhello-gui-core/tests/wizard.rs, crates/openhello-gui/src/capture.rs, crates/openhello-gui/src/view.rs, crates/openhello-gui/src/demo.rs, crates/openhello-gui/ui/app.slint, crates/openhello-gui/ui/capture.slint, crates/openhello-cli/src/lib.rs
+- Model: claude-sonnet-5
+- Effort: medium
+- Notes: depends on T-071. Ideal face height 62% (range 49%-75%), window oval about 62% of the preview, capture window 30 seconds; the user never sees a sample count (the ring in the window, a percentage in the CLI); no distances in centimeters in user sentences.

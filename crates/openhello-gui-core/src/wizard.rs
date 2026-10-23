@@ -159,7 +159,6 @@ impl Wizard {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CaptureUpdate {
     pub guidance: &'static str,
-    pub progress_text: String,
     pub filled: u32,
     pub required: u32,
     pub frame: Option<Frame>,
@@ -277,7 +276,6 @@ impl<C: EnrollClient> EnrollmentFlow<C> {
     fn update(&self, progress: Progress, frame: Option<Frame>) -> CaptureUpdate {
         CaptureUpdate {
             guidance: self.strings.guidance(&progress.verdict),
-            progress_text: self.strings.progress(progress.filled, progress.required),
             filled: progress.filled,
             required: progress.required,
             frame,

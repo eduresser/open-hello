@@ -203,7 +203,7 @@ fn enroll(
     let mut last_line = String::new();
     for _ in 0..MAX_CAPTURES {
         let progress = client.enroll_capture(&handle)?;
-        let line = format!("{} ({}/{} samples)", enroll_guidance(&progress.verdict), progress.filled, progress.required);
+        let line = format!("{} ({}%)", enroll_guidance(&progress.verdict), percent(progress.filled, progress.required));
         if line != last_line {
             say(line.clone())?;
             last_line = line;
@@ -222,7 +222,14 @@ fn enroll(
     Err(format!("enrollment abandoned after {MAX_CAPTURES} captures without enough frontal samples"))
 }
 
-const ENROLL_INTRO: &str = "Sit about 40 to 60 cm from the screen, face the camera and keep your face in the center of the frame";
+fn percent(filled: u32, required: u32) -> u32 {
+    if required == 0 {
+        return 0;
+    }
+    (u64::from(filled.min(required)) * 100 / u64::from(required)) as u32
+}
+
+const ENROLL_INTRO: &str = "Face the camera and keep your face centered. The prompts tell you whether to move closer or back";
 
 pub fn enroll_guidance(verdict: &str) -> &str {
     match verdict {
@@ -454,7 +461,7 @@ mod tests {
     fn enroll_prints_one_original_intro_line_before_capturing() {
         let mut client = FakeClient { progress: vec![progress("failed", 0)], ..Default::default() };
         let (_, output) = run_command(&mut client, Command::Enroll { uid: 1000 });
-        let intro = "Sit about 40 to 60 cm from the screen, face the camera and keep your face in the center of the frame";
+        let intro = "Face the camera and keep your face centered. The prompts tell you whether to move closer or back";
         assert_eq!(output.lines().next(), Some(intro));
         assert_eq!(output.matches(intro).count(), 1);
         assert!(!output.contains("look straight at the camera"));
@@ -490,7 +497,8 @@ mod tests {
         let (outcome, output) = run_command(&mut client, Command::Enroll { uid: 1000 });
         assert_eq!(outcome, Outcome::Success);
         assert_eq!(client.calls, vec!["begin 1000", "capture h1", "capture h1", "capture h1", "commit h1"]);
-        assert!(output.contains("6/6 samples") && output.contains("enrolled uid 1000"));
+        assert!(output.contains("(33%)") && output.contains("(83%)") && output.contains("(100%)") && output.contains("enrolled uid 1000"));
+        assert!(!output.contains("samples"));
     }
 
     // @spec:AC-053
