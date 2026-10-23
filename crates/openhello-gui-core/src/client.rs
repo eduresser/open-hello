@@ -2,7 +2,7 @@ use openhello_cli::dbus_client::DbusClient;
 use openhello_cli::keyd_client::KeydClient;
 use openhello_cli::{Bus, Refusal};
 
-use crate::manage::ManageClient;
+use crate::manage::{ManageClient, SudoAccess};
 use crate::wizard::{ClientError, ClientErrorKind, ClientResult, EnrollClient, Frame, Progress, Status};
 
 pub struct DaemonClient {
@@ -89,6 +89,16 @@ impl ManageClient for DaemonClient {
 
     fn purge(&mut self, uid: u32) -> ClientResult<()> {
         self.biometrics.call::<_, bool>("Purge", &(uid,)).map(|_| ()).map_err(classify)
+    }
+
+    fn sudo_access(&mut self, uid: u32) -> ClientResult<SudoAccess> {
+        let policy: String = self.biometrics.call("GetSudoPolicy", &(uid,)).map_err(classify)?;
+        Ok(SudoAccess::parse(&policy))
+    }
+
+    fn use_own_password_for_sudo(&mut self, uid: u32) -> ClientResult<SudoAccess> {
+        let policy: String = self.biometrics.call("UseOwnPasswordForSudo", &(uid,)).map_err(classify)?;
+        Ok(SudoAccess::parse(&policy))
     }
 }
 

@@ -4,6 +4,31 @@ pub trait ManageClient {
     fn status(&mut self, uid: u32) -> ClientResult<Status>;
     fn verify(&mut self, uid: u32) -> ClientResult<bool>;
     fn purge(&mut self, uid: u32) -> ClientResult<()>;
+
+    fn sudo_access(&mut self, _uid: u32) -> ClientResult<SudoAccess> {
+        Ok(SudoAccess::Unavailable)
+    }
+
+    fn use_own_password_for_sudo(&mut self, _uid: u32) -> ClientResult<SudoAccess> {
+        Ok(SudoAccess::Unavailable)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SudoAccess {
+    OwnPassword,
+    RootPassword,
+    Unavailable,
+}
+
+impl SudoAccess {
+    pub fn parse(policy: &str) -> Self {
+        match policy {
+            "own-password" => SudoAccess::OwnPassword,
+            "root-password" => SudoAccess::RootPassword,
+            _ => SudoAccess::Unavailable,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +65,14 @@ impl<C: ManageClient> Manager<C> {
             Ok(false) => TestOutcome::NotRecognized,
             Err(error) => TestOutcome::Failed(error),
         }
+    }
+
+    pub fn sudo_asks_root(&mut self) -> bool {
+        self.client.sudo_access(self.uid) == Ok(SudoAccess::RootPassword)
+    }
+
+    pub fn use_own_password_for_sudo(&mut self) -> Result<SudoAccess, ClientError> {
+        self.client.use_own_password_for_sudo(self.uid)
     }
 
     pub fn remove(&mut self, confirmed: bool) -> RemoveOutcome {
