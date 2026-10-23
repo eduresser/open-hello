@@ -13,8 +13,8 @@ pub struct EnrollmentConfig {
     pub sample_spacing_ms: u64,
     pub timeout_ms: u64,
     pub ideal_face_height_ratio: f32,
-    pub size_margin: f32,
-    pub center_margin: f32,
+    pub size_tolerance: f32,
+    pub position_tolerance: f32,
     pub min_face_brightness: f32,
     pub max_face_brightness: f32,
 }
@@ -28,8 +28,8 @@ impl Default for EnrollmentConfig {
             sample_spacing_ms: 200,
             timeout_ms: 20_000,
             ideal_face_height_ratio: 0.55,
-            size_margin: 0.13,
-            center_margin: 0.10,
+            size_tolerance: 0.13,
+            position_tolerance: 0.10,
             min_face_brightness: 40.0,
             max_face_brightness: 215.0,
         }
@@ -37,8 +37,8 @@ impl Default for EnrollmentConfig {
 }
 
 const IDEAL_HEIGHT_ENV: &str = "OPENHELLO_ENROLL_IDEAL_HEIGHT";
-const SIZE_MARGIN_ENV: &str = "OPENHELLO_ENROLL_SIZE_MARGIN";
-const CENTER_MARGIN_ENV: &str = "OPENHELLO_ENROLL_CENTER_MARGIN";
+const SIZE_TOLERANCE_ENV: &str = "OPENHELLO_ENROLL_SIZE_TOLERANCE";
+const POSITION_TOLERANCE_ENV: &str = "OPENHELLO_ENROLL_POSITION_TOLERANCE";
 
 impl EnrollmentConfig {
     pub fn from_env() -> Result<Self, EngineError> {
@@ -48,14 +48,14 @@ impl EnrollmentConfig {
     pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Result<Self, EngineError> {
         let defaults = Self::default();
         let ideal = ratio(&lookup, IDEAL_HEIGHT_ENV, defaults.ideal_face_height_ratio, 1.0, false)?;
-        let size = ratio(&lookup, SIZE_MARGIN_ENV, defaults.size_margin, 0.5, true)?;
-        let center = ratio(&lookup, CENTER_MARGIN_ENV, defaults.center_margin, 0.5, true)?;
+        let size = ratio(&lookup, SIZE_TOLERANCE_ENV, defaults.size_tolerance, 0.5, true)?;
+        let position = ratio(&lookup, POSITION_TOLERANCE_ENV, defaults.position_tolerance, 0.5, true)?;
         if ideal - size <= 0.0 || ideal + size > 1.0 {
             return Err(EngineError::InvalidInput(format!(
-                "{IDEAL_HEIGHT_ENV} ({ideal}) plus and minus {SIZE_MARGIN_ENV} ({size}) must stay within (0, 1]"
+                "{IDEAL_HEIGHT_ENV} ({ideal}) plus and minus {SIZE_TOLERANCE_ENV} ({size}) must stay within (0, 1]"
             )));
         }
-        Ok(Self { ideal_face_height_ratio: ideal, size_margin: size, center_margin: center, ..defaults })
+        Ok(Self { ideal_face_height_ratio: ideal, size_tolerance: size, position_tolerance: position, ..defaults })
     }
 }
 
@@ -124,35 +124,37 @@ pub fn estimate_yaw_deg(landmarks: &[(f32, f32); 5]) -> f32 {
     (nose.0 - eye_mid_x) / eye_distance * YAW_DEG_PER_EYE_DISTANCE
 }
 
-fn fit_components(image: &GrayImage, detection: &Detection, config: &EnrollmentConfig) -> (f32, f32, f32) {
-    let (width, height) = (image.width as f32, image.height as f32);
-    let cx = (detection.x + detection.width / 2.0) / width;
-    let cy = (detection.y + detection.height / 2.0) / height;
-    let h = detection.height / height;
-    (
-        (cx - 0.5) / config.center_margin,
-        (cy - 0.5) / config.center_margin,
-        (h - config.ideal_face_height_ratio) / config.size_margin,
-    )
+fn face_height_ratio(image: &GrayImage, detection: &Detection) -> f32 {
+    detection.height / image.height as f32
 }
 
-pub fn fit_error(image: &GrayImage, detection: &Detection, config: &EnrollmentConfig) -> f32 {
-    let (ex, ey, es) = fit_components(image, detection, config);
-    (ex * ex + ey * ey + es * es).sqrt()
+fn center_offset(image: &GrayImage, detection: &Detection) -> (f32, f32) {
+    let (width, height) = (image.width as f32, image.height as f32);
+    ((detection.x + detection.width / 2.0 - width / 2.0) / height, (detection.y + detection.height / 2.0 - height / 2.0) / height)
+}
+
+pub fn size_error(image: &GrayImage, detection: &Detection, config: &EnrollmentConfig) -> f32 {
+    (face_height_ratio(image, detection) - config.ideal_face_height_ratio).abs()
+}
+
+pub fn position_error(image: &GrayImage, detection: &Detection) -> f32 {
+    let (dx, dy) = center_offset(image, detection);
+    (dx * dx + dy * dy).sqrt()
 }
 
 pub fn position_guidance(image: &GrayImage, detection: &Detection, config: &EnrollmentConfig) -> Option<FrameOutcome> {
-    if fit_error(image, detection, config) <= 1.0 {
+    if size_error(image, detection, config) > config.size_tolerance {
+        let too_far = face_height_ratio(image, detection) < config.ideal_face_height_ratio;
+        return Some(if too_far { FrameOutcome::TooFar } else { FrameOutcome::TooClose });
+    }
+    if position_error(image, detection) <= config.position_tolerance {
         return None;
     }
-    let (ex, ey, es) = fit_components(image, detection, config);
-    if es.abs() > ex.abs() && es.abs() > ey.abs() {
-        return Some(if es < 0.0 { FrameOutcome::TooFar } else { FrameOutcome::TooClose });
+    let (dx, dy) = center_offset(image, detection);
+    if dx.abs() >= dy.abs() {
+        return Some(if dx < 0.0 { FrameOutcome::MoveLeft } else { FrameOutcome::MoveRight });
     }
-    if ex.abs() >= ey.abs() {
-        return Some(if ex < 0.0 { FrameOutcome::MoveLeft } else { FrameOutcome::MoveRight });
-    }
-    Some(if ey < 0.0 { FrameOutcome::MoveDown } else { FrameOutcome::MoveUp })
+    Some(if dy < 0.0 { FrameOutcome::MoveDown } else { FrameOutcome::MoveUp })
 }
 
 pub fn face_brightness(image: &GrayImage, detection: &Detection) -> f32 {
@@ -425,26 +427,29 @@ mod tests {
         face_box(frame_cx * 64.0 - size / 2.0, frame_cy * 64.0 - size / 2.0, size)
     }
 
-    fn error_of(detection: &Detection) -> f32 {
-        fit_error(&textured_image(), detection, &EnrollmentConfig::default())
+    fn binary_config() -> EnrollmentConfig {
+        EnrollmentConfig { ideal_face_height_ratio: 0.5, size_tolerance: 0.25, position_tolerance: 0.125, ..EnrollmentConfig::default() }
+    }
+
+    fn verdict(detection: &Detection) -> Option<FrameOutcome> {
+        position_guidance(&textured_image(), detection, &binary_config())
     }
 
     // @spec:AC-050
     #[test]
-    fn the_ideal_crop_has_no_fit_error_and_is_accepted() {
+    fn the_ideal_crop_has_no_error_and_is_accepted() {
         let ideal = at(0.5, 0.5, 0.55);
-        assert!(error_of(&ideal) < 1e-3);
+        assert!(size_error(&textured_image(), &ideal, &EnrollmentConfig::default()) < 1e-3);
+        assert!(position_error(&textured_image(), &ideal) < 1e-3);
         assert!(accepted(ideal));
     }
 
     // @spec:AC-050
     #[test]
-    fn a_face_that_is_too_small_in_the_frame_is_too_far() {
+    fn a_face_smaller_than_the_tolerance_allows_is_too_far() {
         assert_eq!(guidance_for(face_box(24.0, 24.0, 16.0)), FrameOutcome::TooFar);
-        let at_margin = at(0.5, 0.5, 0.55 - 0.13);
-        assert!((error_of(&at_margin) - 1.0).abs() < 1e-3);
-        assert_eq!(guidance_for(at(0.5, 0.5, 0.55 - 0.13 * 1.05)), FrameOutcome::TooFar);
-        assert!(accepted(at(0.5, 0.5, 0.55 - 0.13 * 0.95)));
+        assert_eq!(verdict(&at(0.5, 0.5, 0.25)), None);
+        assert_eq!(verdict(&at(0.5, 0.5, 0.25 - 1.0 / 64.0)), Some(FrameOutcome::TooFar));
     }
 
     // @spec:AC-050
@@ -452,7 +457,7 @@ mod tests {
     fn the_ideal_height_can_be_read_from_the_environment() {
         let config = EnrollmentConfig::from_lookup(lookup(&[(IDEAL_HEIGHT_ENV, "0.5")])).unwrap();
         assert_eq!(config.ideal_face_height_ratio, 0.5);
-        assert_eq!(config.size_margin, 0.13);
+        assert_eq!(config.size_tolerance, 0.13);
         for value in ["0", "1", "abc", ""] {
             let error = EnrollmentConfig::from_lookup(lookup(&[(IDEAL_HEIGHT_ENV, value)])).unwrap_err();
             assert!(error.to_string().contains(IDEAL_HEIGHT_ENV), "{value}");
@@ -461,25 +466,23 @@ mod tests {
 
     // @spec:AC-051
     #[test]
-    fn a_face_that_fills_the_frame_is_too_close() {
+    fn a_face_larger_than_the_tolerance_allows_is_too_close() {
         assert_eq!(guidance_for(face_box(4.0, 4.0, 56.0)), FrameOutcome::TooClose);
-        let at_margin = at(0.5, 0.5, 0.55 + 0.13);
-        assert!((error_of(&at_margin) - 1.0).abs() < 1e-3);
-        assert_eq!(guidance_for(at(0.5, 0.5, 0.55 + 0.13 * 1.05)), FrameOutcome::TooClose);
-        assert!(accepted(at(0.5, 0.5, 0.55 + 0.13 * 0.95)));
+        assert_eq!(verdict(&at(0.5, 0.5, 0.75)), None);
+        assert_eq!(verdict(&at(0.5, 0.5, 0.75 + 1.0 / 64.0)), Some(FrameOutcome::TooClose));
     }
 
     // @spec:AC-051
     #[test]
-    fn the_size_margin_can_be_read_and_must_keep_the_range_inside_the_frame() {
-        let config = EnrollmentConfig::from_lookup(lookup(&[(IDEAL_HEIGHT_ENV, "0.5"), (SIZE_MARGIN_ENV, "0.45")])).unwrap();
-        assert_eq!(config.size_margin, 0.45);
+    fn the_size_tolerance_can_be_read_and_must_keep_the_range_inside_the_frame() {
+        let config = EnrollmentConfig::from_lookup(lookup(&[(IDEAL_HEIGHT_ENV, "0.5"), (SIZE_TOLERANCE_ENV, "0.45")])).unwrap();
+        assert_eq!(config.size_tolerance, 0.45);
         for value in ["0", "0.51", "-0.1", "x"] {
-            let error = EnrollmentConfig::from_lookup(lookup(&[(SIZE_MARGIN_ENV, value)])).unwrap_err();
-            assert!(error.to_string().contains(SIZE_MARGIN_ENV), "{value}");
+            let error = EnrollmentConfig::from_lookup(lookup(&[(SIZE_TOLERANCE_ENV, value)])).unwrap_err();
+            assert!(error.to_string().contains(SIZE_TOLERANCE_ENV), "{value}");
         }
-        let error = EnrollmentConfig::from_lookup(lookup(&[(SIZE_MARGIN_ENV, "0.5")])).unwrap_err();
-        assert!(error.to_string().contains(SIZE_MARGIN_ENV) && error.to_string().contains(IDEAL_HEIGHT_ENV));
+        let error = EnrollmentConfig::from_lookup(lookup(&[(SIZE_TOLERANCE_ENV, "0.5")])).unwrap_err();
+        assert!(error.to_string().contains(SIZE_TOLERANCE_ENV) && error.to_string().contains(IDEAL_HEIGHT_ENV));
     }
 
     // @spec:AC-052
@@ -494,24 +497,52 @@ mod tests {
 
     // @spec:AC-052
     #[test]
-    fn each_center_component_alone_is_accepted_at_the_margin_and_rejected_beyond() {
-        assert!((error_of(&at(0.6, 0.5, 0.55)) - 1.0).abs() < 1e-3);
-        assert_eq!(guidance_for(at(0.6 + 0.005, 0.5, 0.55)), FrameOutcome::MoveRight);
-        assert_eq!(guidance_for(at(0.4 - 0.005, 0.5, 0.55)), FrameOutcome::MoveLeft);
-        assert_eq!(guidance_for(at(0.5, 0.6 + 0.005, 0.55)), FrameOutcome::MoveUp);
-        assert_eq!(guidance_for(at(0.5, 0.4 - 0.005, 0.55)), FrameOutcome::MoveDown);
-        assert!(accepted(at(0.6 - 0.005, 0.5, 0.55)));
-        assert!(accepted(at(0.5, 0.4 + 0.005, 0.55)));
+    fn the_position_limit_is_the_distance_to_the_frame_center() {
+        assert_eq!(verdict(&at(0.625, 0.5, 0.5)), None);
+        assert_eq!(verdict(&at(0.625 + 1.0 / 64.0, 0.5, 0.5)), Some(FrameOutcome::MoveRight));
+        assert_eq!(verdict(&at(0.5, 0.375 - 1.0 / 64.0, 0.5)), Some(FrameOutcome::MoveDown));
+        assert_eq!(verdict(&at(0.5, 0.625 + 1.0 / 64.0, 0.5)), Some(FrameOutcome::MoveUp));
+        assert_eq!(verdict(&at(0.375 - 1.0 / 64.0, 0.5, 0.5)), Some(FrameOutcome::MoveLeft));
+        assert_eq!(verdict(&at(0.5 + 0.09, 0.5 + 0.09, 0.5)), Some(FrameOutcome::MoveRight));
+    }
+
+    fn wide_image() -> GrayImage {
+        let pixels = (0..128 * 64).map(|i| if (i / 128 + i % 128) % 2 == 0 { 0 } else { 255 }).collect();
+        GrayImage::new(128, 64, pixels).unwrap()
+    }
+
+    fn wide_face_centered_at(cx: f32, cy: f32) -> Detection {
+        face_box(cx - 17.5, cy - 17.5, 35.0)
     }
 
     // @spec:AC-052
     #[test]
-    fn components_inside_their_own_margins_are_rejected_when_combined() {
-        let diagonal = at(0.58, 0.58, 0.55);
-        assert!((error_of(&diagonal) - 1.131).abs() < 0.01);
-        assert!(!accepted(diagonal.clone()));
-        assert_eq!(guidance_for(diagonal), FrameOutcome::MoveRight);
-        assert!(!accepted(at(0.57, 0.5, 0.55 + 0.13 * 0.75)));
+    fn the_position_tolerance_is_a_circle_in_units_of_the_frame_height() {
+        let (image, config) = (wide_image(), EnrollmentConfig::default());
+        let one_axis = wide_face_centered_at(64.0 + 0.09 * 64.0, 32.0);
+        let both_axes = wide_face_centered_at(64.0 + 0.09 * 64.0, 32.0 + 0.09 * 64.0);
+        assert_eq!(position_guidance(&image, &one_axis, &config), None);
+        assert!((position_error(&image, &both_axes) - 0.127).abs() < 1e-3);
+        assert_eq!(position_guidance(&image, &both_axes, &config), Some(FrameOutcome::MoveRight));
+        let horizontal = position_error(&image, &wide_face_centered_at(70.0, 32.0));
+        let vertical = position_error(&image, &wide_face_centered_at(64.0, 38.0));
+        assert!((horizontal - vertical).abs() < 1e-6);
+        assert!((horizontal - 6.0 / 64.0).abs() < 1e-6);
+    }
+
+    // @spec:AC-052
+    #[test]
+    fn both_indicators_near_their_limits_at_once_are_accepted() {
+        let detection = at(0.5 + 0.09 / 2f32.sqrt(), 0.5 + 0.09 / 2f32.sqrt(), 0.55 + 0.12);
+        assert!(accepted(detection));
+    }
+
+    // @spec:AC-052
+    #[test]
+    fn size_takes_priority_when_both_indicators_fail() {
+        assert_eq!(guidance_for(at(0.8, 0.5, 0.2)), FrameOutcome::TooFar);
+        assert_eq!(guidance_for(at(0.5, 0.2, 0.9)), FrameOutcome::TooClose);
+        assert_eq!(guidance_for(at(0.8, 0.5, 0.55)), FrameOutcome::MoveRight);
     }
 
     // @spec:AC-052
@@ -523,21 +554,12 @@ mod tests {
 
     // @spec:AC-052
     #[test]
-    fn the_verdict_follows_the_dominant_component() {
-        assert_eq!(guidance_for(at(0.57, 0.5, 0.55 - 0.13 * 0.9)), FrameOutcome::TooFar);
-        assert_eq!(guidance_for(at(0.62, 0.5, 0.55 + 0.13 * 0.6)), FrameOutcome::MoveRight);
-        assert_eq!(guidance_for(at(0.5, 0.45, 0.55 + 0.13 * 1.2)), FrameOutcome::TooClose);
-        assert_eq!(guidance_for(at(0.5, 0.35, 0.55 + 0.13 * 0.6)), FrameOutcome::MoveDown);
-    }
-
-    // @spec:AC-052
-    #[test]
-    fn the_center_margin_can_be_read_from_the_environment() {
-        let config = EnrollmentConfig::from_lookup(lookup(&[(CENTER_MARGIN_ENV, "0.5")])).unwrap();
-        assert_eq!(config.center_margin, 0.5);
+    fn the_position_tolerance_can_be_read_from_the_environment() {
+        let config = EnrollmentConfig::from_lookup(lookup(&[(POSITION_TOLERANCE_ENV, "0.5")])).unwrap();
+        assert_eq!(config.position_tolerance, 0.5);
         for value in ["0", "0.51", "x", ""] {
-            let error = EnrollmentConfig::from_lookup(lookup(&[(CENTER_MARGIN_ENV, value)])).unwrap_err();
-            assert!(error.to_string().contains(CENTER_MARGIN_ENV), "{value}");
+            let error = EnrollmentConfig::from_lookup(lookup(&[(POSITION_TOLERANCE_ENV, value)])).unwrap_err();
+            assert!(error.to_string().contains(POSITION_TOLERANCE_ENV), "{value}");
         }
     }
 
@@ -547,9 +569,9 @@ mod tests {
         let config = EnrollmentConfig::from_lookup(|_| None).unwrap();
         let defaults = EnrollmentConfig::default();
         assert_eq!(config.ideal_face_height_ratio, defaults.ideal_face_height_ratio);
-        assert_eq!(config.size_margin, defaults.size_margin);
-        assert_eq!(config.center_margin, defaults.center_margin);
-        assert_eq!((defaults.ideal_face_height_ratio, defaults.size_margin, defaults.center_margin), (0.55, 0.13, 0.10));
+        assert_eq!(config.size_tolerance, defaults.size_tolerance);
+        assert_eq!(config.position_tolerance, defaults.position_tolerance);
+        assert_eq!((defaults.ideal_face_height_ratio, defaults.size_tolerance, defaults.position_tolerance), (0.55, 0.13, 0.10));
     }
 
     fn uniform_image(level: u8) -> GrayImage {

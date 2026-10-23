@@ -72,12 +72,12 @@
 - Effort: high
 - Notes: depends on T-068. Built from the Slint prototype; the GTK sources are removed; the crate is GPL-3.0-only; T-065 is marked superseded.
 
-## T-070 — Ideal-crop fit at enrollment, tunable without rebuilding [done]
+## T-070 — Independent size and position fit at enrollment, tunable without rebuilding [done]
 - Refs: AC-050, AC-051, AC-052, ASM-018
 - Files: crates/engine-adapter-face/src/enrollment_quality.rs, crates/engine-adapter-face/src/ffi.rs, crates/openhello-gui/ui/capture.slint, README.md
 - Model: claude-sonnet-5
 - Effort: medium
-- Notes: ideal crop centered with face height 55% of the frame, margins 10% (center) and 13% (size) combined as a normalized Euclidean error (valid at most 1); enrollment only, authentication untouched; the three values overridable by validated environment variables; the window's guide oval matches the ideal height.
+- Notes: ideal crop centered with face height 55% of the frame; independent indicators, size within 13% of the ideal and center distance within 10% of the frame height, both required, size evaluated first; enrollment only, authentication untouched; the three values overridable by validated environment variables; the window's guide oval matches the ideal height.
 
 ## T-071 — Original wording for the window and the CLI [pending]
 
