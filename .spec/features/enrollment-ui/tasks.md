@@ -44,10 +44,34 @@
 - Effort: high
 - Notes: depends on T-064. Excluded from `default-members` so `cargo test` needs no GTK; oval guide and progress ring drawn over the preview.
 
-## T-066 — Desktop entry and optional installer step [pending]
+## T-066 — Desktop entry and installer step [pending]
 
 - Refs: AC-067, AC-068
 - Files: packaging/openhello.desktop, scripts/install.sh
 - Model: claude-sonnet-5
 - Effort: low
-- Notes: depends on T-065. Settings category entry; the installer skips the app, with a clear message, when GTK 4 or libadwaita is missing.
+- Notes: depends on T-069. Settings category entry; the installer builds the window with cargo, and if that build fails it warns and continues.
+
+## T-067 — Remove the PIN step from the wizard [pending]
+
+- Refs: AC-058, AC-060, ASM-024
+- Files: crates/openhello-gui-core/src/wizard.rs, crates/openhello-gui-core/src/strings.rs, crates/openhello-gui-core/src/client.rs, crates/openhello-gui-core/tests/wizard.rs, crates/openhello-gui-core/tests/strings.rs, crates/openhello-gui-core/tests/common/mod.rs
+- Model: claude-sonnet-5
+- Effort: medium
+- Notes: no Pin step, no PinError, no set_pin on the client trait; the order is welcome, identity, capture, recovery code (only when the key was created now), done. The GTK crate keeps compiling only until T-069 replaces it.
+
+## T-068 — Block enrollment when recognition is unavailable [pending]
+
+- Refs: AC-070, AC-069
+- Files: crates/openhellod/src/dbus_service.rs, crates/openhellod/src/core.rs, crates/openhello-gui-core/src/wizard.rs, crates/openhello-gui-core/src/client.rs, crates/openhello-gui-core/src/strings.rs, crates/openhello-gui-core/tests/wizard.rs
+- Model: claude-sonnet-5
+- Effort: high
+- Notes: depends on T-067. A readiness check the window runs before the welcome screen enables Get started; it reports the typed causes of T-061 without turning on the camera.
+
+## T-069 — Slint shell replaces the GTK shell [pending]
+
+- Refs: AC-058, AC-059, AC-062, AC-065, AC-066, AC-070, ASM-020
+- Files: crates/openhello-gui/Cargo.toml, crates/openhello-gui/build.rs, crates/openhello-gui/src/main.rs, Cargo.toml
+- Model: claude-sonnet-5
+- Effort: high
+- Notes: depends on T-068. Built from the Slint prototype; the GTK sources are removed; the crate is GPL-3.0-only; T-065 is marked superseded.

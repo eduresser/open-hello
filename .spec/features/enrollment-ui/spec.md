@@ -33,7 +33,7 @@ As a laptop owner, I want a step-by-step window that shows me the camera and tel
 
 - **Given** the user opens the app with no face set up
 - **When** they press "Get started" and complete each step
-- **Then** the app shows, in order: welcome, identity check (system password prompt), PIN creation only if no PIN exists, capture, recovery code, and a final "All set" screen with a Close button
+- **Then** the app shows, in order: welcome, identity check (system password prompt), capture, recovery code (only when the login key was created in this run), and a final "All set" screen with a Close button, and it never asks the user to create a PIN
 
 #### AC-059 — The capture screen shows the preview, the guidance and the progress
 
@@ -101,11 +101,11 @@ As a laptop owner on any distribution and desktop, I want to find the app in the
 - **When** the user searches for "Face recognition" in the menu or settings of any desktop that follows the freedesktop standard
 - **Then** an entry in the Settings category launches the app (valid `.desktop` file whose `Exec` resolves)
 
-#### AC-068 — The installer degrades without GTK
+#### AC-068 — The installer builds the window with cargo and degrades if that fails
 
-- **Given** the machine lacks the GTK 4 and libadwaita development libraries
+- **Given** the machine has the Rust toolchain the installer already requires
 - **When** the installer runs
-- **Then** it installs everything else, tells the user the app was skipped and which packages it needs, and the CLI keeps working
+- **Then** it builds and installs the window with no extra development packages; if that build fails it says so, installs everything else, and the CLI keeps working
 
 #### AC-069 — The daemon tells the client the cause of a failure
 
@@ -113,7 +113,19 @@ As a laptop owner on any distribution and desktop, I want to find the app in the
 - **When** the cause is a busy camera, a stuck infrared stream, a missing camera or an unavailable TPM
 - **Then** the D-Bus error carries a distinct cause the client can show, while the journal keeps the detail
 
+### US-024 — Enrollment only where recognition works
+
+As a laptop owner, I want the app to refuse to enroll when face recognition cannot work on this computer, so that I am never led into a setup that cannot sign me in.
+
+#### AC-070 — Enrollment is blocked when recognition is unavailable
+
+- **Given** the daemon reports that the camera is missing or busy, or that the TPM is unavailable
+- **When** the user opens the app
+- **Then** the welcome screen explains the cause in plain words, its Get started button is disabled, no enrollment session is created, and no PIN or other alternative is offered (the system password remains the sign-in fallback)
+
 ## Out of scope
+
+- Creating a PIN in the app (the PIN stays available in the daemon and in `openhello-cli set-pin`).
 
 - "Improve recognition" (adding a second recognition profile): see Q-004.
 - A page inside KDE System Settings or GNOME Settings (an optional thin layer later).
@@ -124,10 +136,11 @@ As a laptop owner on any distribution and desktop, I want to find the app in the
 
 | ID | Assumption | Status | Resolution |
 |---|---|---|---|
-| ASM-020 | A GTK 4 + libadwaita app in Rust, talking to the daemons over the D-Bus system bus, is acceptable on any desktop; it looks foreign on KDE but needs no per-desktop code. | open | Recommended by the toolkit research (2026-10-23); confirm on the KDE neon VM. |
+| ASM-020 | A Slint app (winit backend, fluent style, GPL-3.0-only crate) talking to the daemons over the D-Bus system bus is acceptable on any desktop; it has its own look, identical everywhere, and follows only the system light/dark setting. | confirmed | Chosen by the product owner on 2026-10-23 after comparing a Slint prototype (30 fps preview at about 7% of one core, 23 MB stripped binary, only runtime libraries) with the GTK build. The window crate is GPL-3.0-only; the rest of the project stays Apache-2.0. |
 | ASM-021 | One 640x360 8-bit grayscale frame per call, handed over as a sealed memory file descriptor in a method reply, is fast enough for a smooth preview. | open | Method replies carry descriptors reliably; signals do not. Measure on the VM. |
 | ASM-022 | The wizard wording reuses the Windows Hello strings extracted from `BioEnrollment` (English wording only for now). | confirmed | Extracted 2026-10-23 from the local Windows install; used for wording only. |
-| ASM-023 | GTK 4 and libadwaita development packages are installable on the VM (Ubuntu noble ships libadwaita 1.5). | open | Check with the package manager before the GUI task starts. |
+| ASM-023 | GTK 4 and libadwaita development packages are installable on the VM. | invalidated | The window no longer uses GTK. |
+| ASM-024 | The app offers no PIN: the system password remains the fallback at sign-in, and the recovery code is shown once at the end of enrollment. | confirmed | Product owner decision, 2026-10-23: when recognition is unavailable the app blocks enrollment instead of offering a PIN. |
 
 ## Open questions
 
