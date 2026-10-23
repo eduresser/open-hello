@@ -23,6 +23,8 @@ const COMMON_STACKS: &[&str] = &[
 const OLD_STACK_FILES: &[&str] = &["sudo-openhello", "openhello-lockscreen"];
 const OLD_INCLUDES: &[&str] = &["sudo-openhello", "openhello-lockscreen"];
 const BACKUP_SUFFIX: &str = ".openhello.bak";
+const WRAPPER_HEADER: &str =
+    "# open-hello wrapper: `openhello-cli pam disable` restores the symlink to";
 
 #[derive(Debug)]
 pub struct PamFailure {
@@ -369,6 +371,9 @@ fn disable_one(dirs: &Dirs, service: &str) -> Result<String, String> {
         ));
     }
     let content = read_text(&path)?;
+    if let Some(message) = unwrap_if_wrapper(dirs, service, &content)? {
+        return Ok(message);
+    }
     let (kept, removed) = remove_lines(&content, is_our_line);
     if removed == 0 {
         return Ok(format!("{service}: not enabled"));
@@ -415,6 +420,13 @@ fn enable_common(
 ) -> Result<(), String> {
     let with_fallback = |e: String| format!("{e}\n{FALLBACK}");
     let name = discover_common_stack(dirs).map_err(with_fallback)?;
+    if let Some(target) = sibling_symlink_target(dirs, &name) {
+        wrap_symlink(dirs, &name, &target, &our_line(module_args))?;
+        say(format!(
+            "{name}: enabled through a wrapper that includes {target}, which your PAM tool keeps managing"
+        ));
+        return remove_other_service_lines(dirs, &name, say);
+    }
     let path = materialize(dirs, &name).map_err(with_fallback)?;
     let content = read_text(&path)?;
     if content.lines().any(is_our_line) {
@@ -428,12 +440,76 @@ fn enable_common(
         )?;
         say(format!("{name}: enabled in {}", path.display()));
     }
+    remove_other_service_lines(dirs, &name, say)
+}
+
+fn remove_other_service_lines(
+    dirs: &Dirs,
+    common: &str,
+    say: &mut dyn FnMut(String),
+) -> Result<(), String> {
     for service in editable_names(dirs)? {
-        if service != name {
+        if service != common {
             remove_service_lines(dirs, &service, say)?;
         }
     }
     Ok(())
+}
+
+fn sibling_symlink_target(dirs: &Dirs, name: &str) -> Option<String> {
+    let target = fs::read_link(dirs.etc.join(name)).ok()?;
+    let target = target.to_str()?;
+    (!target.contains('/') && is_regular(&dirs.etc.join(target))).then(|| target.to_string())
+}
+
+fn wrapper_content(line: &str, target: &str) -> String {
+    format!("{WRAPPER_HEADER} {target}\n{line}\nauth include {target}\n")
+}
+
+fn wrapped_target(content: &str) -> Option<&str> {
+    let lines: Vec<&str> = content.lines().filter(|l| first_token(l).is_some()).collect();
+    match lines.as_slice() {
+        [ours, include] if is_our_line(ours) => match include.split_whitespace().collect::<Vec<_>>()[..] {
+            ["auth", "include", target] if !target.contains('/') => Some(target),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn wrap_symlink(dirs: &Dirs, name: &str, target: &str, line: &str) -> Result<(), String> {
+    let target_path = dirs.etc.join(target);
+    let meta = fs::metadata(&target_path)
+        .map_err(|e| format!("cannot read {}: {e}", target_path.display()))?;
+    write_atomic(
+        &dirs.etc.join(name),
+        wrapper_content(line, target).as_bytes(),
+        meta.mode(),
+        Some((meta.uid(), meta.gid())),
+    )
+}
+
+fn restore_symlink(dirs: &Dirs, name: &str, target: &str) -> Result<(), String> {
+    let path = dirs.etc.join(name);
+    let temp = path.with_file_name(format!(".{name}.openhello.tmp"));
+    let _ = fs::remove_file(&temp);
+    std::os::unix::fs::symlink(target, &temp)
+        .and_then(|_| fs::rename(&temp, &path))
+        .map_err(|e| {
+            let _ = fs::remove_file(&temp);
+            format!("cannot restore {} as a symlink to {target}: {e}", path.display())
+        })
+}
+
+fn unwrap_if_wrapper(dirs: &Dirs, name: &str, content: &str) -> Result<Option<String>, String> {
+    let Some(target) = wrapped_target(content) else {
+        return Ok(None);
+    };
+    if !is_regular(&dirs.etc.join(target)) {
+        return Ok(None);
+    }
+    restore_symlink(dirs, name, target)?;
+    Ok(Some(format!("{name}: disabled, restored the symlink to {target}")))
 }
 
 fn legacy_services_file(dirs: &Dirs) -> PathBuf {
@@ -507,6 +583,11 @@ fn disable_everywhere(dirs: &Dirs, say: &mut dyn FnMut(String)) -> Result<(), St
         else {
             continue;
         };
+        if let Some(message) = unwrap_if_wrapper(dirs, &name, &content)? {
+            say(message);
+            touched += 1;
+            continue;
+        }
         let (kept, removed) = remove_lines(&content, is_our_line);
         if removed > 0 {
             rewrite(&path, &name, &kept)?;
