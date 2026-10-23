@@ -13,7 +13,8 @@ fn status_of(error: &StorageError) -> Status {
         StorageError::NotFound => Status::NotFound,
         StorageError::AuthenticationFailed => Status::AuthenticationFailed,
         StorageError::InvalidUid(_) => Status::InvalidArgument,
-        StorageError::Tpm(_) | StorageError::Io(_) => Status::Internal,
+        StorageError::Tpm(_) => Status::TpmUnavailable,
+        StorageError::Io(_) => Status::Internal,
     }
 }
 
@@ -124,4 +125,15 @@ static STORAGE_INTERFACE: StorageInterface = StorageInterface {
 #[no_mangle]
 pub extern "C" fn openhello_storage_interface() -> *const StorageInterface {
     &STORAGE_INTERFACE
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tpm_failures_have_their_own_status_and_io_stays_internal() {
+        assert_eq!(status_of(&StorageError::Tpm("x".into())), Status::TpmUnavailable);
+        assert_eq!(status_of(&StorageError::Io("x".into())), Status::Internal);
+    }
 }

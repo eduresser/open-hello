@@ -29,6 +29,10 @@ const AUTO_EMITTER: &str = "auto";
 pub enum SensorError {
     #[error("camera device error: {0}")]
     Device(String),
+    #[error("camera device busy: {0}")]
+    DeviceBusy(String),
+    #[error("camera device missing: {0}")]
+    NoDevice(String),
     #[error("IR emitter configuration invalid: {0}")]
     EmitterConfig(String),
     #[error("IR emitter activation failed: {0}")]
@@ -171,7 +175,7 @@ type SharedState = Arc<Mutex<SensorState>>;
 fn open_state(device_path: &str) -> Result<SharedState, SensorError> {
     let policy = EmitterPolicy::from_env()?;
     if !std::path::Path::new(device_path).exists() {
-        return Err(SensorError::Device(format!("{device_path} does not exist")));
+        return Err(SensorError::NoDevice(format!("{device_path} does not exist")));
     }
     let path = device_path.to_string();
     let opener = Box::new(move || {
@@ -199,12 +203,10 @@ fn spawn_idle_release(state: std::sync::Weak<Mutex<SensorState>>) {
 fn status_of(error: &SensorError) -> Status {
     match error {
         SensorError::Device(_) => Status::DeviceUnavailable,
-        SensorError::EmitterConfig(_)
-        | SensorError::EmitterActivation(_)
-        | SensorError::NoIllumination
-        | SensorError::EmitterWriteRefused(_)
-        | SensorError::EmitterNotConfirmed(_)
-        | SensorError::NoAlternation => Status::EmitterFailure,
+        SensorError::DeviceBusy(_) => Status::DeviceBusy,
+        SensorError::NoDevice(_) => Status::NoDevice,
+        SensorError::EmitterConfig(_) | SensorError::EmitterActivation(_) | SensorError::EmitterWriteRefused(_) => Status::EmitterFailure,
+        SensorError::NoIllumination | SensorError::EmitterNotConfirmed(_) | SensorError::NoAlternation => Status::SensorStuck,
     }
 }
 
@@ -625,11 +627,21 @@ mod tests {
 
     #[test]
     fn emitter_errors_are_reported_as_emitter_failure_with_the_reason_available() {
-        let error = SensorError::EmitterNotConfirmed(1);
+        let error = SensorError::EmitterWriteRefused("denied".into());
         assert_eq!(fail(&error), Status::EmitterFailure);
         let mut buffer = [0u8; 256];
         let length = unsafe { openhello_sensor_last_error(buffer.as_mut_ptr(), buffer.len()) };
         assert_eq!(std::str::from_utf8(&buffer[..length]).unwrap(), error.to_string());
+    }
+
+    #[test]
+    fn stuck_stream_busy_and_missing_camera_get_their_own_statuses() {
+        assert_eq!(status_of(&SensorError::NoAlternation), Status::SensorStuck);
+        assert_eq!(status_of(&SensorError::EmitterNotConfirmed(1)), Status::SensorStuck);
+        assert_eq!(status_of(&SensorError::NoIllumination), Status::SensorStuck);
+        assert_eq!(status_of(&SensorError::DeviceBusy("x".into())), Status::DeviceBusy);
+        assert_eq!(status_of(&SensorError::NoDevice("x".into())), Status::NoDevice);
+        assert_eq!(status_of(&SensorError::Device("x".into())), Status::DeviceUnavailable);
     }
 
     #[test]

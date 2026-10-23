@@ -7,6 +7,8 @@ use std::sync::{Arc, Mutex};
 use futures_lite::StreamExt;
 
 use zbus::message::Header;
+use zbus::message::Message;
+use zbus::names::ErrorName;
 use zbus::{fdo, interface, Connection};
 
 use crate::backends::DaemonError;
@@ -15,6 +17,71 @@ use crate::logging::{Level, Logger, Value};
 
 pub const BUS_NAME: &str = "io.openhello.Biometrics1";
 pub const OBJECT_PATH: &str = "/io/openhello/Biometrics1";
+
+#[derive(Debug)]
+pub enum ServiceError {
+    Fdo(fdo::Error),
+    CameraBusy(String),
+    SensorStuck(String),
+    NoCamera(String),
+    TpmUnavailable(String),
+}
+
+impl ServiceError {
+    fn cause(&self) -> Option<(&'static str, &str)> {
+        match self {
+            ServiceError::Fdo(_) => None,
+            ServiceError::CameraBusy(message) => Some(("io.openhello.Error.CameraBusy", message)),
+            ServiceError::SensorStuck(message) => Some(("io.openhello.Error.SensorStuck", message)),
+            ServiceError::NoCamera(message) => Some(("io.openhello.Error.NoCamera", message)),
+            ServiceError::TpmUnavailable(message) => Some(("io.openhello.Error.TpmUnavailable", message)),
+        }
+    }
+}
+
+impl From<fdo::Error> for ServiceError {
+    fn from(error: fdo::Error) -> Self {
+        ServiceError::Fdo(error)
+    }
+}
+
+impl std::fmt::Display for ServiceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match (self, self.cause()) {
+            (ServiceError::Fdo(error), _) => error.fmt(f),
+            (_, Some((name, message))) => write!(f, "{name}: {message}"),
+            (_, None) => Ok(()),
+        }
+    }
+}
+
+impl std::error::Error for ServiceError {}
+
+impl zbus::DBusError for ServiceError {
+    fn name(&self) -> ErrorName<'_> {
+        match self.cause() {
+            Some((name, _)) => ErrorName::from_static_str_unchecked(name),
+            None => match self {
+                ServiceError::Fdo(error) => error.name(),
+                _ => ErrorName::from_static_str_unchecked("org.freedesktop.DBus.Error.Failed"),
+            },
+        }
+    }
+
+    fn description(&self) -> Option<&str> {
+        match self {
+            ServiceError::Fdo(error) => error.description(),
+            _ => self.cause().map(|(_, message)| message),
+        }
+    }
+
+    fn create_reply(&self, call: &Header) -> zbus::Result<Message> {
+        match self {
+            ServiceError::Fdo(error) => error.create_reply(call),
+            _ => Message::error(call, self.name())?.build(&(self.description().unwrap_or_default(),)),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
@@ -120,7 +187,7 @@ impl Service {
     async fn with_core<T: Send + 'static>(
         &self,
         operation: impl FnOnce(&mut Biometrics) -> Result<T, DaemonError> + Send + 'static,
-    ) -> fdo::Result<T> {
+    ) -> Result<T, ServiceError> {
         let core = self.core.clone();
         let outcome = blocking::unblock(move || {
             let mut guard = core.lock().map_err(|_| DaemonError::Backend("core lock poisoned".into()))?;
@@ -200,19 +267,24 @@ impl Service {
         }
     }
 
-    async fn session_uid(&self, handle: &str) -> fdo::Result<u32> {
+    async fn session_uid(&self, handle: &str) -> Result<u32, ServiceError> {
         let handle = handle.to_string();
         self.with_core(move |core| core.session_uid(&handle)).await
     }
 }
 
-fn failure(logger: &Logger, error: DaemonError) -> fdo::Error {
+fn failure(logger: &Logger, error: DaemonError) -> ServiceError {
     if !matches!(error, DaemonError::Cancelled) {
         logger.log(Level::Error, "operation-failed", &[("reason", Value::reason(&error))]);
     }
+    let message = error.user_message().to_string();
     match error {
-        DaemonError::InvalidRequest(_) => fdo::Error::InvalidArgs(error.user_message().to_string()),
-        _ => fdo::Error::Failed(error.user_message().to_string()),
+        DaemonError::InvalidRequest(_) => fdo::Error::InvalidArgs(message).into(),
+        DaemonError::CameraBusy(_) => ServiceError::CameraBusy(message),
+        DaemonError::SensorStuck(_) => ServiceError::SensorStuck(message),
+        DaemonError::NoCamera(_) => ServiceError::NoCamera(message),
+        DaemonError::TpmUnavailable(_) => ServiceError::TpmUnavailable(message),
+        _ => fdo::Error::Failed(message).into(),
     }
 }
 
@@ -230,7 +302,7 @@ impl Service {
         uid: u32,
         #[zbus(connection)] conn: &Connection,
         #[zbus(header)] header: Header<'_>,
-    ) -> fdo::Result<String> {
+    ) -> Result<String, ServiceError> {
         self.authorize(conn, &header, Action::EnrollBegin, uid).await?;
         let handle = self.with_core(move |core| core.enroll_begin(uid)).await?;
         self.discard_when_owner_leaves(conn, &header, &handle).await;
@@ -242,7 +314,7 @@ impl Service {
         handle: String,
         #[zbus(connection)] conn: &Connection,
         #[zbus(header)] header: Header<'_>,
-    ) -> fdo::Result<(String, String, u32, u32)> {
+    ) -> Result<(String, String, u32, u32), ServiceError> {
         let uid = self.session_uid(&handle).await?;
         self.authorize(conn, &header, Action::EnrollCapture, uid).await?;
         let progress = self.with_core(move |core| core.enroll_capture(&handle)).await?;
@@ -254,7 +326,7 @@ impl Service {
         handle: String,
         #[zbus(connection)] conn: &Connection,
         #[zbus(header)] header: Header<'_>,
-    ) -> fdo::Result<bool> {
+    ) -> Result<bool, ServiceError> {
         let uid = self.session_uid(&handle).await?;
         self.authorize(conn, &header, Action::EnrollCommit, uid).await?;
         self.release_enrollment_owner(&handle);
@@ -267,7 +339,7 @@ impl Service {
         handle: String,
         #[zbus(connection)] conn: &Connection,
         #[zbus(header)] header: Header<'_>,
-    ) -> fdo::Result<()> {
+    ) -> Result<(), ServiceError> {
         let uid = self.session_uid(&handle).await?;
         self.authorize(conn, &header, Action::EnrollDiscard, uid).await?;
         self.release_enrollment_owner(&handle);
@@ -279,7 +351,7 @@ impl Service {
         uid: u32,
         #[zbus(connection)] conn: &Connection,
         #[zbus(header)] header: Header<'_>,
-    ) -> fdo::Result<bool> {
+    ) -> Result<bool, ServiceError> {
         let watch = CallerWatch::start(conn, &header).await;
         let gone = watch.flag();
         self.with_core(move |core| core.verify_cancellable(uid, &|| gone.load(Ordering::SeqCst))).await
@@ -289,7 +361,7 @@ impl Service {
         &self,
         #[zbus(connection)] conn: &Connection,
         #[zbus(header)] header: Header<'_>,
-    ) -> fdo::Result<(bool, u32)> {
+    ) -> Result<(bool, u32), ServiceError> {
         let watch = CallerWatch::start(conn, &header).await;
         let gone = watch.flag();
         let matched = self.with_core(move |core| core.identify_cancellable(&|| gone.load(Ordering::SeqCst))).await?;
@@ -301,7 +373,7 @@ impl Service {
         uid: u32,
         #[zbus(connection)] conn: &Connection,
         #[zbus(header)] header: Header<'_>,
-    ) -> fdo::Result<bool> {
+    ) -> Result<bool, ServiceError> {
         self.authorize(conn, &header, Action::Purge, uid).await?;
         self.with_core(move |core| core.purge(uid)).await?;
         Ok(true)
@@ -312,7 +384,7 @@ impl Service {
         uid: u32,
         #[zbus(connection)] conn: &Connection,
         #[zbus(header)] header: Header<'_>,
-    ) -> fdo::Result<bool> {
+    ) -> Result<bool, ServiceError> {
         self.authorize_own_uid(conn, &header, uid).await?;
         self.with_core(move |core| core.face_enrolled(uid)).await
     }

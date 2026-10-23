@@ -31,12 +31,43 @@ impl DbusClient {
     }
 }
 
+fn failure_cause(error_name: &str) -> Option<&'static str> {
+    match error_name {
+        "io.openhello.Error.CameraBusy" => Some("the camera is busy: close the program using it and try again"),
+        "io.openhello.Error.SensorStuck" => Some("the infrared stream is stuck: power the computer off completely and try again"),
+        "io.openhello.Error.NoCamera" => Some("no infrared camera was found: check that it is connected and enabled"),
+        "io.openhello.Error.TpmUnavailable" => Some("the TPM is unavailable: check that it is enabled and that tpm2-tools is installed"),
+        _ => None,
+    }
+}
+
+fn describe_refusal(method: &str, error_name: &str, detail: Option<&str>) -> String {
+    match failure_cause(error_name) {
+        Some(cause) => format!("{method} failed: {cause}"),
+        None => format!("{method} refused ({error_name}): {}", detail.unwrap_or("no detail")),
+    }
+}
+
 fn describe(method: &str, error: zbus::Error) -> String {
     match error {
-        zbus::Error::MethodError(name, detail, _) => {
-            format!("{method} refused ({}): {}", name.as_str(), detail.as_deref().unwrap_or("no detail"))
-        }
+        zbus::Error::MethodError(name, detail, _) => describe_refusal(method, name.as_str(), detail.as_deref()),
         other => format!("{method} failed: {other}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // @spec:AC-069
+    #[test]
+    fn each_failure_cause_gets_its_own_sentence_and_other_errors_keep_the_generic_form() {
+        let say = |name: &str| describe_refusal("Verify", name, Some("detail"));
+        assert!(say("io.openhello.Error.CameraBusy").contains("camera is busy"));
+        assert!(say("io.openhello.Error.SensorStuck").contains("the infrared stream is stuck: power the computer off completely and try again"));
+        assert!(say("io.openhello.Error.NoCamera").contains("no infrared camera"));
+        assert!(say("io.openhello.Error.TpmUnavailable").contains("TPM is unavailable"));
+        assert_eq!(say("org.freedesktop.DBus.Error.Failed"), "Verify refused (org.freedesktop.DBus.Error.Failed): detail");
     }
 }
 

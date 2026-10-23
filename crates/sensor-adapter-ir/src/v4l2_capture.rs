@@ -105,7 +105,13 @@ pub struct V4l2Camera {
 unsafe impl Send for V4l2Camera {}
 
 fn os_error(context: &str) -> SensorError {
-    SensorError::Device(format!("{context}: {}", std::io::Error::last_os_error()))
+    let error = std::io::Error::last_os_error();
+    let detail = format!("{context}: {error}");
+    match error.raw_os_error() {
+        Some(libc::EBUSY) => SensorError::DeviceBusy(detail),
+        Some(libc::ENOENT | libc::ENODEV) => SensorError::NoDevice(detail),
+        _ => SensorError::Device(detail),
+    }
 }
 
 fn zeroed<T>() -> T {
@@ -278,6 +284,18 @@ mod tests {
     }
 
     #[test]
+    fn errno_decides_between_busy_missing_and_generic_device_errors() {
+        let with_errno = |code: i32| {
+            unsafe { *libc::__errno_location() = code };
+            os_error("open")
+        };
+        assert!(matches!(with_errno(libc::EBUSY), SensorError::DeviceBusy(_)));
+        assert!(matches!(with_errno(libc::ENOENT), SensorError::NoDevice(_)));
+        assert!(matches!(with_errno(libc::ENODEV), SensorError::NoDevice(_)));
+        assert!(matches!(with_errno(libc::EIO), SensorError::Device(_)));
+    }
+
+    #[test]
     fn only_full_error_free_buffers_count_as_frames() {
         assert!(is_complete(230_400, 0, 230_400));
         assert!(!is_complete(125_524, 0, 230_400));
@@ -288,6 +306,6 @@ mod tests {
     #[test]
     fn open_reports_missing_device() {
         let error = V4l2Camera::open("/dev/openhello-no-such-camera").err().unwrap();
-        assert!(matches!(error, SensorError::Device(_)));
+        assert!(matches!(error, SensorError::NoDevice(_)));
     }
 }
