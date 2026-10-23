@@ -11,6 +11,7 @@ pub struct DemoMode {
 pub struct Options {
     pub demo: Option<DemoMode>,
     pub stats: bool,
+    pub trace_input: bool,
 }
 
 impl Options {
@@ -27,10 +28,27 @@ impl Options {
                 "--hold" => mode.hold = true,
                 "--fail" => mode.fail = true,
                 "--stats" => options.stats = true,
+                "--trace-input" => options.trace_input = true,
                 other => eprintln!("unknown option: {other}"),
             }
         }
         options.demo = demo.then_some(mode);
         options
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Options {
+        Options::parse(args.iter().map(|arg| arg.to_string()))
+    }
+
+    // @spec:AC-076
+    #[test]
+    fn trace_input_is_off_by_default_and_turned_on_by_its_flag() {
+        assert!(!parse(&[]).trace_input);
+        assert!(parse(&["--trace-input"]).trace_input);
     }
 }

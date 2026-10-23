@@ -21,6 +21,8 @@ The script builds the project, downloads the models and ONNX Runtime with checks
 
 The face recognition window is optional: when the fontconfig and FreeType development files are installed, the script also builds it and installs the `openhello-gui` command and a menu entry; otherwise it skips the window, names the packages to install for your distribution, and everything else works.
 
+When a click in the window seems to be lost, run `openhello-gui --trace-input` and send the lines it prints on stderr: each pointer event, button click, worker command and screen change with its time in milliseconds, and no image data.
+
 Options:
 
 | Option | Effect |

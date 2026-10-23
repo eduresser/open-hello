@@ -43,6 +43,7 @@ export component MainWindow inherits Window {
     background: Palette.background;
 
     if root.page == Page.welcome: WelcomePage {
+        busy: root.busy;
         blocked: root.blocked;
         blocked-title: root.blocked-title;
         blocked-body: root.blocked-body;
@@ -57,6 +58,7 @@ export component MainWindow inherits Window {
         guidance: root.guidance;
         progress: root.progress;
         accepted: root.accepted;
+        busy: root.busy;
         cancel => { root.cancel(); }
     }
 
@@ -70,6 +72,7 @@ export component MainWindow inherits Window {
     if root.page == Page.error: ErrorPage {
         title: root.error-title;
         body: root.error-body;
+        busy: root.busy;
         retry => { root.retry(); }
         delete-data => { root.confirming = true; }
     }

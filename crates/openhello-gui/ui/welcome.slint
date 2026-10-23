@@ -4,6 +4,7 @@ import { T } from "texts.slint";
 
 export component WelcomePage inherits Column {
     in property <bool> blocked;
+    in property <bool> busy;
     in property <string> blocked-title;
     in property <string> blocked-body;
     callback get-started();
@@ -14,11 +15,12 @@ export component WelcomePage inherits Column {
     ButtonRow {
         ActionButton {
             text: T.set-up;
-            enabled: !root.blocked;
+            enabled: !root.blocked && !root.busy;
             clicked => { root.get-started(); }
         }
         if root.blocked: Button {
             text: T.try-again;
+            enabled: !root.busy;
             clicked => { root.retry(); }
         }
     }
