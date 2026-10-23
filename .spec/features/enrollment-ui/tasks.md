@@ -2,8 +2,7 @@
 
 > feature: enrollment-ui
 
-## T-060 — Status query on both daemons [pending]
-
+## T-060 — Status query on both daemons [done]
 - Refs: AC-056, AC-057
 - Files: crates/openhellod/src/dbus_service.rs, crates/openhellod/src/core.rs, crates/openhello-keyd/src/dbus_service.rs, crates/openhello-cli/src/dbus_client.rs
 - Model: claude-sonnet-5

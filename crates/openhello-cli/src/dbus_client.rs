@@ -71,4 +71,8 @@ impl BiometricsClient for DbusClient {
     fn purge(&mut self, uid: u32) -> Result<(), String> {
         self.proxy()?.call::<_, _, bool>("Purge", &(uid,)).map(|_| ()).map_err(|e| describe("Purge", e))
     }
+
+    fn face_status(&mut self, uid: u32) -> Result<bool, String> {
+        self.proxy()?.call("GetStatus", &(uid,)).map_err(|e| describe("GetStatus", e))
+    }
 }

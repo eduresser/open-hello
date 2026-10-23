@@ -161,6 +161,12 @@ impl Protectors {
         self.write_blob(uid, Kind::Pin, &blob)
     }
 
+    pub fn status(&self, uid: u32) -> Result<(bool, bool), KeydError> {
+        let uid = validate_uid(uid)?;
+        let _store = self.store.lock().unwrap_or_else(PoisonError::into_inner);
+        Ok((self.is_provisioned(uid), self.user_dir(uid).join(Kind::Pin.file()).exists()))
+    }
+
     pub fn unlock_with_pin(&self, uid: u32, pin: &str) -> Result<Secret, KeydError> {
         let uid = validate_uid(uid)?;
         if !self.user_dir(uid).join(Kind::Pin.file()).exists() {
