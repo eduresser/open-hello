@@ -73,6 +73,17 @@ pub enum Text {
     KeyFailedBody,
     OtherTitle,
     OtherBody,
+    ManageTitle,
+    ManageBody,
+    TestFace,
+    Testing,
+    Recognized,
+    NotRecognized,
+    RemoveFace,
+    RemoveConfirmTitle,
+    RemoveConfirmBody,
+    SetUpAgain,
+    CopyCode,
 }
 
 impl Text {
@@ -183,6 +194,23 @@ impl Text {
                 "The setup could not be completed and nothing was saved. Try again.",
                 "Não foi possível concluir a configuração e nada foi salvo. Tente novamente.",
             ),
+            Text::ManageTitle => ("Face recognition", "Reconhecimento facial"),
+            Text::ManageBody => (
+                "Your face is set up. Test it, remove it or set it up again.",
+                "Seu rosto está configurado. Teste-o, remova-o ou configure novamente.",
+            ),
+            Text::TestFace => ("Test", "Testar"),
+            Text::Testing => ("Look at the camera…", "Olhe para a câmera…"),
+            Text::Recognized => ("Recognized", "Reconhecido"),
+            Text::NotRecognized => ("Not recognized", "Não reconhecido"),
+            Text::RemoveFace => ("Remove", "Remover"),
+            Text::RemoveConfirmTitle => ("Remove your face?", "Remover o seu rosto?"),
+            Text::RemoveConfirmBody => (
+                "Your face and login key will be erased and the system will ask for your password. You can set them up again later.",
+                "Seu rosto e a chave de login serão apagados e o sistema pedirá a sua senha. Você poderá configurá-los novamente depois.",
+            ),
+            Text::SetUpAgain => ("Set up again", "Configurar novamente"),
+            Text::CopyCode => ("Copy", "Copiar"),
         }
     }
 }
