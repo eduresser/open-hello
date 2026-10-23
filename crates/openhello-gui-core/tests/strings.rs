@@ -92,6 +92,7 @@ fn every_failure_cause_has_a_title_an_explanation_and_a_try_again_label() {
         for cause in causes {
             assert!(!strings.failure_title(cause).is_empty());
             assert!(strings.failure_explanation(cause).len() > 20);
+            assert!(!strings.failure_explanation(cause).contains(" cm"));
         }
         assert!(!strings.get(Text::TryAgain).is_empty());
     }

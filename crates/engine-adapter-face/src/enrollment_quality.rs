@@ -26,8 +26,8 @@ impl Default for EnrollmentConfig {
             yaw_range_deg: 20.0,
             blur_threshold: 40.0,
             sample_spacing_ms: 200,
-            timeout_ms: 20_000,
-            ideal_face_height_ratio: 0.55,
+            timeout_ms: 30_000,
+            ideal_face_height_ratio: 0.62,
             size_tolerance: 0.13,
             position_tolerance: 0.10,
             min_face_brightness: 40.0,
@@ -390,7 +390,7 @@ mod tests {
     // @spec:AC-050
     #[test]
     fn the_ideal_crop_has_no_error_and_is_accepted() {
-        let ideal = at(0.5, 0.5, 0.55);
+        let ideal = at(0.5, 0.5, 0.62);
         assert!(size_error(&textured_image(), &ideal, &EnrollmentConfig::default()) < 1e-3);
         assert!(position_error(&textured_image(), &ideal) < 1e-3);
         assert!(accepted(ideal));
@@ -462,7 +462,7 @@ mod tests {
     // @spec:AC-052
     #[test]
     fn both_indicators_near_their_limits_at_once_are_accepted() {
-        let detection = at(0.5 + 0.09 / 2f32.sqrt(), 0.5 + 0.09 / 2f32.sqrt(), 0.55 + 0.12);
+        let detection = at(0.5 + 0.09 / 2f32.sqrt(), 0.5 + 0.09 / 2f32.sqrt(), 0.62 + 0.12);
         assert!(accepted(detection));
     }
 
@@ -471,21 +471,21 @@ mod tests {
     fn size_takes_priority_when_both_indicators_fail() {
         assert_eq!(guidance_for(at(0.8, 0.5, 0.2)), FrameOutcome::TooFar);
         assert_eq!(guidance_for(at(0.5, 0.2, 0.9)), FrameOutcome::TooClose);
-        assert_eq!(guidance_for(at(0.8, 0.5, 0.55)), FrameOutcome::MoveRight);
+        assert_eq!(guidance_for(at(0.8, 0.5, 0.62)), FrameOutcome::MoveRight);
     }
 
     // @spec:AC-052
     #[test]
     fn the_enrollment_defaults_are_the_chosen_ideal_and_tolerances() {
         let defaults = EnrollmentConfig::default();
-        assert_eq!((defaults.ideal_face_height_ratio, defaults.size_tolerance, defaults.position_tolerance), (0.55, 0.13, 0.10));
+        assert_eq!((defaults.ideal_face_height_ratio, defaults.size_tolerance, defaults.position_tolerance), (0.62, 0.13, 0.10));
     }
 
     // @spec:AC-052
     #[test]
     fn a_face_in_a_corner_is_rejected_with_a_direction() {
-        assert_eq!(guidance_for(at(0.2, 0.2, 0.55)), FrameOutcome::MoveLeft);
-        assert_eq!(guidance_for(at(0.5, 0.8, 0.55)), FrameOutcome::MoveUp);
+        assert_eq!(guidance_for(at(0.2, 0.2, 0.62)), FrameOutcome::MoveLeft);
+        assert_eq!(guidance_for(at(0.5, 0.8, 0.62)), FrameOutcome::MoveUp);
     }
 
 
@@ -539,10 +539,10 @@ mod tests {
     fn the_capture_window_elapsing_fails_with_explicit_error_and_no_template() {
         let mut s = session(false);
         s.submit(1_000, &textured_image(), &face_at_yaw(0.0), embed).unwrap();
-        assert!(s.tick(20_999).is_ok());
+        assert!(s.tick(30_999).is_ok());
         assert_eq!(s.state(), SessionState::InProgress);
-        let error = s.tick(21_000).unwrap_err();
-        assert!(matches!(error, EnrollmentError::Timeout { timeout_ms: 20_000 }));
+        let error = s.tick(31_000).unwrap_err();
+        assert!(matches!(error, EnrollmentError::Timeout { timeout_ms: 30_000 }));
         assert_eq!(s.state(), SessionState::Failed);
         assert_eq!(s.filled(), 0);
         assert!(matches!(s.commit(), Err(EnrollmentError::Timeout { .. })));
@@ -553,7 +553,7 @@ mod tests {
     fn late_frame_after_the_window_is_refused() {
         let mut s = session(false);
         s.submit(1_000, &textured_image(), &face_at_yaw(0.0), embed).unwrap();
-        let result = s.submit(25_000, &textured_image(), &face_at_yaw(0.0), embed);
+        let result = s.submit(35_000, &textured_image(), &face_at_yaw(0.0), embed);
         assert!(matches!(result, Err(EnrollmentError::Timeout { .. })));
     }
 
@@ -563,8 +563,8 @@ mod tests {
         let mut s = session(false);
         let outcome = s.submit(100_000, &textured_image(), &face_at_yaw(0.0), embed).unwrap();
         assert_eq!(outcome, FrameOutcome::Accepted);
-        assert!(s.tick(119_999).is_ok());
-        assert!(s.tick(120_000).is_err());
+        assert!(s.tick(129_999).is_ok());
+        assert!(s.tick(130_000).is_err());
     }
 
     #[test]

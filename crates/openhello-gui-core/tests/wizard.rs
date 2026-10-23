@@ -47,7 +47,7 @@ fn provisioning_and_the_recovery_code_are_skipped_when_the_key_already_exists() 
 
 // @spec:AC-059
 #[test]
-fn each_tick_returns_a_guidance_sentence_progress_text_and_a_frame_and_progress_grows() {
+fn each_tick_returns_a_guidance_sentence_and_a_frame_and_progress_grows() {
     let script = vec![step("move-left", "in-progress", 0), step("accepted", "in-progress", 1), step("accepted", "in-progress", 2)];
     let (mut flow, _calls) = open(Status { face: false, key: true }, script);
     reach_capture(&mut flow);
@@ -55,9 +55,7 @@ fn each_tick_returns_a_guidance_sentence_progress_text_and_a_frame_and_progress_
     let second = flow.tick().unwrap();
     let third = flow.tick().unwrap();
     assert_eq!(first.guidance, "Move a little to your left");
-    assert_eq!(first.progress_text, "0 of 6");
     assert_eq!(second.guidance, "Hold still and look at the camera");
-    assert_eq!(third.progress_text, "2 of 6");
     assert!(third.filled > second.filled && second.filled > first.filled);
     assert_eq!(third.frame, Some(Frame { width: 2, height: 2, pixels: vec![1, 2, 3, 4] }));
     assert_eq!(flow.step(), Step::Capture);
@@ -75,12 +73,12 @@ fn the_frame_debug_output_never_contains_the_pixels() {
 
 // @spec:AC-061
 #[test]
-fn the_twenty_second_window_ending_shows_a_timeout_error_without_commit_and_try_again_restarts() {
+fn the_thirty_second_window_ending_shows_a_timeout_error_without_commit_and_try_again_restarts() {
     let (mut flow, calls) = open(Status { face: false, key: true }, vec![step("no-face", "failed", 1)]);
     reach_capture(&mut flow);
     flow.tick();
     assert_eq!(flow.step(), Step::Error(FailureCause::Timeout));
-    assert!(flow.strings().failure_explanation(FailureCause::Timeout).contains("20 seconds"));
+    assert!(flow.strings().failure_explanation(FailureCause::Timeout).contains("30 seconds"));
     assert_eq!(calls.borrow().commits, 0);
     flow.retry();
     assert_eq!(flow.step(), Step::Welcome);

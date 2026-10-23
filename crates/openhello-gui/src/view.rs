@@ -76,7 +76,6 @@ fn show_failure(window: &MainWindow, strings: &Strings, cause: FailureCause) {
 fn show_capture_start(window: &MainWindow) {
     window.set_frame(Image::default());
     window.set_guidance(SharedString::new());
-    window.set_progress_text(SharedString::new());
     window.set_progress(0.0);
     window.set_accepted(false);
     show(window, Page::Capture);
@@ -85,7 +84,6 @@ fn show_capture_start(window: &MainWindow) {
 fn show_capture(window: &MainWindow, view: CaptureView) {
     window.set_guidance(view.guidance.into());
     window.set_accepted(view.accepted);
-    window.set_progress_text(view.progress_text.into());
     window.set_progress(view.progress);
     if let Some(buffer) = view.frame {
         window.set_frame(image_of(buffer));

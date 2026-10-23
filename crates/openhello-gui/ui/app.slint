@@ -19,7 +19,6 @@ export component MainWindow inherits Window {
     in property <string> blocked-body;
     in property <image> frame;
     in property <string> guidance;
-    in property <string> progress-text;
     in property <float> progress;
     in property <bool> accepted;
     in property <string> recovery-code;
@@ -59,7 +58,6 @@ export component MainWindow inherits Window {
     if root.page == Page.capture: CapturePage {
         frame: root.frame;
         guidance: root.guidance;
-        progress-text: root.progress-text;
         progress: root.progress;
         accepted: root.accepted;
         cancel => { root.cancel(); }
