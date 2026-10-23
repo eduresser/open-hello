@@ -43,10 +43,11 @@ fn installed_window_binary() -> String {
 fn desktop_entry_has_the_required_keys_and_launches_the_installed_binary() {
     let entry = desktop_entry();
     assert_eq!(value(&entry, "Type"), "Application");
-    assert_eq!(value(&entry, "Name"), "Face recognition");
+    assert_eq!(value(&entry, "Name"), "Open Hello");
+    assert_eq!(value(&entry, "GenericName"), "Face recognition");
     assert_eq!(value(&entry, "Terminal"), "false");
     assert!(!value(&entry, "Comment").is_empty());
-    assert!(!value(&entry, "Icon").is_empty());
+    assert_eq!(value(&entry, "Icon"), "openhello");
     let categories = value(&entry, "Categories");
     assert!(categories.split(';').any(|c| c == "Settings"), "{categories}");
     let exec = value(&entry, "Exec");
@@ -120,6 +121,7 @@ fn present_headers_list_building_and_installing_the_window_and_the_entry() {
     assert!(run.output.contains("cargo build --release") && run.output.contains("-p openhello-gui"), "{}", run.output);
     assert!(run.output.contains("/usr/local/bin/openhello-gui"), "{}", run.output);
     assert!(run.output.contains("/usr/local/share/applications/openhello.desktop"), "{}", run.output);
+    assert!(run.output.contains("/usr/local/share/icons/hicolor/scalable/apps/openhello.svg"), "{}", run.output);
     assert!(!run.output.contains("was skipped"), "{}", run.output);
 }
 
@@ -130,5 +132,6 @@ fn no_gui_leaves_the_window_out_entirely() {
     assert_eq!(run.status, 0, "{}", run.output);
     assert!(!run.output.contains("openhello-gui"), "{}", run.output);
     assert!(!run.output.contains("openhello.desktop"), "{}", run.output);
+    assert!(!run.output.contains("openhello.svg"), "{}", run.output);
     assert!(!run.output.contains("was skipped"), "{}", run.output);
 }

@@ -1,27 +1,33 @@
-import { Button } from "std-widgets.slint";
-import { ActionButton, Body, ButtonRow, Column, Heading, TestStatus } from "components.slint";
+import { ActionButton, Brand, Column, Footer, Intro, MarkRow, Spacer, TestStatus } from "components.slint";
 import { T } from "texts.slint";
 
-export component DonePage inherits Column {
+export component DonePage inherits VerticalLayout {
     in property <bool> busy;
     in property <bool> testing;
     callback test();
     callback set-up-again();
 
-    Heading { text: T.done-title; }
-    Body { text: T.done-body; }
-    TestStatus {
-        busy: root.busy;
-        testing: root.testing;
+    Column {
+        MarkRow { fill: Brand.positive; }
+        Intro {
+            title: T.done-title;
+            body: T.done-body;
+        }
+        TestStatus {
+            busy: root.busy;
+            testing: root.testing;
+        }
     }
-    ButtonRow {
+    Footer {
+        Spacer {}
         ActionButton {
             text: T.test;
             enabled: !root.busy;
             clicked => { root.test(); }
         }
-        Button {
+        ActionButton {
             text: T.set-up-again;
+            secondary: true;
             enabled: !root.busy;
             clicked => { root.set-up-again(); }
         }

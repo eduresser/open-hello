@@ -38,6 +38,7 @@ LEGACY_UNIT_DIR=/etc/systemd/system
 LDCONFIG="$(command -v ldconfig || echo /sbin/ldconfig)"
 CALIBRATION_FILE="$STATE_DIR/calibration.bin"
 APPLICATIONS_DIR=/usr/local/share/applications
+ICONS_DIR=/usr/local/share/icons/hicolor
 OS_RELEASE="${OPENHELLO_OS_RELEASE:-/etc/os-release}"
 GUI_INSTALLED=0
 
@@ -223,6 +224,9 @@ install_window_files() {
   run install -m 0755 "$T/openhello-gui" /usr/local/bin/openhello-gui
   run install -d -m 0755 "$APPLICATIONS_DIR"
   run install -m 0644 "$REPO/packaging/openhello.desktop" "$APPLICATIONS_DIR/openhello.desktop"
+  run install -d -m 0755 "$ICONS_DIR/scalable/apps"
+  run install -m 0644 "$REPO/packaging/openhello.svg" "$ICONS_DIR/scalable/apps/openhello.svg"
+  if command -v gtk-update-icon-cache >/dev/null 2>&1; then run gtk-update-icon-cache -q -t "$ICONS_DIR" || true; fi
   if command -v update-desktop-database >/dev/null 2>&1; then run update-desktop-database "$APPLICATIONS_DIR" || true; fi
 }
 
