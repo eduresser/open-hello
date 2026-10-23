@@ -23,8 +23,7 @@
 - Effort: high
 - Notes: depends on T-061. `EnrollFrame(handle)` returns a sealed read-only memfd; new polkit action implied by `enroll-begin`; explicit, narrow exception to the no-image-bytes test (P-003, P-010 stay intact).
 
-## T-063 — GUI core: wizard state machine and wording [pending]
-
+## T-063 — GUI core: wizard state machine and wording [done]
 - Refs: AC-058, AC-059, AC-060, AC-061, AC-062
 - Files: crates/openhello-gui-core/Cargo.toml, crates/openhello-gui-core/src/lib.rs, crates/openhello-gui-core/src/wizard.rs, crates/openhello-gui-core/src/strings.rs
 - Model: claude-sonnet-5

@@ -12,6 +12,7 @@ members = [
     "crates/storage-adapter-templates",
     "crates/openhellod",
     "crates/openhello-cli",
+    "crates/openhello-gui-core",
 ]
 
 [workspace.package]

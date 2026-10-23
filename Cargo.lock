@@ -849,6 +849,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "openhello-gui-core"
+version = "0.1.0"
+
+[[package]]
 name = "openhello-keyd"
 version = "0.1.0"
 dependencies = [
