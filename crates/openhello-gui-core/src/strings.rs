@@ -210,10 +210,10 @@ impl Text {
             Text::ReasonTpm => "the security chip is unavailable",
             Text::ReasonAuthDenied => "the system did not authorize the request",
             Text::ReasonOther => "something went wrong",
-            Text::SudoNotice => "Your face works for sign-in and the lock screen. sudo on this computer asks for the root password, so it cannot use your face.",
-            Text::SudoUseOwn => "Use my face for sudo",
-            Text::SudoChanged => "sudo now accepts your face or your own password.",
-            Text::SudoFailedPrefix => "sudo was not changed: ",
+            Text::SudoNotice => "Your face works for sign-in and the lock screen. Administrator prompts on this computer, such as sudo and pkexec, ask for the root password, so they cannot use your face.",
+            Text::SudoUseOwn => "Use my face for admin prompts",
+            Text::SudoChanged => "Administrator prompts now accept your face or your own password.",
+            Text::SudoFailedPrefix => "Administrator prompts were not changed: ",
         }
     }
 }

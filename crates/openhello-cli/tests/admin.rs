@@ -9,7 +9,7 @@ use fake_sudo::{my_uid, FakeSudo, Reads, Visudo, TUMBLEWEED_DEFAULTS};
 fn cli(fake: &FakeSudo, args: &[&str]) -> (i32, String, String) {
     let path = format!("{}:{}", fake.dir.path().display(), std::env::var("PATH").unwrap());
     let out = Command::new(env!("CARGO_BIN_EXE_openhello-cli"))
-        .arg("sudo")
+        .arg("admin")
         .args(args)
         .env("PATH", path)
         .output()
@@ -22,16 +22,18 @@ fn cli(fake: &FakeSudo, args: &[&str]) -> (i32, String, String) {
 }
 
 #[test]
-fn status_own_password_and_restore_round_trip_through_the_drop_in() {
+fn status_own_password_and_restore_round_trip_through_sudo_and_polkit() {
     let fake = FakeSudo::new(TUMBLEWEED_DEFAULTS, Visudo::Accepts, Reads::DropIns);
     let (uid, root) = (my_uid().to_string(), fake.dir.path().to_str().unwrap().to_string());
-    assert_eq!(cli(&fake, &["status", &uid, "--root", &root]), (0, "root-password".into(), String::new()));
-    assert_eq!(cli(&fake, &["own-password", &uid, "--root", &root]).1, "own-password");
-    assert!(fake.drop_in(my_uid()).exists());
-    assert_eq!(cli(&fake, &["status", &uid, "--root", &root]).1, "own-password");
-    assert_eq!(cli(&fake, &["restore", &uid, "--root", &root]).1, "restored");
-    assert_eq!(cli(&fake, &["restore", &uid, "--root", &root]).1, "nothing to restore");
-    assert_eq!(cli(&fake, &["status", &uid, "--root", &root]).1, "root-password");
+    let rule = fake.dir.path().join(format!("etc/polkit-1/rules.d/49-openhello-uid{uid}.rules"));
+    let status = |fake: &FakeSudo| cli(fake, &["status", &uid, "--root", &root]);
+    assert_eq!(status(&fake), (0, "sudo: root-password\npolkit: system-default".into(), String::new()));
+    assert_eq!(cli(&fake, &["own-password", &uid, "--root", &root]).1, "sudo: own-password\npolkit: own-password");
+    assert!(fake.drop_in(my_uid()).exists() && rule.exists());
+    assert_eq!(status(&fake).1, "sudo: own-password\npolkit: own-password");
+    assert_eq!(cli(&fake, &["restore", &uid, "--root", &root]).1, "sudo: restored\npolkit: restored");
+    assert_eq!(cli(&fake, &["restore", &uid, "--root", &root]).1, "sudo: nothing to restore\npolkit: nothing to restore");
+    assert_eq!(status(&fake).1, "sudo: root-password\npolkit: system-default");
 }
 
 #[test]
@@ -41,6 +43,7 @@ fn a_rejected_drop_in_exits_three_and_leaves_no_file() {
     assert_eq!(code, 3);
     assert!(stderr.contains("visudo rejected"), "{stderr}");
     assert!(fake.entries().is_empty());
+    assert!(!fake.dir.path().join("etc/polkit-1").exists(), "polkit stays untouched when sudo fails");
 }
 
 #[test]

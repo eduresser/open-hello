@@ -15,8 +15,8 @@ fn main() -> ExitCode {
             }
         };
     }
-    if args.first().map(String::as_str) == Some("sudo") {
-        return match openhello_cli::sudo_policy::run(&args[1..], &mut std::io::stdout()) {
+    if args.first().map(String::as_str) == Some("admin") {
+        return match openhello_cli::admin::run(&args[1..], &mut std::io::stdout()) {
             Ok(()) => ExitCode::SUCCESS,
             Err(failure) => {
                 eprintln!("openhello-cli: {}", failure.message);

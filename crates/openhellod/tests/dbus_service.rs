@@ -130,7 +130,8 @@ fn serve_core(bus: &PrivateBus, authorizer: Arc<dyn Authorizer>, core: Biometric
 fn serve_with_sudo(bus: &PrivateBus, authorizer: Arc<dyn Authorizer>, fake: &FakeSudo) {
     let engine = Engine { begins: Arc::default(), candidates: Vec::new() };
     let core = Biometrics::new(Box::new(Sensor), Box::new(engine), Box::new(Storage::default()), DEFAULT_TARGET_FAR);
-    serve_service(bus, Service::new(core, authorizer).with_sudo_policy(fake.store()));
+    let rules = openhellod::polkit_admin::PolkitAdminStore::new(fake.dir.path().join("etc/polkit-1/rules.d"));
+    serve_service(bus, Service::new(core, authorizer).with_sudo_policy(fake.store()).with_polkit_admin(rules));
 }
 
 fn serve_service(bus: &PrivateBus, service: Service) {
@@ -851,11 +852,13 @@ fn switching_sudo_to_the_own_password_needs_polkit_and_purge_restores_it() {
     let policy: String = proxy(&conn).call("UseOwnPasswordForSudo", &(my_uid(),)).unwrap();
     assert_eq!(policy, "own-password");
     assert!(fake.drop_in(my_uid()).exists());
+    assert!(polkit_rule(&fake).exists());
     assert_eq!(*polkit.asked.lock().unwrap(), vec!["io.openhello.biometrics.sudo-own-password"]);
     assert_eq!(proxy(&conn).call::<_, _, String>("GetSudoPolicy", &(my_uid(),)).unwrap(), "own-password");
 
     proxy(&conn).call::<_, _, bool>("Purge", &(my_uid(),)).unwrap();
     assert!(!fake.drop_in(my_uid()).exists());
+    assert!(!polkit_rule(&fake).exists());
     assert_eq!(proxy(&conn).call::<_, _, String>("GetSudoPolicy", &(my_uid(),)).unwrap(), "root-password");
 }
 
@@ -881,4 +884,9 @@ fn a_failed_switch_returns_a_short_message_without_paths_or_tool_output() {
     assert!(error.contains("sudo could not be changed"), "{error}");
     assert!(!error.contains("sudoers") && !error.contains("syntax error"), "{error}");
     assert!(fake.entries().is_empty());
+    assert!(!polkit_rule(&fake).exists());
+}
+
+fn polkit_rule(fake: &FakeSudo) -> std::path::PathBuf {
+    fake.dir.path().join(format!("etc/polkit-1/rules.d/49-openhello-uid{}.rules", my_uid()))
 }
