@@ -106,14 +106,6 @@ cargo test --workspace
 
 Some tests use a simulated TPM (`swtpm`) and need the `libtss2-tcti-swtpm` library. If it is not installed on the system, point `OPENHELLO_SWTPM_TCTI_LIB` to the `libtss2-tcti-swtpm.so.0` file.
 
-## Enrollment tuning
-
-Enrollment compares the detected face with an ideal crop centered in the frame, with a height of 55% of the frame height. A frame is accepted when two independent indicators are within their tolerances: the face height deviation from the ideal and the distance from the face center to the frame center. Authentication is not affected. The values are read when the engine plugin starts, and an invalid value stops it from starting.
-
-- `OPENHELLO_ENROLL_IDEAL_HEIGHT`: ideal face height as a fraction of the frame height, a decimal in (0, 1) (default `0.55`).
-- `OPENHELLO_ENROLL_SIZE_TOLERANCE`: tolerated deviation of the face height from the ideal, a decimal in (0, 0.5] such that ideal plus and minus the tolerance stays within (0, 1] (default `0.13`).
-- `OPENHELLO_ENROLL_POSITION_TOLERANCE`: tolerated distance from the face center to the frame center, in units of the frame height (a circle in pixels), a decimal in (0, 0.5] (default `0.10`).
-
 The detailed architecture is in `.spec/docs/arquitetura-linux.md`.
 
 ## License
