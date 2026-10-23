@@ -5,7 +5,7 @@ set -u
 STATE_DIR="${OPENHELLO_PKG_STATE_DIR:-/var/lib/openhello}"
 SYSTEMD_RUN_DIR="${OPENHELLO_PKG_SYSTEMD_RUN_DIR:-/run/systemd/system}"
 PAM_DECIDED="$STATE_DIR/pam-enabled-by-package"
-SUDO_DECIDED="$STATE_DIR/sudo-own-password-by-package"
+ADMIN_DECIDED="$STATE_DIR/admin-own-password-by-package"
 INSTALLER_UID="${SUDO_UID:-${PKEXEC_UID:-}}"
 
 warn() { echo "openhello: $*" >&2; }
@@ -23,11 +23,11 @@ if [ ! -e "$PAM_DECIDED" ]; then
 fi
 
 # Whoever ran the install through sudo or pkexec already proved they are an administrator.
-if [ ! -e "$SUDO_DECIDED" ] && [ -n "$INSTALLER_UID" ] && [ "$INSTALLER_UID" != 0 ]; then
-  if openhello-cli sudo own-password "$INSTALLER_UID" >/dev/null; then
-    : > "$SUDO_DECIDED"
+if [ ! -e "$ADMIN_DECIDED" ] && [ -n "$INSTALLER_UID" ] && [ "$INSTALLER_UID" != 0 ]; then
+  if openhello-cli admin own-password "$INSTALLER_UID" >/dev/null; then
+    : > "$ADMIN_DECIDED"
   else
-    warn "sudo keeps asking for the root password; open Open Hello to let it accept your face"
+    warn "sudo and admin prompts keep asking for the root password; open Open Hello to let them accept your face"
   fi
 fi
 

@@ -162,7 +162,7 @@ impl SudoPolicyStore {
     }
 }
 
-fn user_name(uid: u32) -> Option<String> {
+pub(crate) fn user_name(uid: u32) -> Option<String> {
     let mut buffer = vec![0u8; 4096];
     let mut entry: libc::passwd = unsafe { std::mem::zeroed() };
     let mut found: *mut libc::passwd = std::ptr::null_mut();

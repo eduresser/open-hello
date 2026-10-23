@@ -14,6 +14,7 @@ use zbus::{fdo, interface, Connection};
 use crate::backends::DaemonError;
 use crate::core::Biometrics;
 use crate::logging::{Level, Logger, Value};
+use crate::polkit_admin::PolkitAdminStore;
 use crate::sudo_policy::SudoPolicyStore;
 
 pub const BUS_NAME: &str = "io.openhello.Biometrics1";
@@ -141,6 +142,7 @@ pub struct Service {
     logger: Logger,
     enrollment_owners: Arc<Mutex<HashMap<String, zbus::Task<()>>>>,
     sudo: Arc<SudoPolicyStore>,
+    polkit_admin: Arc<PolkitAdminStore>,
 }
 
 struct CallerWatch {
@@ -193,7 +195,13 @@ impl Service {
             logger,
             enrollment_owners: Arc::default(),
             sudo: Arc::new(SudoPolicyStore::system()),
+            polkit_admin: Arc::new(PolkitAdminStore::system()),
         }
+    }
+
+    pub fn with_polkit_admin(mut self, store: PolkitAdminStore) -> Self {
+        self.polkit_admin = Arc::new(store);
+        self
     }
 
     pub fn with_sudo_policy(mut self, store: SudoPolicyStore) -> Self {
@@ -202,8 +210,13 @@ impl Service {
     }
 
     async fn restore_sudo_policy(&self, uid: u32) {
-        let store = self.sudo.clone();
-        match blocking::unblock(move || store.restore(uid)).await {
+        let (store, admin) = (self.sudo.clone(), self.polkit_admin.clone());
+        let restored = blocking::unblock(move || {
+            let sudo = store.restore(uid);
+            let polkit = admin.restore(uid);
+            Ok(sudo? | polkit?)
+        });
+        match restored.await {
             Ok(true) => self.logger.log(Level::Info, "sudo-policy-restored", &[("uid", Value::Uid(uid))]),
             Ok(false) => {}
             Err(reason) => self.logger.log(Level::Warn, "sudo-policy-restore-failed", &[("uid", Value::Uid(uid)), ("reason", Value::Reason(reason))]),
@@ -455,8 +468,13 @@ impl Service {
         #[zbus(header)] header: Header<'_>,
     ) -> Result<String, ServiceError> {
         self.authorize(conn, &header, Action::SudoOwnPassword, uid).await?;
-        let store = self.sudo.clone();
-        match blocking::unblock(move || store.use_own_password(uid)).await {
+        let (store, admin) = (self.sudo.clone(), self.polkit_admin.clone());
+        let switched = blocking::unblock(move || {
+            let policy = store.use_own_password(uid)?;
+            admin.use_own_identity(uid)?;
+            Ok::<_, String>(policy)
+        });
+        match switched.await {
             Ok(policy) => {
                 self.logger.log(Level::Info, "sudo-policy-changed", &[("uid", Value::Uid(uid)), ("policy", Value::Label(policy.as_str()))]);
                 Ok(policy.as_str().into())

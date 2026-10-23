@@ -3,7 +3,7 @@ use std::io::Write;
 pub mod dbus_client;
 pub mod keyd_client;
 pub mod pam_enable;
-pub mod sudo_policy;
+pub mod admin;
 
 const MAX_CAPTURES: u32 = 1000;
 
