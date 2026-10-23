@@ -5,7 +5,7 @@ pub mod keyd_client;
 pub mod pam_enable;
 pub mod terminal;
 
-const MAX_CAPTURES: u32 = 400;
+const MAX_CAPTURES: u32 = 1000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Progress {
@@ -179,22 +179,46 @@ fn enroll(
     say: &mut dyn FnMut(String) -> Result<(), String>,
 ) -> Result<Outcome, String> {
     let handle = client.enroll_begin(uid)?;
-    say(format!("enrolling uid {uid}: turn your head slowly through all poses"))?;
+    say(format!("enrolling uid {uid}: look straight at the camera and hold still"))?;
+    let mut last_line = String::new();
     for _ in 0..MAX_CAPTURES {
         let progress = client.enroll_capture(&handle)?;
-        say(format!("frame {}: {}/{} poses covered", progress.verdict, progress.filled, progress.required))?;
+        let line = format!("{} ({}/{} samples)", enroll_guidance(&progress.verdict), progress.filled, progress.required);
+        if line != last_line {
+            say(line.clone())?;
+            last_line = line;
+        }
         match progress.state.as_str() {
             "complete" => {
                 client.enroll_commit(&handle)?;
                 say(format!("enrolled uid {uid}"))?;
                 return provision(keys, uid, &enrolled_failure(uid), say);
             }
-            "failed" => return Err("enrollment failed: timed out without covering every pose".into()),
+            "failed" => return Err("enrollment failed: timed out before enough frontal samples were collected".into()),
             _ => {}
         }
     }
     client.enroll_discard(&handle)?;
-    Err(format!("enrollment abandoned after {MAX_CAPTURES} captures without covering every pose"))
+    Err(format!("enrollment abandoned after {MAX_CAPTURES} captures without enough frontal samples"))
+}
+
+pub fn enroll_guidance(verdict: &str) -> &str {
+    match verdict {
+        "accepted" | "too-soon" => "Keep looking directly at the camera",
+        "no-face" => "Face not detected: make sure your face is centered in the frame",
+        "move-left" => "Move a little to your left",
+        "move-right" => "Move a little to your right",
+        "move-up" => "Move up a little",
+        "move-down" => "Move down a little",
+        "too-close" => "Too close: move a little farther away",
+        "too-far" => "Too far: move a bit closer",
+        "too-dark" => "Too dark: move closer to the camera or add some light",
+        "too-bright" => "Too bright: avoid direct sunlight or a strong light behind you",
+        "yaw-out-of-range" => "Keep looking forward, facing the camera",
+        "blurred" => "Hold still: the image is not sharp enough",
+        "occluded" => "Remove anything that may be blocking your face",
+        other => other,
+    }
 }
 
 const RETRY_FAILURE: &str = "the login key could not be created; run this from the desktop session and check the openhello-keyd service log";
@@ -398,7 +422,22 @@ mod tests {
         let (outcome, output) = run_command(&mut client, Command::Enroll { uid: 1000 });
         assert_eq!(outcome, Outcome::Success);
         assert_eq!(client.calls, vec!["begin 1000", "capture h1", "capture h1", "capture h1", "commit h1"]);
-        assert!(output.contains("6/6 poses covered") && output.contains("enrolled uid 1000"));
+        assert!(output.contains("6/6 samples") && output.contains("enrolled uid 1000"));
+    }
+
+    // @spec:AC-053
+    #[test]
+    fn enroll_tells_the_user_where_to_move_and_does_not_repeat_the_same_line() {
+        let guided = |verdict: &str| Progress { verdict: verdict.into(), state: "in-progress".into(), filled: 0, required: 6 };
+        let mut client = FakeClient {
+            progress: vec![guided("move-left"), guided("move-left"), guided("too-far"), guided("no-face"), progress("failed", 0)],
+            ..Default::default()
+        };
+        let (_, output) = run_command(&mut client, Command::Enroll { uid: 1000 });
+        assert_eq!(output.matches("Move a little to your left").count(), 1);
+        assert!(output.contains("Too far: move a bit closer") && output.contains("Face not detected"));
+        let verdicts = ["move-right", "move-up", "move-down", "too-close", "yaw-out-of-range", "blurred", "occluded", "accepted", "too-dark", "too-bright"];
+        assert!(verdicts.iter().all(|v| enroll_guidance(v) != *v));
     }
 
     #[test]

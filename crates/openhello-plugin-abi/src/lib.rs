@@ -1,6 +1,6 @@
 use std::os::raw::{c_char, c_void};
 
-pub const ABI_VERSION: u32 = 3;
+pub const ABI_VERSION: u32 = 5;
 
 pub const SENSOR_ENTRY_SYMBOL: &str = "openhello_sensor_interface";
 pub const ENGINE_ENTRY_SYMBOL: &str = "openhello_engine_interface";
@@ -46,7 +46,15 @@ pub enum EnrollVerdict {
     Occluded = 2,
     NoFace = 3,
     YawOutOfRange = 4,
-    BucketAlreadyFilled = 5,
+    TooSoon = 5,
+    MoveLeft = 6,
+    MoveRight = 7,
+    MoveUp = 8,
+    MoveDown = 9,
+    TooClose = 10,
+    TooFar = 11,
+    TooDark = 12,
+    TooBright = 13,
 }
 
 #[repr(i32)]
