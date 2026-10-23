@@ -8,6 +8,11 @@ use openhellod::core::{Biometrics, DEFAULT_TARGET_FAR};
 use openhellod::dbus_service::{Action, AuthFuture, Authorizer, Caller, Service, BUS_NAME, OBJECT_PATH};
 use openhellod::polkit::{PolkitAuthorizer, PolkitClient, PolkitFuture};
 
+mod support {
+    pub mod fake_sudo;
+}
+use support::fake_sudo::{FakeSudo, Reads, Visudo, TUMBLEWEED_DEFAULTS};
+
 struct PrivateBus {
     daemon: Child,
     address: String,
@@ -119,8 +124,17 @@ fn serve(bus: &PrivateBus, authorizer: Arc<dyn Authorizer>) -> Arc<AtomicUsize> 
 }
 
 fn serve_core(bus: &PrivateBus, authorizer: Arc<dyn Authorizer>, core: Biometrics) {
+    serve_service(bus, Service::new(core, authorizer));
+}
+
+fn serve_with_sudo(bus: &PrivateBus, authorizer: Arc<dyn Authorizer>, fake: &FakeSudo) {
+    let engine = Engine { begins: Arc::default(), candidates: Vec::new() };
+    let core = Biometrics::new(Box::new(Sensor), Box::new(engine), Box::new(Storage::default()), DEFAULT_TARGET_FAR);
+    serve_service(bus, Service::new(core, authorizer).with_sudo_policy(fake.store()));
+}
+
+fn serve_service(bus: &PrivateBus, service: Service) {
     let address = bus.address.clone();
-    let service = Service::new(core, authorizer);
     let (ready_tx, ready_rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         async_io::block_on(async move {
@@ -811,4 +825,60 @@ fn check_ready_reports_an_unavailable_tpm_as_tpm_unavailable() {
     assert_eq!(name, "io.openhello.Error.TpmUnavailable");
     assert!(!detail.contains("tpm2_getcap"), "{detail}");
     assert_eq!(readiness.captures, 0);
+}
+
+#[test]
+fn the_caller_reads_whose_password_sudo_asks_only_for_its_own_uid() {
+    let bus = PrivateBus::start();
+    let fake = FakeSudo::new(TUMBLEWEED_DEFAULTS, Visudo::Accepts, Reads::DropIns);
+    let polkit = Arc::new(ScriptedPolkit { authorized: true, asked: Default::default() });
+    serve_with_sudo(&bus, Arc::new(PolkitAuthorizer::new(polkit.clone())), &fake);
+    let conn = client(&bus);
+    let policy: String = proxy(&conn).call("GetSudoPolicy", &(my_uid(),)).unwrap();
+    assert_eq!(policy, "root-password");
+    let error = proxy(&conn).call::<_, _, String>("GetSudoPolicy", &(my_uid() + 1,)).unwrap_err();
+    assert!(error.to_string().contains("AuthFailed"), "{error}");
+    assert!(polkit.asked.lock().unwrap().is_empty());
+}
+
+#[test]
+fn switching_sudo_to_the_own_password_needs_polkit_and_purge_restores_it() {
+    let bus = PrivateBus::start();
+    let fake = FakeSudo::new(TUMBLEWEED_DEFAULTS, Visudo::Accepts, Reads::DropIns);
+    let polkit = Arc::new(ScriptedPolkit { authorized: true, asked: Default::default() });
+    serve_with_sudo(&bus, Arc::new(PolkitAuthorizer::new(polkit.clone())), &fake);
+    let conn = client(&bus);
+    let policy: String = proxy(&conn).call("UseOwnPasswordForSudo", &(my_uid(),)).unwrap();
+    assert_eq!(policy, "own-password");
+    assert!(fake.drop_in(my_uid()).exists());
+    assert_eq!(*polkit.asked.lock().unwrap(), vec!["io.openhello.biometrics.sudo-own-password"]);
+    assert_eq!(proxy(&conn).call::<_, _, String>("GetSudoPolicy", &(my_uid(),)).unwrap(), "own-password");
+
+    proxy(&conn).call::<_, _, bool>("Purge", &(my_uid(),)).unwrap();
+    assert!(!fake.drop_in(my_uid()).exists());
+    assert_eq!(proxy(&conn).call::<_, _, String>("GetSudoPolicy", &(my_uid(),)).unwrap(), "root-password");
+}
+
+#[test]
+fn a_polkit_refusal_leaves_sudo_untouched() {
+    let bus = PrivateBus::start();
+    let fake = FakeSudo::new(TUMBLEWEED_DEFAULTS, Visudo::Accepts, Reads::DropIns);
+    let polkit = Arc::new(ScriptedPolkit { authorized: false, asked: Default::default() });
+    serve_with_sudo(&bus, Arc::new(PolkitAuthorizer::new(polkit)), &fake);
+    let conn = client(&bus);
+    let error = proxy(&conn).call::<_, _, String>("UseOwnPasswordForSudo", &(my_uid(),)).unwrap_err();
+    assert!(error.to_string().contains("AuthFailed"), "{error}");
+    assert!(fake.entries().is_empty());
+}
+
+#[test]
+fn a_failed_switch_returns_a_short_message_without_paths_or_tool_output() {
+    let bus = PrivateBus::start();
+    let fake = FakeSudo::new(TUMBLEWEED_DEFAULTS, Visudo::Rejects, Reads::DropIns);
+    serve_with_sudo(&bus, Arc::new(AllowAll), &fake);
+    let conn = client(&bus);
+    let error = proxy(&conn).call::<_, _, String>("UseOwnPasswordForSudo", &(my_uid(),)).unwrap_err().to_string();
+    assert!(error.contains("sudo could not be changed"), "{error}");
+    assert!(!error.contains("sudoers") && !error.contains("syntax error"), "{error}");
+    assert!(fake.entries().is_empty());
 }

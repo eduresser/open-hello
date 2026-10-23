@@ -15,6 +15,15 @@ fn main() -> ExitCode {
             }
         };
     }
+    if args.first().map(String::as_str) == Some("sudo") {
+        return match openhello_cli::sudo_policy::run(&args[1..], &mut std::io::stdout()) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(failure) => {
+                eprintln!("openhello-cli: {}", failure.message);
+                ExitCode::from(failure.code)
+            }
+        };
+    }
     let current_uid = unsafe { libc::getuid() };
     let invocation = match parse_args(std::env::args().skip(1), current_uid) {
         Ok(invocation) => invocation,

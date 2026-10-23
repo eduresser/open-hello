@@ -14,6 +14,7 @@ use zbus::{fdo, interface, Connection};
 use crate::backends::DaemonError;
 use crate::core::Biometrics;
 use crate::logging::{Level, Logger, Value};
+use crate::sudo_policy::SudoPolicyStore;
 
 pub const BUS_NAME: &str = "io.openhello.Biometrics1";
 pub const OBJECT_PATH: &str = "/io/openhello/Biometrics1";
@@ -91,6 +92,7 @@ pub enum Action {
     EnrollCommit,
     EnrollDiscard,
     Purge,
+    SudoOwnPassword,
 }
 
 impl Action {
@@ -102,6 +104,7 @@ impl Action {
             Action::EnrollCommit => "io.openhello.biometrics.enroll-commit",
             Action::EnrollDiscard => "io.openhello.biometrics.enroll-discard",
             Action::Purge => "io.openhello.biometrics.purge",
+            Action::SudoOwnPassword => "io.openhello.biometrics.sudo-own-password",
         }
     }
 }
@@ -137,6 +140,7 @@ pub struct Service {
     authorizer: Arc<dyn Authorizer>,
     logger: Logger,
     enrollment_owners: Arc<Mutex<HashMap<String, zbus::Task<()>>>>,
+    sudo: Arc<SudoPolicyStore>,
 }
 
 struct CallerWatch {
@@ -183,7 +187,27 @@ async fn watch_name(conn: &Connection, name: &str, gone: Arc<AtomicBool>) -> Opt
 impl Service {
     pub fn new(core: Biometrics, authorizer: Arc<dyn Authorizer>) -> Self {
         let logger = core.logger().clone();
-        Self { core: Arc::new(Mutex::new(core)), authorizer, logger, enrollment_owners: Arc::default() }
+        Self {
+            core: Arc::new(Mutex::new(core)),
+            authorizer,
+            logger,
+            enrollment_owners: Arc::default(),
+            sudo: Arc::new(SudoPolicyStore::system()),
+        }
+    }
+
+    pub fn with_sudo_policy(mut self, store: SudoPolicyStore) -> Self {
+        self.sudo = Arc::new(store);
+        self
+    }
+
+    async fn restore_sudo_policy(&self, uid: u32) {
+        let store = self.sudo.clone();
+        match blocking::unblock(move || store.restore(uid)).await {
+            Ok(true) => self.logger.log(Level::Info, "sudo-policy-restored", &[("uid", Value::Uid(uid))]),
+            Ok(false) => {}
+            Err(reason) => self.logger.log(Level::Warn, "sudo-policy-restore-failed", &[("uid", Value::Uid(uid)), ("reason", Value::Reason(reason))]),
+        }
     }
 
     async fn with_core<T: Send + 'static>(
@@ -409,7 +433,39 @@ impl Service {
     ) -> Result<bool, ServiceError> {
         self.authorize(conn, &header, Action::Purge, uid).await?;
         self.with_core(move |core| core.purge(uid)).await?;
+        self.restore_sudo_policy(uid).await;
         Ok(true)
+    }
+
+    async fn get_sudo_policy(
+        &self,
+        uid: u32,
+        #[zbus(connection)] conn: &Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> Result<String, ServiceError> {
+        self.authorize_own_uid(conn, &header, uid).await?;
+        let store = self.sudo.clone();
+        Ok(blocking::unblock(move || store.detect(uid)).await.as_str().into())
+    }
+
+    async fn use_own_password_for_sudo(
+        &self,
+        uid: u32,
+        #[zbus(connection)] conn: &Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> Result<String, ServiceError> {
+        self.authorize(conn, &header, Action::SudoOwnPassword, uid).await?;
+        let store = self.sudo.clone();
+        match blocking::unblock(move || store.use_own_password(uid)).await {
+            Ok(policy) => {
+                self.logger.log(Level::Info, "sudo-policy-changed", &[("uid", Value::Uid(uid)), ("policy", Value::Label(policy.as_str()))]);
+                Ok(policy.as_str().into())
+            }
+            Err(reason) => {
+                self.logger.log(Level::Error, "sudo-policy-change-failed", &[("uid", Value::Uid(uid)), ("reason", Value::Reason(reason))]);
+                Err(fdo::Error::Failed("sudo could not be changed; check the service logs".into()).into())
+            }
+        }
     }
 
     async fn check_ready(&self) -> Result<(), ServiceError> {

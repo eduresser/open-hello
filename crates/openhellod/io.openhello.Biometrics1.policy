@@ -65,4 +65,14 @@
       <allow_active>auth_self</allow_active>
     </defaults>
   </action>
+  <action id="io.openhello.biometrics.sudo-own-password">
+    <description>Let sudo ask for your own password or face</description>
+    <message>Administrator authentication is required to let sudo accept your own password or face instead of the root password</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
+
 </policyconfig>

@@ -19,7 +19,7 @@ impl Sandbox {
         let log = dir.path().join("calls");
         for (tool, exit) in [("openhello-cli", pam_enable_exit), ("systemctl", 0)] {
             let script = format!(
-                "#!/bin/sh\necho \"{tool} $*\" >> {log}\n[ \"$1 $2\" = \"pam enable\" ] && exit {exit}\nexit 0\n",
+                "#!/bin/sh\necho \"{tool} $*\" >> {log}\n[ \"$1 $2\" = \"pam enable\" ] && exit {exit}\n[ \"$1 $2\" = \"sudo own-password\" ] && exit ${{FAKE_SUDO_EXIT:-0}}\nexit 0\n",
                 log = log.display()
             );
             let path = dir.path().join("bin").join(tool);
@@ -34,16 +34,28 @@ impl Sandbox {
     }
 
     fn run(&self, script: &str, args: &[&str]) -> (i32, String) {
+        self.run_with(script, args, &[])
+    }
+
+    fn run_with(&self, script: &str, args: &[&str], env: &[(&str, &str)]) -> (i32, String) {
         let path = format!("{}:{}", self.dir.path().join("bin").display(), std::env::var("PATH").unwrap());
         let out = Command::new("sh")
+            .env_remove("SUDO_UID")
+            .env_remove("PKEXEC_UID")
+            .envs(env.iter().copied())
             .arg(repo().join("packaging/package").join(script))
             .args(args)
             .env("PATH", path)
             .env("OPENHELLO_PKG_STATE_DIR", self.state())
             .env("OPENHELLO_PKG_SYSTEMD_RUN_DIR", self.dir.path().join("systemd"))
+            .env("OPENHELLO_PKG_SUDOERS_DIR", self.sudoers())
             .output()
             .unwrap();
         (out.status.code().unwrap(), String::from_utf8_lossy(&out.stderr).into_owned())
+    }
+
+    fn sudoers(&self) -> PathBuf {
+        self.dir.path().join("sudoers.d")
     }
 
     fn calls(&self) -> String {
@@ -163,4 +175,60 @@ fn packaged_config_matches_the_paths_the_daemon_reads() {
     assert!(env.lines().any(|l| l == "ORT_DYLIB_PATH=/usr/lib/openhello/libonnxruntime.so"), "{env}");
     let engine = fs::read_to_string(repo().join("packaging/package/engine.json")).unwrap();
     assert_eq!(engine.trim(), r#"{"models_dir": "/usr/share/openhello/models"}"#);
+}
+
+#[test]
+fn removal_drops_only_the_sudo_drop_ins_the_window_wrote_and_upgrades_keep_them() {
+    for (argument, kept) in [("upgrade", true), ("1", true), ("remove", false), ("0", false)] {
+        let sandbox = Sandbox::new(0);
+        fs::create_dir(sandbox.sudoers()).unwrap();
+        fs::write(sandbox.sudoers().join("openhello-uid1000"), "Defaults:#1000 !targetpw\n").unwrap();
+        fs::write(sandbox.sudoers().join("admin"), "Defaults env_reset\n").unwrap();
+        sandbox.run("preremove.sh", &[argument]);
+        assert_eq!(sandbox.sudoers().join("openhello-uid1000").exists(), kept, "{argument}");
+        assert!(sandbox.sudoers().join("admin").exists(), "{argument}");
+    }
+}
+
+#[test]
+fn the_administrator_who_installed_through_sudo_or_pkexec_gets_sudo_with_their_own_password_once() {
+    for variable in ["SUDO_UID", "PKEXEC_UID"] {
+        let sandbox = Sandbox::new(0);
+        let (status, _) = sandbox.run_with("postinstall.sh", &["configure"], &[(variable, "1000")]);
+        assert_eq!(status, 0);
+        assert!(sandbox.calls().contains("openhello-cli sudo own-password 1000"), "{variable}: {}", sandbox.calls());
+        assert!(sandbox.state().join("sudo-own-password-by-package").exists());
+        fs::remove_file(sandbox.dir.path().join("calls")).unwrap();
+        sandbox.run_with("postinstall.sh", &["2"], &[(variable, "1000")]);
+        assert!(!sandbox.calls().contains("sudo own-password"), "{variable}: {}", sandbox.calls());
+    }
+}
+
+#[test]
+fn an_install_without_a_known_administrator_leaves_sudo_alone() {
+    for env in [vec![], vec![("SUDO_UID", "0")], vec![("SUDO_UID", "")]] {
+        let sandbox = Sandbox::new(0);
+        let (status, _) = sandbox.run_with("postinstall.sh", &["configure"], &env);
+        assert_eq!(status, 0);
+        assert!(!sandbox.calls().contains("sudo own-password"), "{env:?}: {}", sandbox.calls());
+        assert!(!sandbox.state().join("sudo-own-password-by-package").exists());
+    }
+}
+
+#[test]
+fn a_refused_sudo_change_still_installs_explains_and_retries_on_the_next_install() {
+    let sandbox = Sandbox::new(0);
+    let (status, stderr) = sandbox.run_with("postinstall.sh", &["configure"], &[("SUDO_UID", "1000"), ("FAKE_SUDO_EXIT", "3")]);
+    assert_eq!(status, 0);
+    assert!(stderr.contains("open Open Hello"), "{stderr}");
+    assert!(!sandbox.state().join("sudo-own-password-by-package").exists());
+    assert!(sandbox.calls().contains("systemctl restart openhellod.service"));
+}
+
+#[test]
+fn removal_forgets_the_sudo_decision_so_a_reinstall_applies_it_again() {
+    let sandbox = Sandbox::new(0);
+    sandbox.run_with("postinstall.sh", &["configure"], &[("SUDO_UID", "1000")]);
+    sandbox.run("preremove.sh", &["remove"]);
+    assert!(!sandbox.state().join("sudo-own-password-by-package").exists());
 }
