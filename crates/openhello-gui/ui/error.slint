@@ -1,10 +1,11 @@
-import { ActionButton, Body, ButtonRow, Column, Heading } from "components.slint";
+import { ActionButton, Body, ButtonRow, Column, Heading, LinkButton } from "components.slint";
 import { T } from "texts.slint";
 
 export component ErrorPage inherits Column {
     in property <string> title;
     in property <string> body;
     callback retry();
+    callback remove-data();
 
     Heading { text: root.title; }
     Body { text: root.body; }
@@ -12,6 +13,12 @@ export component ErrorPage inherits Column {
         ActionButton {
             text: T.try-again;
             clicked => { root.retry(); }
+        }
+    }
+    ButtonRow {
+        LinkButton {
+            text: T.remove-data;
+            clicked => { root.remove-data(); }
         }
     }
 }

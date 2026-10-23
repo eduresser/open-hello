@@ -91,6 +91,12 @@ As a laptop owner, I want to test and remove my face from the same app, so that 
 - **When** they press "Remove" and confirm
 - **Then** the system asks for the password again, the face and key are erased, and the app shows the face as not set up
 
+#### AC-071 — Removal is offered where the owner may need it
+
+- **Given** a face is set up and the welcome screen is shown (including the blocked state and the screen reached through Set up again), or any error screen is shown
+- **When** the user presses the removal link ("Remove face data")
+- **Then** the app asks for confirmation (same text as Remove), the system asks for the password again, the face and key are erased and the app returns to the welcome screen showing the face as not set up (the removal link is gone from it); on the welcome screen the link appears only when the status says a face is set up, on error screens it always appears, never on the identity or capture screens
+
 ### US-023 — Reach the app from any desktop
 
 As a laptop owner on any distribution and desktop, I want to find the app in the application menu and settings, so that I do not depend on one desktop environment.

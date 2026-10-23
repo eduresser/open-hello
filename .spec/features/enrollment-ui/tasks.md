@@ -100,3 +100,10 @@
 - Model: claude-sonnet-5
 - Effort: high
 - Notes: depends on T-072. Product owner decision 2026-10-23: the order is welcome, identity, capture, done; the key is provisioned right after the commit only when it does not exist, and the returned recovery code is discarded at once; the CLI has no `set-pin` and `enroll` and `provision` print no code; exit code 4 stays for a provisioning failure; `ui/recovery.slint` and the CLI `terminal.rs` are deleted (T-069 no longer lists the screen). The key service keeps the PIN and recovery protectors in its D-Bus API.
+
+## T-074 — Face data removal on the welcome and error screens [done]
+- Refs: AC-071, AC-066
+- Files: crates/openhello-gui-core/src/wizard.rs, crates/openhello-gui-core/src/strings.rs, crates/openhello-gui-core/tests/wizard.rs, crates/openhello-gui-core/tests/common/mod.rs, crates/openhello-gui/src/backend.rs, crates/openhello-gui/src/view.rs, crates/openhello-gui/ui/app.slint, crates/openhello-gui/ui/components.slint, crates/openhello-gui/ui/confirm.slint, crates/openhello-gui/ui/manage.slint, crates/openhello-gui/ui/welcome.slint, crates/openhello-gui/ui/error.slint, crates/openhello-gui/ui/texts.slint
+- Model: claude-sonnet-5
+- Effort: medium
+- Notes: depends on T-073. Product owner request 2026-10-23: a discreet "Remove face data" link on the welcome screen (only when the status says a face is set up) and on every error screen, opening the same confirmation overlay as the Manage page (now shared in `confirm.slint`); the purge needs no camera; on success the flow resets and starts again, on failure the error screen shows the cause and keeps the link.
