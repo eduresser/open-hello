@@ -35,7 +35,7 @@ pub fn build_engine(config: &EngineConfig) -> Result<Engine, EngineError> {
         Box::new(YunetDetector::load(&models.join("yunet.onnx"))?),
         Box::new(AuraFaceEmbedder::load(&models.join("glintr100.onnx"))?),
         Matcher::new(calibration),
-        EnrollmentConfig::default(),
+        EnrollmentConfig::from_env()?,
     ))
 }
 

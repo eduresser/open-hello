@@ -426,6 +426,20 @@ mod tests {
         assert_eq!(run_until_decided(&large, session, 40).verdict, AuthVerdict::Rejected);
     }
 
+    // @spec:AC-052
+    #[test]
+    fn authentication_scores_faces_that_enrollment_would_ask_to_reposition() {
+        let mut corner = face(0.0, 0.0);
+        corner.x = 0.0;
+        corner.y = 0.0;
+        corner.width = 30.0;
+        corner.height = 30.0;
+        let engine = engine(vec![vec![corner.clone()]]);
+        let template = Template::new(vec![probe_of(&textured(), &corner)]).unwrap();
+        let session = engine.auth_begin(vec![(1000, template)], 1e-5, 16).unwrap();
+        assert_eq!(run_until_decided(&engine, session, 16).verdict, AuthVerdict::Accepted { uid: 1000 });
+    }
+
     #[test]
     fn frames_without_a_face_do_not_consume_the_frame_budget() {
         let engine = engine(vec![vec![]]);
