@@ -257,14 +257,6 @@ fn retry_rechecks_and_unblocks_once_the_cause_is_fixed() {
     assert_eq!(calls.borrow().begins, 0);
 }
 
-fn blocked_welcome(face: bool) -> (EnrollmentFlow<common::FakeClient>, std::rc::Rc<std::cell::RefCell<Calls>>) {
-    let (mut flow, calls) = open(Status { face, key: face }, vec![]);
-    calls.borrow_mut().ready_error = Some(ClientErrorKind::CameraBusy);
-    flow.start();
-    flow.set_face(face);
-    (flow, calls)
-}
-
 fn failed_enrollment() -> (EnrollmentFlow<common::FakeClient>, Manager<common::FakeClient>, std::rc::Rc<std::cell::RefCell<Calls>>) {
     let (mut client, calls) = fake(Status { face: true, key: true }, vec![]);
     client.begin_error = Some(ClientErrorKind::CameraBusy);
@@ -276,20 +268,22 @@ fn failed_enrollment() -> (EnrollmentFlow<common::FakeClient>, Manager<common::F
 
 // @spec:AC-071
 #[test]
-fn the_welcome_screen_offers_removal_only_when_the_status_says_a_face_is_set_up() {
-    let (flow, _) = blocked_welcome(true);
-    assert_eq!((flow.step(), flow.face_enrolled(), flow.removal_offered()), (Step::Welcome, true, true));
-    let (flow, _) = blocked_welcome(false);
-    assert_eq!((flow.step(), flow.face_enrolled(), flow.removal_offered()), (Step::Welcome, false, false));
+fn the_welcome_screen_never_offers_deletion_not_even_when_blocked() {
+    let (mut flow, calls) = open(fresh(), vec![]);
+    calls.borrow_mut().ready_error = Some(ClientErrorKind::CameraBusy);
+    flow.start();
+    assert_eq!((flow.step(), flow.removal_offered()), (Step::Welcome, false));
 }
 
-// @spec:AC-071
+// @spec:AC-073
 #[test]
-fn the_status_read_while_starting_decides_whether_removal_is_offered() {
-    let (mut flow, _) = open(Status { face: true, key: true }, vec![]);
-    flow.start();
-    assert!(flow.face_enrolled());
-    assert!(!flow.removal_offered());
+fn probing_reports_the_cause_for_the_main_screen_without_leaving_the_welcome_step() {
+    let (mut flow, calls) = open(Status { face: true, key: true }, vec![]);
+    assert_eq!(flow.probe(), None);
+    calls.borrow_mut().ready_error = Some(ClientErrorKind::TpmUnavailable);
+    assert_eq!(flow.probe(), Some(FailureCause::TpmUnavailable));
+    assert_eq!((flow.step(), flow.blocked()), (Step::Welcome, Some(FailureCause::TpmUnavailable)));
+    assert_eq!(calls.borrow().begins, 0);
 }
 
 // @spec:AC-071
@@ -313,7 +307,6 @@ fn every_error_screen_offers_removal_even_without_a_face() {
         let mut flow = EnrollmentFlow::new(client, 1000, Language::English);
         reach_capture(&mut flow);
         assert!(matches!(flow.step(), Step::Error(_)));
-        assert!(!flow.face_enrolled());
         assert!(flow.removal_offered());
     }
     let (mut flow, _) = open(fresh(), vec![error(ClientErrorKind::CameraBusy)]);
@@ -333,7 +326,7 @@ fn a_confirmed_removal_from_an_error_screen_purges_once_and_restarts_with_the_fa
     assert!(!status.face);
     flow.reset_after_removal();
     flow.start();
-    assert_eq!((flow.step(), flow.face_enrolled(), flow.removal_offered()), (Step::Identity, false, false));
+    assert_eq!((flow.step(), flow.removal_offered()), (Step::Identity, false));
     assert_eq!(calls.borrow().purges, 1);
     assert_eq!(calls.borrow().events.last(), Some(&"status"));
 }
@@ -355,4 +348,19 @@ fn a_failed_purge_is_reported_and_the_error_screen_still_offers_removal() {
     assert!(matches!(manager.remove(true), RemoveOutcome::Failed(error) if error.kind == ClientErrorKind::AuthDenied));
     assert_eq!(calls.borrow().purges, 1);
     assert!(flow.removal_offered());
+}
+
+// @spec:AC-074
+#[test]
+fn set_up_again_from_the_final_screen_restarts_the_enrollment_from_the_start() {
+    let (mut flow, calls) = open(fresh(), vec![step("accepted", "complete", 6), step("accepted", "complete", 6)]);
+    reach_capture(&mut flow);
+    flow.tick();
+    assert_eq!(flow.step(), Step::Done);
+    flow.start();
+    assert_eq!(flow.step(), Step::Identity);
+    flow.confirm_identity();
+    flow.tick();
+    assert_eq!(flow.step(), Step::Done);
+    assert_eq!((calls.borrow().begins, calls.borrow().commits), (2, 2));
 }

@@ -5,7 +5,7 @@ export component ErrorPage inherits Column {
     in property <string> title;
     in property <string> body;
     callback retry();
-    callback remove-data();
+    callback delete-data();
 
     Heading { text: root.title; }
     Body { text: root.body; }
@@ -17,8 +17,8 @@ export component ErrorPage inherits Column {
     }
     ButtonRow {
         LinkButton {
-            text: T.remove-data;
-            clicked => { root.remove-data(); }
+            text: T.delete-data;
+            clicked => { root.delete-data(); }
         }
     }
 }

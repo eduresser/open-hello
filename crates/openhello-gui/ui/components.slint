@@ -1,4 +1,5 @@
-import { Palette } from "std-widgets.slint";
+import { Palette, Spinner } from "std-widgets.slint";
+import { T } from "texts.slint";
 
 export global Brand {
     out property <color> accent: #1f6feb;
@@ -123,5 +124,28 @@ export component LinkButton inherits Rectangle {
             }
             return reject;
         }
+    }
+}
+
+export component TestStatus inherits HorizontalLayout {
+    in property <bool> busy;
+    in property <bool> testing;
+    in property <string> result;
+
+    alignment: center;
+    spacing: 12px;
+    min-height: 40px;
+    if root.busy: Spinner {
+        indeterminate: true;
+        width: 28px;
+        height: 28px;
+    }
+    Text {
+        text: root.testing ? T.testing : root.result;
+        font-size: 18px;
+        font-weight: 600;
+        color: Palette.foreground;
+        vertical-alignment: center;
+        wrap: word-wrap;
     }
 }

@@ -35,6 +35,7 @@ pub struct DemoClient {
     pace: Duration,
     ticks: u32,
     frames: u32,
+    verifies: u32,
     verdict: &'static str,
     noise: Vec<u8>,
 }
@@ -45,7 +46,7 @@ impl DemoClient {
     }
 
     pub fn paced(mode: DemoMode, face: Arc<AtomicBool>, pace: Duration) -> Self {
-        Self { mode, face, pace, ticks: 0, frames: 0, verdict: SCRIPT[0], noise: noise() }
+        Self { mode, face, pace, ticks: 0, frames: 0, verifies: 0, verdict: SCRIPT[0], noise: noise() }
     }
 
     fn sleep(&self, duration: Duration) {
@@ -174,7 +175,16 @@ impl ManageClient for DemoClient {
 
     fn verify(&mut self, _uid: u32) -> ClientResult<bool> {
         self.sleep(PAUSE);
-        Ok(true)
+        let round = self.verifies;
+        self.verifies += 1;
+        if !self.mode.cycle_tests {
+            return Ok(true);
+        }
+        match round % 3 {
+            0 => Ok(true),
+            1 => Ok(false),
+            _ => Err(ClientError::new(ClientErrorKind::CameraBusy, "demo")),
+        }
     }
 
     fn purge(&mut self, _uid: u32) -> ClientResult<()> {

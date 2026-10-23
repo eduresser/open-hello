@@ -1,15 +1,29 @@
-import { ActionButton, Body, ButtonRow, Column, Heading } from "components.slint";
+import { Button } from "std-widgets.slint";
+import { ActionButton, Body, ButtonRow, Column, Heading, TestStatus } from "components.slint";
 import { T } from "texts.slint";
 
 export component DonePage inherits Column {
-    callback finish();
+    in property <bool> busy;
+    in property <bool> testing;
+    callback test();
+    callback set-up-again();
 
     Heading { text: T.done-title; }
     Body { text: T.done-body; }
+    TestStatus {
+        busy: root.busy;
+        testing: root.testing;
+    }
     ButtonRow {
         ActionButton {
-            text: T.close;
-            clicked => { root.finish(); }
+            text: T.test;
+            enabled: !root.busy;
+            clicked => { root.test(); }
+        }
+        Button {
+            text: T.set-up-again;
+            enabled: !root.busy;
+            clicked => { root.set-up-again(); }
         }
     }
 }

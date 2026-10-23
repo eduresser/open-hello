@@ -32,8 +32,8 @@ As a laptop owner, I want a step-by-step window that shows me the camera and tel
 #### AC-058 — The wizard follows the Windows Hello order
 
 - **Given** the user opens the app with no face set up
-- **When** they press "Get started" and complete each step
-- **Then** the app shows, in order: welcome, identity check (system password prompt), capture, and a final "All set" screen with a Close button; when the login key does not exist yet it is created right after the enrollment commits, and the app never asks for, creates or shows a PIN or a recovery code
+- **When** they press "Set up" and complete each step
+- **Then** the app shows, in order: welcome, identity check (system password prompt), capture, and a final "Face recognition is ready" screen with Test and Set up again buttons and no Close button; the welcome screen appears only when no face is set up, and Set up again goes straight to the identity check; when the login key does not exist yet it is created right after the enrollment commits, and the app never asks for, creates or shows a PIN or a recovery code
 
 #### AC-059 — The capture screen shows the preview, the guidance and the progress
 
@@ -77,25 +77,43 @@ As a laptop owner, I want the live image to reach only my own enrollment window,
 
 ### US-022 — Manage the face
 
-As a laptop owner, I want to test and remove my face from the same app, so that I do not need the terminal.
+As a laptop owner, I want to test and delete my face from the same app, so that I do not need the terminal.
 
 #### AC-065 — Test recognition from the app
 
-- **Given** a user with a face set up
+- **Given** a user with a face set up, on the main screen or on the screen after setup
 - **When** they press "Test" and look at the camera
-- **Then** the app shows "recognized" or "not recognized" and releases the camera
+- **Then** the app shows "Look at the camera…" with the buttons disabled while the test runs, then returns to the main screen (the one shown when a face is set up) with the result as a message at its top, which stays until the next action, and the camera is released
 
-#### AC-066 — Removing the face asks for confirmation and reauthentication
+#### AC-072 — The screen after setup offers Test and Set up again
+
+- **Given** the enrollment just completed
+- **When** the screen after setup is shown
+- **Then** it has the title "Face recognition is ready", the text "Test it now to make sure it recognizes you." and two buttons, Test (primary) and Set up again, with no Close button
+
+#### AC-073 — The main screen is usable when recognition is unavailable
+
+- **Given** a face is set up and the camera, the infrared sensor or the TPM is unavailable
+- **When** the app opens
+- **Then** the main screen explains the cause in plain words, Test and Set up again are disabled and "Delete face data" stays available, because deleting needs no camera
+
+#### AC-074 — A test that fails stays on the main screen with its cause
+
+- **Given** a test that was not recognized or could not run (for example a camera error)
+- **When** the result is shown
+- **Then** the main screen shows a short sentence at its top ("It recognized you.", "Your face was not recognized. Test again or set it up again." or "The test could not run: " followed by the cause in plain words), no full-screen error is shown, and Test and Set up again stay available; Set up again goes straight to the identity check and replaces the existing data
+
+#### AC-066 — Deleting the face asks for confirmation and reauthentication
 
 - **Given** a user with a face set up
-- **When** they press "Remove" and confirm
-- **Then** the system asks for the password again, the face and key are erased, and the app shows the face as not set up
+- **When** they press "Delete face data" and confirm "Delete"
+- **Then** the system asks for the password again, the face and key are erased and the app returns to the welcome screen showing the face as not set up; when the deletion fails the error screen shows the cause and keeps the link
 
-#### AC-071 — Removal is offered where the owner may need it
+#### AC-071 — Deletion is offered where the owner may need it
 
-- **Given** a face is set up and the welcome screen is shown (including the blocked state and the screen reached through Set up again), or any error screen is shown
-- **When** the user presses the removal link ("Remove face data")
-- **Then** the app asks for confirmation (same text as Remove), the system asks for the password again, the face and key are erased and the app returns to the welcome screen showing the face as not set up (the removal link is gone from it); on the welcome screen the link appears only when the status says a face is set up, on error screens it always appears, never on the identity or capture screens
+- **Given** the main screen (a face is set up, including when recognition is unavailable) or any error screen is shown
+- **When** the user presses "Delete face data"
+- **Then** the app asks for confirmation ("Delete face recognition?", with the buttons "Delete" and "Cancel"); the welcome screen, which only appears when no face is set up, the identity step, the capture step and the screen after setup do not offer it, and error screens always do
 
 ### US-023 — Reach the app from any desktop
 
@@ -127,7 +145,7 @@ As a laptop owner, I want the app to refuse to enroll when face recognition cann
 
 - **Given** the daemon reports that the camera is missing or busy, or that the TPM is unavailable
 - **When** the user opens the app
-- **Then** the welcome screen explains the cause in plain words, its Get started button is disabled, no enrollment session is created, and no PIN or other alternative is offered (the system password remains the sign-in fallback)
+- **Then** the welcome screen explains the cause in plain words, its Set up button is disabled, it offers Try again and no deletion link (there is nothing to delete), no enrollment session is created, and no PIN or other alternative is offered (the system password remains the sign-in fallback)
 
 ## Out of scope
 
@@ -140,6 +158,7 @@ As a laptop owner, I want the app to refuse to enroll when face recognition cann
 
 ## Decisions
 
+- Product owner decision 2026-10-23: the window has three states: set up (welcome), set up with face (main screen: Test, Set up again, Delete face data) and the screen after setup (Test, Set up again); a test always returns to the main screen with its result on it.
 - Product owner decision 2026-10-23: neither a PIN nor a recovery code is created, shown or printed by the window or the CLI; the key service keeps both protectors in its D-Bus API.
 
 ## Assumptions
