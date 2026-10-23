@@ -175,13 +175,13 @@ impl Biometrics {
         let EnrollSession { uid, engine_session, .. } = self.take_session(handle)?;
         let template = self.engine.enroll_commit(engine_session)?;
         self.logger.log(Level::Debug, "enroll-commit", &[("uid", Value::Uid(uid)), ("template_bytes", Value::Count(template.len() as u64))]);
-        self.sensor.release();
+        self.release_sensor("enroll-commit");
         self.storage.put(uid, &template)
     }
 
     pub fn enroll_discard(&mut self, handle: &str) -> Result<(), DaemonError> {
         let session = self.take_session(handle)?;
-        self.sensor.release();
+        self.release_sensor("enroll-discard");
         self.engine.enroll_discard(session.engine_session)
     }
 
@@ -286,6 +286,11 @@ impl Biometrics {
         }
     }
 
+    fn release_sensor(&mut self, reason: &'static str) {
+        self.logger.log(Level::Info, "sensor-release", &[("reason", Value::Label(reason))]);
+        self.sensor.release();
+    }
+
     fn deliver_ticket(&mut self, uid: u32) {
         self.last_delivery = None;
         let Some(client) = self.tickets.as_mut() else { return };
@@ -296,7 +301,7 @@ impl Biometrics {
 
     fn authenticate(&mut self, candidates: &[(u32, Vec<u8>)], cancel: Cancel) -> Result<AuthOutcome, DaemonError> {
         let outcome = self.run_attempts(candidates, cancel);
-        self.sensor.release();
+        self.release_sensor("request-end");
         outcome
     }
 

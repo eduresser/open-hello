@@ -3,6 +3,7 @@ mod illumination;
 mod ioctl;
 mod lazy;
 mod msxu;
+mod session_log;
 mod v4l2_capture;
 
 use std::ffi::CStr;
@@ -29,6 +30,8 @@ const AUTO_EMITTER: &str = "auto";
 pub enum SensorError {
     #[error("camera device error: {0}")]
     Device(String),
+    #[error("camera device error: camera keeps delivering incomplete frames ({count} in a row; last: bytesused={bytes_used} of {size_image}, flags={flags:#x})")]
+    IncompleteFrames { count: usize, bytes_used: u32, size_image: u32, flags: u32 },
     #[error("camera device busy: {0}")]
     DeviceBusy(String),
     #[error("camera device missing: {0}")]
@@ -45,6 +48,12 @@ pub enum SensorError {
     EmitterNotConfirmed(u8),
     #[error("the stream never alternates between lit and unlit frames although the emitter is controllable")]
     NoAlternation,
+}
+
+impl SensorError {
+    pub fn is_transient_start_failure(&self) -> bool {
+        matches!(self, SensorError::IncompleteFrames { .. })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -203,7 +212,7 @@ fn spawn_idle_release(state: std::sync::Weak<Mutex<SensorState>>) {
 
 fn status_of(error: &SensorError) -> Status {
     match error {
-        SensorError::Device(_) => Status::DeviceUnavailable,
+        SensorError::Device(_) | SensorError::IncompleteFrames { .. } => Status::DeviceUnavailable,
         SensorError::DeviceBusy(_) => Status::DeviceBusy,
         SensorError::NoDevice(_) => Status::NoDevice,
         SensorError::EmitterConfig(_) | SensorError::EmitterActivation(_) | SensorError::EmitterWriteRefused(_) => Status::EmitterFailure,
@@ -282,7 +291,7 @@ unsafe extern "C" fn sensor_release(handle: SensorHandle) {
     }
     let shared = &*(handle as *const SharedState);
     if let Ok(mut state) = shared.lock() {
-        state.capture.release();
+        state.capture.release(Instant::now());
     }
 }
 
