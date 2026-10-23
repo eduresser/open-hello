@@ -63,6 +63,13 @@ impl SensorBackend for Sensor {
         }
         Ok(CapturedFrame { width: 3, height: 2, pixels: PIXELS.to_vec() })
     }
+
+    fn probe(&mut self) -> Result<(), DaemonError> {
+        if self.busy {
+            return Err(DaemonError::CameraBusy("held by another process".into()));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Default)]
@@ -198,6 +205,19 @@ fn a_busy_camera_reaches_the_real_client_as_a_typed_camera_busy_error() {
     assert_eq!(error.kind, ClientErrorKind::CameraBusy);
     assert!(!error.message.contains("held by another process"), "{}", error.message);
     client.enroll_discard(&handle).unwrap();
+}
+
+// @spec:AC-070
+#[test]
+fn the_real_client_checks_readiness_and_gets_a_typed_error_when_the_camera_is_busy() {
+    let rig = rig();
+    let healthy = PrivateBus::start();
+    serve(&healthy, false, Arc::new(Protectors::new(rig.config.clone()).unwrap()));
+    assert!(DaemonClient::on_address(&healthy.address).unwrap().check_ready().is_ok());
+    let busy = PrivateBus::start();
+    serve(&busy, true, Arc::new(Protectors::new(rig.config.clone()).unwrap()));
+    let error = DaemonClient::on_address(&busy.address).unwrap().check_ready().unwrap_err();
+    assert_eq!(error.kind, ClientErrorKind::CameraBusy);
 }
 
 // @spec:AC-066

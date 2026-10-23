@@ -412,6 +412,10 @@ impl Service {
         Ok(true)
     }
 
+    async fn check_ready(&self) -> Result<(), ServiceError> {
+        self.with_core(|core| core.check_ready()).await
+    }
+
     async fn get_status(
         &self,
         uid: u32,

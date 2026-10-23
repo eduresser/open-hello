@@ -120,6 +120,16 @@ fn zeroed<T>() -> T {
 
 impl V4l2Camera {
     pub fn open(device_path: &str) -> Result<Self, SensorError> {
+        let mut camera = Self::open_configured(device_path)?;
+        camera.map_buffers()?;
+        Ok(camera)
+    }
+
+    pub fn probe(device_path: &str) -> Result<(), SensorError> {
+        Self::open_configured(device_path).map(drop)
+    }
+
+    fn open_configured(device_path: &str) -> Result<Self, SensorError> {
         let path = CString::new(device_path)
             .map_err(|_| SensorError::Device(format!("invalid device path `{device_path}`")))?;
         let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDWR) };
@@ -128,7 +138,6 @@ impl V4l2Camera {
         }
         let mut camera = Self { fd, buffers: Vec::new(), format: PixFormat::default(), streaming: false };
         camera.negotiate_format()?;
-        camera.map_buffers()?;
         Ok(camera)
     }
 
@@ -306,6 +315,13 @@ mod tests {
     #[test]
     fn open_reports_missing_device() {
         let error = V4l2Camera::open("/dev/openhello-no-such-camera").err().unwrap();
+        assert!(matches!(error, SensorError::NoDevice(_)));
+    }
+
+    // @spec:AC-070
+    #[test]
+    fn probe_reports_a_missing_device_without_streaming() {
+        let error = V4l2Camera::probe("/dev/openhello-no-such-camera").unwrap_err();
         assert!(matches!(error, SensorError::NoDevice(_)));
     }
 }

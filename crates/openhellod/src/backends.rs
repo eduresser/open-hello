@@ -124,6 +124,9 @@ pub struct AuthProgress {
 pub trait SensorBackend: Send {
     fn capture(&mut self) -> Result<CapturedFrame, DaemonError>;
     fn release(&mut self) {}
+    fn probe(&mut self) -> Result<(), DaemonError> {
+        Ok(())
+    }
 }
 
 pub trait EngineBackend: Send {
@@ -141,4 +144,7 @@ pub trait StorageBackend: Send {
     fn get(&mut self, uid: u32) -> Result<Vec<u8>, DaemonError>;
     fn list_uids(&mut self) -> Result<Vec<u32>, DaemonError>;
     fn purge(&mut self, uid: u32) -> Result<(), DaemonError>;
+    fn probe(&mut self) -> Result<(), DaemonError> {
+        Ok(())
+    }
 }

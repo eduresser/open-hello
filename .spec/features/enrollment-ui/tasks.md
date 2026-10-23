@@ -59,8 +59,7 @@
 - Effort: medium
 - Notes: no Pin step, no PinError, no set_pin on the client trait; the order is welcome, identity, capture, recovery code (only when the key was created now), done. The GTK crate keeps compiling only until T-069 replaces it.
 
-## T-068 — Block enrollment when recognition is unavailable [pending]
-
+## T-068 — Block enrollment when recognition is unavailable [done]
 - Refs: AC-070, AC-069
 - Files: crates/openhellod/src/dbus_service.rs, crates/openhellod/src/core.rs, crates/openhello-gui-core/src/wizard.rs, crates/openhello-gui-core/src/client.rs, crates/openhello-gui-core/src/strings.rs, crates/openhello-gui-core/tests/wizard.rs
 - Model: claude-sonnet-5

@@ -166,6 +166,7 @@ impl EmitterPolicy {
 }
 
 struct SensorState {
+    device_path: String,
     capture: LazyCapture<V4l2Camera>,
     last: Option<Frame>,
 }
@@ -183,7 +184,7 @@ fn open_state(device_path: &str) -> Result<SharedState, SensorError> {
         let mut emitter = policy.clone().emitter_for(&path, camera.raw_fd());
         CaptureSession::begin(emitter.as_mut(), camera)
     });
-    let state = Arc::new(Mutex::new(SensorState { capture: LazyCapture::new(opener, Instant::now()), last: None }));
+    let state = Arc::new(Mutex::new(SensorState { device_path: device_path.to_string(), capture: LazyCapture::new(opener, Instant::now()), last: None }));
     spawn_idle_release(Arc::downgrade(&state));
     Ok(state)
 }
@@ -285,6 +286,23 @@ unsafe extern "C" fn sensor_release(handle: SensorHandle) {
     }
 }
 
+unsafe extern "C" fn sensor_probe(handle: SensorHandle) -> Status {
+    if handle.is_null() {
+        return Status::InvalidArgument;
+    }
+    let shared = &*(handle as *const SharedState);
+    let Ok(state) = shared.lock() else {
+        return Status::Internal;
+    };
+    if state.capture.is_open() {
+        return Status::Ok;
+    }
+    match V4l2Camera::probe(&state.device_path) {
+        Ok(()) => Status::Ok,
+        Err(error) => fail(&error),
+    }
+}
+
 unsafe extern "C" fn sensor_close(handle: SensorHandle) {
     if !handle.is_null() {
         drop(Box::from_raw(handle as *mut SharedState));
@@ -298,6 +316,7 @@ static SENSOR_INTERFACE: SensorInterface = SensorInterface {
     release_frame: sensor_release_frame,
     release: sensor_release,
     close: sensor_close,
+    probe: sensor_probe,
 };
 
 #[no_mangle]

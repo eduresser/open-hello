@@ -17,7 +17,6 @@ impl<S: FrameSource> LazyCapture<S> {
         Self { opener, session: None, last_used: now }
     }
 
-    #[cfg(test)]
     pub fn is_open(&self) -> bool {
         self.session.is_some()
     }

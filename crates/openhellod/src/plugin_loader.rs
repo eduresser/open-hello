@@ -114,6 +114,10 @@ impl SensorBackend for SensorPlugin {
     fn release(&mut self) {
         unsafe { (self.interface.release)(self.handle) };
     }
+
+    fn probe(&mut self) -> Result<(), DaemonError> {
+        check_with_reason(unsafe { (self.interface.probe)(self.handle) }, "sensor probe", self.last_error)
+    }
 }
 
 impl Drop for SensorPlugin {
@@ -297,6 +301,10 @@ impl StorageBackend for StoragePlugin {
 
     fn purge(&mut self, uid: u32) -> Result<(), DaemonError> {
         check(unsafe { (self.interface.purge)(self.handle, uid) }, "storage purge")
+    }
+
+    fn probe(&mut self) -> Result<(), DaemonError> {
+        check(unsafe { (self.interface.probe)(self.handle) }, "storage probe")
     }
 }
 
