@@ -17,7 +17,7 @@ struct FakeManage {
 }
 
 fn enrolled() -> Status {
-    Status { face: true, key: true, pin: true }
+    Status { face: true, key: true }
 }
 
 fn manage(verify: ClientResult<bool>, purge_error: Option<ClientError>) -> (Manager<FakeManage>, Rc<RefCell<Log>>) {
@@ -41,7 +41,7 @@ impl ManageClient for FakeManage {
         match self.purge_error.clone() {
             Some(error) => Err(error),
             None => {
-                self.status = Status { face: false, key: false, pin: false };
+                self.status = Status { face: false, key: false };
                 Ok(())
             }
         }

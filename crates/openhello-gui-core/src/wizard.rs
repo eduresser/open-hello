@@ -1,9 +1,6 @@
 use std::fmt;
 
-use crate::strings::{Language, Strings, Text};
-
-const PIN_MIN: usize = 6;
-const PIN_MAX: usize = 32;
+use crate::strings::{Language, Strings};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClientErrorKind {
@@ -33,7 +30,6 @@ pub type ClientResult<T> = Result<T, ClientError>;
 pub struct Status {
     pub face: bool,
     pub key: bool,
-    pub pin: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,7 +60,6 @@ pub trait EnrollClient {
     fn enroll_frame(&mut self, handle: &str) -> ClientResult<Frame>;
     fn enroll_commit(&mut self, handle: &str) -> ClientResult<()>;
     fn enroll_discard(&mut self, handle: &str) -> ClientResult<()>;
-    fn set_pin(&mut self, uid: u32, pin: &str) -> ClientResult<()>;
     fn provision(&mut self, uid: u32) -> ClientResult<String>;
 }
 
@@ -97,7 +92,6 @@ impl From<ClientErrorKind> for FailureCause {
 pub enum Step {
     Welcome,
     Identity,
-    Pin,
     Capture,
     RecoveryCode,
     Done,
@@ -106,7 +100,6 @@ pub enum Step {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Plan {
-    pub pin: bool,
     pub key: bool,
 }
 
@@ -154,29 +147,11 @@ impl Wizard {
     pub fn advance(&mut self) {
         self.step = match self.step {
             Step::Welcome => Step::Identity,
-            Step::Identity if self.plan.pin => Step::Pin,
-            Step::Identity | Step::Pin => Step::Capture,
+            Step::Identity => Step::Capture,
             Step::Capture if self.plan.key => Step::RecoveryCode,
             Step::Capture | Step::RecoveryCode => Step::Done,
             other => other,
         };
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PinError {
-    Invalid,
-    Mismatch,
-    Failed,
-}
-
-impl PinError {
-    pub fn text(self) -> Text {
-        match self {
-            PinError::Invalid => Text::PinInvalid,
-            PinError::Mismatch => Text::PinMismatch,
-            PinError::Failed => Text::OtherBody,
-        }
     }
 }
 
@@ -222,7 +197,7 @@ impl<C: EnrollClient> EnrollmentFlow<C> {
         }
         match self.client.status(self.uid) {
             Ok(status) => {
-                self.wizard.set_plan(Plan { pin: !status.pin, key: !status.key });
+                self.wizard.set_plan(Plan { key: !status.key });
                 self.wizard.advance();
             }
             Err(error) => self.wizard.fail(error.kind.into()),
@@ -239,23 +214,6 @@ impl<C: EnrollClient> EnrollmentFlow<C> {
                 self.wizard.advance();
             }
             Err(error) => self.wizard.fail(error.kind.into()),
-        }
-    }
-
-    pub fn submit_pin(&mut self, pin: &str, confirmation: &str) -> Result<(), PinError> {
-        if self.step() != Step::Pin {
-            return Err(PinError::Failed);
-        }
-        validate_pin(pin, confirmation)?;
-        match self.client.set_pin(self.uid, pin) {
-            Ok(()) => {
-                self.wizard.advance();
-                Ok(())
-            }
-            Err(error) => {
-                self.abort(error.kind.into());
-                Err(PinError::Failed)
-            }
         }
     }
 
@@ -365,16 +323,4 @@ impl<C: EnrollClient> Drop for EnrollmentFlow<C> {
     fn drop(&mut self) {
         self.release_session();
     }
-}
-
-fn validate_pin(pin: &str, confirmation: &str) -> Result<(), PinError> {
-    let length = pin.chars().count();
-    let printable = pin.chars().all(|c| (' '..='~').contains(&c));
-    if !(PIN_MIN..=PIN_MAX).contains(&length) || !printable {
-        return Err(PinError::Invalid);
-    }
-    if pin != confirmation {
-        return Err(PinError::Mismatch);
-    }
-    Ok(())
 }

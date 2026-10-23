@@ -21,8 +21,8 @@ impl DaemonClient {
 
     fn read_status(&self, uid: u32) -> ClientResult<Status> {
         let face: bool = self.biometrics.call("GetStatus", &(uid,)).map_err(classify)?;
-        let (key, pin): (bool, bool) = self.keys.call("GetStatus", &(uid,)).map_err(classify)?;
-        Ok(Status { face, key, pin })
+        let (key, _): (bool, bool) = self.keys.call("GetStatus", &(uid,)).map_err(classify)?;
+        Ok(Status { face, key })
     }
 }
 
@@ -67,10 +67,6 @@ impl EnrollClient for DaemonClient {
 
     fn enroll_discard(&mut self, handle: &str) -> ClientResult<()> {
         self.biometrics.call::<_, ()>("EnrollDiscard", &(handle,)).map_err(classify)
-    }
-
-    fn set_pin(&mut self, uid: u32, pin: &str) -> ClientResult<()> {
-        self.keys.call::<_, bool>("SetPin", &(uid, pin)).map(|_| ()).map_err(classify)
     }
 
     fn provision(&mut self, uid: u32) -> ClientResult<String> {

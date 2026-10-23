@@ -168,7 +168,7 @@ fn the_real_client_enrolls_over_dbus_and_reads_the_preview_and_the_combined_stat
     let uid = my_uid();
 
     let fresh = EnrollClient::status(&mut client, uid).unwrap();
-    assert!(!fresh.face && !fresh.key && !fresh.pin);
+    assert!(!fresh.face && !fresh.key);
 
     let handle = client.enroll_begin(uid).unwrap();
     let progress = client.enroll_capture(&handle).unwrap();
@@ -179,9 +179,8 @@ fn the_real_client_enrolls_over_dbus_and_reads_the_preview_and_the_combined_stat
 
     let code = client.provision(uid).unwrap();
     assert_eq!(code.len(), 32);
-    client.set_pin(uid, "482916").unwrap();
     let ready = EnrollClient::status(&mut client, uid).unwrap();
-    assert!(ready.face && ready.key && ready.pin);
+    assert!(ready.face && ready.key);
     protectors.purge(uid).unwrap();
 }
 
