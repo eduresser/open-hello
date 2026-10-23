@@ -37,8 +37,7 @@
 - Effort: medium
 - Notes: depends on T-063. Reuses the existing D-Bus client from `openhello-cli`.
 
-## T-065 — GTK 4 / libadwaita shell [pending]
-
+## T-065 — GTK 4 / libadwaita shell [done]
 - Refs: AC-058, AC-059, AC-062
 - Files: crates/openhello-gui/Cargo.toml, crates/openhello-gui/src/main.rs, crates/openhello-gui/src/window.rs, crates/openhello-gui/src/capture_view.rs, Cargo.toml
 - Model: claude-sonnet-5
