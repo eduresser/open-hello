@@ -1,10 +1,9 @@
-import { Button, Palette } from "std-widgets.slint";
-import { Brand, Heading } from "components.slint";
+import { Palette } from "std-widgets.slint";
+import { ActionButton, Brand, Footer, Heading, Spacer } from "components.slint";
 import { T } from "texts.slint";
 
 component Preview inherits Rectangle {
     in property <image> frame;
-    in property <float> progress;
     in property <bool> accepted;
 
     property <length> vw: 560px;
@@ -13,17 +12,11 @@ component Preview inherits Rectangle {
     property <length> cy: vh / 2;
     property <length> orx: 76px;
     property <length> ory: 97.5px;
-    property <length> rrx: orx + 12px;
-    property <length> rry: ory + 12px;
-    property <angle> sweep: min(progress, 0.9999) * 360deg;
-    property <length> ex: cx + rrx * sin(sweep);
-    property <length> ey: cy - rry * cos(sweep);
     property <string> oval: "M \{cx / 1px} \{cy / 1px - ory / 1px} A \{orx / 1px} \{ory / 1px} 0 1 1 \{cx / 1px} \{cy / 1px + ory / 1px} A \{orx / 1px} \{ory / 1px} 0 1 1 \{cx / 1px} \{cy / 1px - ory / 1px} Z";
-    property <string> track: "M \{cx / 1px} \{cy / 1px - rry / 1px} A \{rrx / 1px} \{rry / 1px} 0 1 1 \{cx / 1px} \{cy / 1px + rry / 1px} A \{rrx / 1px} \{rry / 1px} 0 1 1 \{cx / 1px} \{cy / 1px - rry / 1px} Z";
 
     width: vw;
     height: vh;
-    border-radius: 18px;
+    border-radius: 8px;
     background: #000000;
     clip: true;
 
@@ -51,35 +44,32 @@ component Preview inherits Rectangle {
         viewbox-width: root.vw / 1px;
         viewbox-height: root.vh / 1px;
         stroke: root.accepted ? Brand.accepted : #ffffffd0;
-        stroke-width: 2px;
+        stroke-width: 3px;
         animate stroke { duration: 250ms; }
         commands: root.oval;
     }
+}
 
-    Path {
-        width: parent.width;
-        height: parent.height;
-        viewbox-width: root.vw / 1px;
-        viewbox-height: root.vh / 1px;
-        stroke: #ffffff40;
-        stroke-width: 5px;
-        commands: root.track;
-    }
+component ProgressBar inherits Rectangle {
+    in property <float> progress;
 
-    Path {
-        width: parent.width;
+    height: 4px;
+    border-radius: 2px;
+    background: Palette.foreground.with-alpha(0.12);
+    accessible-role: progress-indicator;
+    accessible-value: round(root.progress * 100) + "%";
+
+    Rectangle {
+        x: 0;
+        width: parent.width * clamp(root.progress, 0, 1);
         height: parent.height;
-        viewbox-width: root.vw / 1px;
-        viewbox-height: root.vh / 1px;
-        stroke: Brand.accent;
-        stroke-width: 5px;
-        stroke-line-cap: round;
-        commands: root.progress <= 0.001 ? "" : "M \{root.cx / 1px} \{root.cy / 1px - root.rry / 1px} A \{root.rrx / 1px} \{root.rry / 1px} 0 \{root.sweep > 180deg ? 1 : 0} 1 \{root.ex / 1px} \{root.ey / 1px}";
-        animate stroke { duration: 150ms; }
+        border-radius: parent.border-radius;
+        background: Brand.accent;
+        animate width { duration: 200ms; easing: ease-out; }
     }
 }
 
-export component CapturePage inherits Rectangle {
+export component CapturePage inherits VerticalLayout {
     in property <image> frame;
     in property <string> guidance;
     in property <float> progress;
@@ -89,37 +79,41 @@ export component CapturePage inherits Rectangle {
 
     VerticalLayout {
         alignment: center;
+        vertical-stretch: 1;
         padding: 24px;
-        spacing: 20px;
+        spacing: 16px;
 
         Heading { text: T.capture-title; }
 
         HorizontalLayout {
             alignment: center;
-            Preview {
-                frame: root.frame;
-                progress: root.progress;
-                accepted: root.accepted;
+            VerticalLayout {
+                spacing: 12px;
+                Preview {
+                    frame: root.frame;
+                    accepted: root.accepted;
+                }
+                ProgressBar { progress: root.progress; }
             }
         }
 
         Text {
             text: root.guidance;
-            font-size: 18px;
+            font-size: 17px;
             font-weight: 600;
             color: Palette.foreground;
             horizontal-alignment: center;
             wrap: word-wrap;
-            min-height: 48px;
+            min-height: 44px;
         }
-
-        HorizontalLayout {
-            alignment: center;
-            Button {
-                text: T.cancel;
-                enabled: !root.busy;
-                clicked => { root.cancel(); }
-            }
+    }
+    Footer {
+        Spacer {}
+        ActionButton {
+            text: T.cancel;
+            secondary: true;
+            enabled: !root.busy;
+            clicked => { root.cancel(); }
         }
     }
 }

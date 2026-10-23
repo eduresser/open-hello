@@ -32,8 +32,8 @@ As a laptop owner, I want a step-by-step window that shows me the camera and tel
 #### AC-058 — The wizard follows the Windows Hello order
 
 - **Given** the user opens the app with no face set up
-- **When** they press "Set up" and complete each step
-- **Then** the app shows, in order: welcome, identity check (system password prompt), capture, and a final "Face recognition is ready" screen with Test and Set up again buttons and no Close button; the welcome screen appears only when no face is set up, and Set up again goes straight to the identity check; when the login key does not exist yet it is created right after the enrollment commits, and the app never asks for, creates or shows a PIN or a recovery code
+- **When** they press "Get started" and complete each step
+- **Then** the app shows, in order: welcome ("Welcome to Open Hello"), identity check (system password prompt), capture, and a final "All set" screen with Test and Set up again buttons and no Close button; the welcome screen appears only when no face is set up, and Set up again goes straight to the identity check; when the login key does not exist yet it is created right after the enrollment commits, and the app never asks for, creates or shows a PIN or a recovery code
 
 #### AC-059 — The capture screen shows the preview, the guidance and the progress
 
@@ -89,7 +89,7 @@ As a laptop owner, I want to test and delete my face from the same app, so that 
 
 - **Given** the enrollment just completed
 - **When** the screen after setup is shown
-- **Then** it has the title "Face recognition is ready", the text "Test it now to make sure it recognizes you." and two buttons, Test (primary) and Set up again, with no Close button
+- **Then** it has the title "All set", the text "Test it now to make sure it recognizes you." and two buttons, Test (primary) and Set up again, with no Close button
 
 #### AC-073 — The main screen is usable when recognition is unavailable
 
@@ -134,8 +134,8 @@ As a laptop owner on any distribution and desktop, I want to find the app in the
 #### AC-067 — A desktop entry opens the app
 
 - **Given** the package is installed
-- **When** the user searches for "Face recognition" in the menu or settings of any desktop that follows the freedesktop standard
-- **Then** an entry in the Settings category launches the app (valid `.desktop` file whose `Exec` resolves)
+- **When** the user searches for "Open Hello" or "Face recognition" in the menu or settings of any desktop that follows the freedesktop standard
+- **Then** an entry named "Open Hello" (generic name "Face recognition") with the Open Hello logo in the Settings category launches the app (valid `.desktop` file whose `Exec` resolves, logo installed in the hicolor theme, window app id `openhello`)
 
 #### AC-068 — The installer builds the window when fontconfig and FreeType headers exist
 
@@ -157,7 +157,7 @@ As a laptop owner, I want the app to refuse to enroll when face recognition cann
 
 - **Given** the daemon reports that the camera is missing or busy, or that the TPM is unavailable
 - **When** the user opens the app
-- **Then** the welcome screen explains the cause in plain words, its Set up button is disabled, it offers Try again and no deletion link (there is nothing to delete), no enrollment session is created, and no PIN or other alternative is offered (the system password remains the sign-in fallback)
+- **Then** the welcome screen explains the cause in plain words, its Get started button is disabled, it offers Try again and no deletion link (there is nothing to delete), no enrollment session is created, and no PIN or other alternative is offered (the system password remains the sign-in fallback)
 
 ## Out of scope
 
@@ -171,6 +171,7 @@ As a laptop owner, I want the app to refuse to enroll when face recognition cann
 ## Decisions
 
 - Product owner decision 2026-10-23: the window has three states: set up (welcome), set up with face (main screen: Test, Set up again, Delete face data) and the screen after setup (Test, Set up again); a test always returns to the main screen with its result on it.
+- Product owner decision 2026-10-23: the app is named "Open Hello" (window, menu entry and texts) with its own logo, and the window follows the Windows Hello setup layout (large logo, content in the middle, actions in a footer aligned to the right, linear progress under the camera); the common phrases "Get started" and "All set" are allowed, every other sentence stays original (ASM-022).
 - Product owner decision 2026-10-23: neither a PIN nor a recovery code is created, shown or printed by the window or the CLI; the key service keeps both protectors in its D-Bus API.
 
 ## Assumptions

@@ -1,4 +1,4 @@
-import { Button, Palette } from "std-widgets.slint";
+import { Palette } from "std-widgets.slint";
 import { ActionButton, Brand, ButtonRow } from "components.slint";
 import { T } from "texts.slint";
 
@@ -6,7 +6,7 @@ export component ConfirmRemoval inherits Rectangle {
     callback confirmed();
     callback dismissed();
 
-    background: #000000a0;
+    background: #00000099;
 
     TouchArea {}
 
@@ -29,10 +29,13 @@ export component ConfirmRemoval inherits Rectangle {
                 background: Palette.background;
                 border-radius: 12px;
                 border-width: 1px;
-                border-color: Palette.foreground.with-alpha(0.2);
+                border-color: Palette.foreground.with-alpha(0.12);
+                drop-shadow-offset-y: 12px;
+                drop-shadow-blur: 32px;
+                drop-shadow-color: #00000066;
                 VerticalLayout {
                     padding: 24px;
-                    spacing: 16px;
+                    spacing: 12px;
                     Text {
                         text: T.delete-confirm-title;
                         font-size: 20px;
@@ -48,14 +51,16 @@ export component ConfirmRemoval inherits Rectangle {
                     }
                     ButtonRow {
                         alignment: end;
-                        Button {
-                            text: T.cancel;
-                            clicked => { root.dismissed(); }
-                        }
+                        padding-top: 12px;
                         ActionButton {
                             text: T.delete;
                             tone: Brand.danger;
                             clicked => { root.confirmed(); }
+                        }
+                        ActionButton {
+                            text: T.cancel;
+                            secondary: true;
+                            clicked => { root.dismissed(); }
                         }
                     }
                 }

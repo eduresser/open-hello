@@ -32,6 +32,9 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if let Err(error) = slint::set_xdg_app_id("openhello") {
+        eprintln!("cannot set the application id: {error}");
+    }
     if options.trace_input {
         trace::enable();
     }
