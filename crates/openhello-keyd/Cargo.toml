@@ -22,6 +22,8 @@ cryptoki = "0.12"
 cryptoki-sys = "0.5"
 getrandom = "0.2"
 sha2 = "0.10"
+hmac = "0.12"
+chacha20poly1305 = "0.10"
 zeroize = "1"
 zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
 blocking = "1"

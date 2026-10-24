@@ -1,0 +1,198 @@
+name: openhello
+arch: amd64
+platform: linux
+version: ${VERSION}
+release: 1
+section: admin
+priority: optional
+maintainer: Eduardo Ramon Resser <eduresser@gmail.com>
+description: |
+  Face sign-in for Linux with an IR camera.
+  Adds a PAM module, a biometric daemon and a TPM key daemon, plus the
+  Open Hello window to enroll a face.
+vendor: Open Hello
+homepage: https://github.com/eduresser/open-hello
+license: Apache-2.0 AND GPL-3.0-only
+
+overrides:
+  deb:
+    depends:
+      - libc6 (>= 2.34)
+      - libgcc-s1
+      - libstdc++6
+      - libpam0g
+      - systemd
+      - dbus
+      - polkitd | policykit-1
+      - p11-kit
+      - python3
+      - tpm2-tools
+      - libtpm2-pkcs11-1
+      - libtpm2-pkcs11-tools
+      - libfontconfig1
+      - libxkbcommon0
+      - libxkbcommon-x11-0
+      - libwayland-client0
+      - libwayland-egl1
+      - libegl1
+      - libgl1
+      - libx11-6
+      - libx11-xcb1
+      - libxcb1
+      - libxcursor1
+      - libxi6
+      - libxrender1
+  rpm:
+    depends:
+      - libpam.so.0()(64bit)
+      - libstdc++.so.6()(64bit)
+      - systemd
+      - /usr/bin/dbus-daemon
+      - /usr/bin/pkttyagent
+      - /usr/bin/p11-kit
+      - /usr/bin/python3
+      - /usr/bin/tpm2_createprimary
+      - /usr/bin/tpm2_ptool
+      - tpm2-pkcs11
+      - libfontconfig.so.1()(64bit)
+      - libxkbcommon.so.0()(64bit)
+      - libxkbcommon-x11.so.0()(64bit)
+      - libwayland-client.so.0()(64bit)
+      - libwayland-egl.so.1()(64bit)
+      - libEGL.so.1()(64bit)
+      - libGL.so.1()(64bit)
+      - libX11.so.6()(64bit)
+      - libX11-xcb.so.1()(64bit)
+      - libxcb.so.1()(64bit)
+      - libXcursor.so.1()(64bit)
+      - libXi.so.6()(64bit)
+      - libXrender.so.1()(64bit)
+  archlinux:
+    depends:
+      - glibc
+      - gcc-libs
+      - pam
+      - systemd
+      - dbus
+      - polkit
+      - p11-kit
+      - python
+      - tpm2-tools
+      - tpm2-pkcs11
+      - tpm2-pkcs11-tools
+      - fontconfig
+      - libxkbcommon
+      - libxkbcommon-x11
+      - wayland
+      - libglvnd
+      - libx11
+      - libxcb
+      - libxcursor
+      - libxi
+      - libxrender
+
+contents:
+  - src: dist/stage/libpam_openhello.so
+    dst: /usr/lib/x86_64-linux-gnu/security/pam_openhello.so
+    packager: deb
+    file_info: {mode: 0755}
+  - src: dist/stage/libpam_openhello.so
+    dst: /usr/lib64/security/pam_openhello.so
+    packager: rpm
+    file_info: {mode: 0755}
+  - src: dist/stage/libpam_openhello.so
+    dst: /usr/lib/security/pam_openhello.so
+    packager: archlinux
+    file_info: {mode: 0755}
+
+  - src: dist/stage/openhello-cli
+    dst: /usr/bin/openhello-cli
+    file_info: {mode: 0755}
+  - src: dist/stage/openhello-gui
+    dst: /usr/bin/openhello-gui
+    file_info: {mode: 0755}
+
+  - src: dist/stage/openhellod
+    dst: /usr/libexec/openhello/openhellod
+    file_info: {mode: 0755}
+  - src: dist/stage/openhello-keyd
+    dst: /usr/libexec/openhello/openhello-keyd
+    file_info: {mode: 0755}
+  - src: dist/stage/openhello-calibrate
+    dst: /usr/libexec/openhello/openhello-calibrate
+    file_info: {mode: 0755}
+
+  - src: dist/stage/libsensor_adapter_ir.so
+    dst: /usr/lib/openhello/libsensor_adapter_ir.so
+    file_info: {mode: 0644}
+  - src: dist/stage/libengine_adapter_face.so
+    dst: /usr/lib/openhello/libengine_adapter_face.so
+    file_info: {mode: 0644}
+  - src: dist/stage/libstorage_adapter_templates.so
+    dst: /usr/lib/openhello/libstorage_adapter_templates.so
+    file_info: {mode: 0644}
+  - src: dist/stage/libopenhello_pkcs11.so
+    dst: /usr/lib/openhello/libopenhello_pkcs11.so
+    file_info: {mode: 0644}
+  - src: dist/stage/onnxruntime/
+    dst: /usr/lib/openhello/
+    type: tree
+
+  - src: dist/stage/models/yunet.onnx
+    dst: /usr/share/openhello/models/yunet.onnx
+    file_info: {mode: 0644}
+  - src: dist/stage/models/glintr100.onnx
+    dst: /usr/share/openhello/models/glintr100.onnx
+    file_info: {mode: 0644}
+
+  - src: dist/stage/openhellod.service
+    dst: /usr/lib/systemd/system/openhellod.service
+    file_info: {mode: 0644}
+  - src: dist/stage/openhello-keyd.service
+    dst: /usr/lib/systemd/system/openhello-keyd.service
+    file_info: {mode: 0644}
+  - src: packaging/io.openhello.Biometrics1.conf
+    dst: /usr/share/dbus-1/system.d/io.openhello.Biometrics1.conf
+    file_info: {mode: 0644}
+  - src: packaging/io.openhello.Keyd1.conf
+    dst: /usr/share/dbus-1/system.d/io.openhello.Keyd1.conf
+    file_info: {mode: 0644}
+  - src: crates/openhellod/io.openhello.Biometrics1.policy
+    dst: /usr/share/polkit-1/actions/io.openhello.Biometrics1.policy
+    file_info: {mode: 0644}
+  - src: crates/openhello-keyd/io.openhello.Keyd1.policy
+    dst: /usr/share/polkit-1/actions/io.openhello.Keyd1.policy
+    file_info: {mode: 0644}
+  - src: packaging/selinux/openhello.cil
+    dst: /usr/share/openhello/selinux/openhello.cil
+    file_info: {mode: 0644}
+  - src: packaging/openhello.desktop
+    dst: /usr/share/applications/openhello.desktop
+    file_info: {mode: 0644}
+  - src: packaging/openhello.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/openhello.svg
+    file_info: {mode: 0644}
+
+  - src: packaging/package/openhello.env
+    dst: /etc/openhello/openhello.env
+    type: config|noreplace
+    file_info: {mode: 0644}
+  - src: packaging/package/engine.json
+    dst: /etc/openhello/engine.json
+    type: config|noreplace
+    file_info: {mode: 0644}
+  - dst: /etc/openhello/cacerts
+    type: dir
+    file_info: {mode: 0755}
+  - dst: /etc/openhello/crls
+    type: dir
+    file_info: {mode: 0755}
+
+scripts:
+  postinstall: packaging/package/postinstall.sh
+  preremove: packaging/package/preremove.sh
+
+archlinux:
+  packager: Eduardo Ramon Resser <eduresser@gmail.com>
+  scripts:
+    postupgrade: packaging/package/postinstall.sh

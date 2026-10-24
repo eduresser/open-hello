@@ -4,6 +4,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
 use cryptoki::context::{CInitializeArgs, CInitializeFlags, Pkcs11};
 use cryptoki::error::{Error as P11Error, RvError};
@@ -90,6 +91,8 @@ pub struct KeydConfig {
     pub mapfile: PathBuf,
     pub auth_dir: PathBuf,
     pub user_name: Option<fn(u32) -> Option<String>>,
+    pub shadow_file: PathBuf,
+    pub pending_password_ttl: Duration,
 }
 
 impl KeydConfig {
@@ -103,6 +106,8 @@ impl KeydConfig {
             mapfile: PathBuf::from(crate::certificate::DEFAULT_MAPFILE),
             auth_dir: PathBuf::from(crate::auth_keys::DEFAULT_AUTH_DIR),
             user_name: None,
+            shadow_file: PathBuf::from(crate::login_secret::SHADOW_FILE),
+            pending_password_ttl: crate::login_secret::PENDING_PASSWORD_TTL,
         }
     }
 

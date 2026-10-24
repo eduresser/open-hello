@@ -291,6 +291,10 @@ impl Biometrics {
         self.sensor.release();
     }
 
+    pub fn reissue_ticket(&mut self, uid: u32) {
+        self.deliver_ticket(uid);
+    }
+
     fn deliver_ticket(&mut self, uid: u32) {
         self.last_delivery = None;
         let Some(client) = self.tickets.as_mut() else { return };
@@ -848,6 +852,20 @@ mod tests {
         assert_eq!(rig.core.identify().unwrap(), None);
         assert_eq!(rig.begun(), 6);
         assert_eq!(rig.ended(), 6);
+    }
+
+    #[test]
+    fn a_reissued_ticket_reaches_keyd_without_touching_the_camera() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("keyd.sock");
+        let keyd = TestKeyd::start(&socket, 1);
+        let mut rig = rig(&[], FRAME, None);
+        rig.core = rig.core.with_ticket_client(Some(TicketClient::new(&socket)));
+        rig.core.reissue_ticket(1000);
+        assert_eq!(rig.core.last_ticket_delivery(), Some(TicketDelivery::Delivered));
+        assert_eq!(*keyd.connections.lock().unwrap(), 1);
+        assert_eq!(rig.counters.frames.load(Ordering::SeqCst), 0);
+        assert_eq!(rig.begun(), 0);
     }
 
     // @spec:AC-042

@@ -6,4 +6,6 @@ pub mod keyd_client;
 pub mod logging;
 pub mod plugin_loader;
 pub mod polkit;
+pub mod polkit_admin;
+pub mod sudo_policy;
 pub mod ticket_client;

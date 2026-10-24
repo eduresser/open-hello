@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use openhello_gui_core::{ClientError, ClientErrorKind, ClientResult, EnrollClient, Frame, ManageClient, Progress, Status};
+use openhello_gui_core::{ClientError, ClientErrorKind, ClientResult, EnrollClient, Frame, ManageClient, Progress, Status, SudoAccess};
 
 use crate::options::DemoMode;
 
@@ -38,6 +38,7 @@ pub struct DemoClient {
     verifies: u32,
     verdict: &'static str,
     noise: Vec<u8>,
+    sudo: SudoAccess,
 }
 
 impl DemoClient {
@@ -46,7 +47,8 @@ impl DemoClient {
     }
 
     pub fn paced(mode: DemoMode, face: Arc<AtomicBool>, pace: Duration) -> Self {
-        Self { mode, face, pace, ticks: 0, frames: 0, verifies: 0, verdict: SCRIPT[0], noise: noise() }
+        let sudo = if mode.sudo_asks_root { SudoAccess::RootPassword } else { SudoAccess::Unavailable };
+        Self { mode, face, pace, ticks: 0, frames: 0, verifies: 0, verdict: SCRIPT[0], noise: noise(), sudo }
     }
 
     fn sleep(&self, duration: Duration) {
@@ -169,6 +171,19 @@ impl EnrollClient for DemoClient {
 }
 
 impl ManageClient for DemoClient {
+    fn sudo_access(&mut self, _uid: u32) -> ClientResult<SudoAccess> {
+        Ok(self.sudo)
+    }
+
+    fn use_own_password_for_sudo(&mut self, _uid: u32) -> ClientResult<SudoAccess> {
+        self.sleep(PAUSE);
+        if self.mode.fail {
+            return Err(ClientError::new(ClientErrorKind::AuthDenied, "demo"));
+        }
+        self.sudo = SudoAccess::OwnPassword;
+        Ok(self.sudo)
+    }
+
     fn status(&mut self, _uid: u32) -> ClientResult<Status> {
         self.read_status()
     }

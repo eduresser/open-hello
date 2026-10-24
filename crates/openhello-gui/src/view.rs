@@ -29,6 +29,8 @@ pub fn init(window: &MainWindow, strings: &Strings) {
     texts.set_delete_confirm_title(get(Text::DeleteConfirmTitle));
     texts.set_delete_confirm_body(get(Text::DeleteConfirmBody));
     texts.set_set_up_again(get(Text::SetUpAgain));
+    texts.set_sudo_notice(get(Text::SudoNotice));
+    texts.set_sudo_use_own(get(Text::SudoUseOwn));
 }
 
 pub fn apply(window: &MainWindow, strings: &Strings, event: Event) {
@@ -56,13 +58,29 @@ fn handle(window: &MainWindow, strings: &Strings, event: Event) {
         Event::Failed(cause) => show_failure(window, strings, cause),
         Event::Manage { blocked } => show_manage(window, strings, blocked),
         Event::TestResult(outcome) => show_test_result(window, strings, &outcome),
+        Event::SudoNotice(asks_root) => show_sudo_notice(window, asks_root),
+        Event::SudoChanged(outcome) => show_sudo_change(window, strings, outcome),
     }
+}
+
+fn show_sudo_notice(window: &MainWindow, asks_root: bool) {
+    window.set_sudo_asks_root(asks_root);
+    gate::settle(window);
+}
+
+fn show_sudo_change(window: &MainWindow, strings: &Strings, outcome: Result<(), FailureCause>) {
+    let message = match outcome {
+        Ok(()) => strings.get(Text::SudoChanged).to_string(),
+        Err(cause) => strings.sudo_failure(cause),
+    };
+    window.set_sudo_message(message.into());
 }
 
 fn show(window: &MainWindow, page: Page) {
     window.set_page(page);
     gate::settle(window);
     window.set_test_result(SharedString::new());
+    window.set_sudo_message(SharedString::new());
     window.set_confirming(false);
 }
 

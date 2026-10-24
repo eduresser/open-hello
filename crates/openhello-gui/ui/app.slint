@@ -27,6 +27,8 @@ export component MainWindow inherits Window {
     in property <bool> testing;
     in property <string> test-result;
     in-out property <bool> confirming;
+    in property <bool> sudo-asks-root;
+    in property <string> sudo-message;
 
     callback get-started();
     callback retry();
@@ -34,6 +36,7 @@ export component MainWindow inherits Window {
     callback test();
     callback delete();
     callback set-up-again();
+    callback use-own-sudo();
 
     title: T.window-title;
     icon: @image-url("../../../packaging/openhello.svg");
@@ -66,6 +69,9 @@ export component MainWindow inherits Window {
     if root.page == Page.done: DonePage {
         busy: root.busy;
         testing: root.testing;
+        sudo-asks-root: root.sudo-asks-root;
+        sudo-message: root.sudo-message;
+        use-own-sudo => { root.use-own-sudo(); }
         test => { root.test(); }
         set-up-again => { root.set-up-again(); }
     }
@@ -86,6 +92,9 @@ export component MainWindow inherits Window {
         blocked-title: root.blocked-title;
         blocked-body: root.blocked-body;
         confirming <=> root.confirming;
+        sudo-asks-root: root.sudo-asks-root;
+        sudo-message: root.sudo-message;
+        use-own-sudo => { root.use-own-sudo(); }
         test => { root.test(); }
         set-up-again => { root.set-up-again(); }
     }

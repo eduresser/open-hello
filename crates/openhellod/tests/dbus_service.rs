@@ -8,6 +8,11 @@ use openhellod::core::{Biometrics, DEFAULT_TARGET_FAR};
 use openhellod::dbus_service::{Action, AuthFuture, Authorizer, Caller, Service, BUS_NAME, OBJECT_PATH};
 use openhellod::polkit::{PolkitAuthorizer, PolkitClient, PolkitFuture};
 
+mod support {
+    pub mod fake_sudo;
+}
+use support::fake_sudo::{FakeSudo, Reads, Visudo, TUMBLEWEED_DEFAULTS};
+
 struct PrivateBus {
     daemon: Child,
     address: String,
@@ -119,8 +124,18 @@ fn serve(bus: &PrivateBus, authorizer: Arc<dyn Authorizer>) -> Arc<AtomicUsize> 
 }
 
 fn serve_core(bus: &PrivateBus, authorizer: Arc<dyn Authorizer>, core: Biometrics) {
+    serve_service(bus, Service::new(core, authorizer));
+}
+
+fn serve_with_sudo(bus: &PrivateBus, authorizer: Arc<dyn Authorizer>, fake: &FakeSudo) {
+    let engine = Engine { begins: Arc::default(), candidates: Vec::new() };
+    let core = Biometrics::new(Box::new(Sensor), Box::new(engine), Box::new(Storage::default()), DEFAULT_TARGET_FAR);
+    let rules = openhellod::polkit_admin::PolkitAdminStore::new(fake.dir.path().join("etc/polkit-1/rules.d"));
+    serve_service(bus, Service::new(core, authorizer).with_sudo_policy(fake.store()).with_polkit_admin(rules));
+}
+
+fn serve_service(bus: &PrivateBus, service: Service) {
     let address = bus.address.clone();
-    let service = Service::new(core, authorizer);
     let (ready_tx, ready_rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         async_io::block_on(async move {
@@ -543,7 +558,7 @@ fn a_caller_that_disconnects_stops_the_capture_and_a_queued_call_of_a_dead_calle
     assert_eq!(probe.auth_ends.load(Ordering::SeqCst), 1);
 }
 
-// @spec:AC-040
+// @spec:AC-047
 #[test]
 fn an_enrollment_whose_owner_leaves_is_discarded_and_the_camera_is_released() {
     let bus = PrivateBus::start();
@@ -562,7 +577,7 @@ fn an_enrollment_whose_owner_leaves_is_discarded_and_the_camera_is_released() {
     assert!(error.contains("not valid in the current state"), "{error}");
 }
 
-// @spec:AC-040
+// @spec:AC-047
 #[test]
 fn an_enrollment_that_is_committed_or_discarded_by_its_owner_is_not_discarded_again_when_it_leaves() {
     let bus = PrivateBus::start();
@@ -811,4 +826,152 @@ fn check_ready_reports_an_unavailable_tpm_as_tpm_unavailable() {
     assert_eq!(name, "io.openhello.Error.TpmUnavailable");
     assert!(!detail.contains("tpm2_getcap"), "{detail}");
     assert_eq!(readiness.captures, 0);
+}
+
+#[test]
+fn the_caller_reads_whose_password_sudo_asks_only_for_its_own_uid() {
+    let bus = PrivateBus::start();
+    let fake = FakeSudo::new(TUMBLEWEED_DEFAULTS, Visudo::Accepts, Reads::DropIns);
+    let polkit = Arc::new(ScriptedPolkit { authorized: true, asked: Default::default() });
+    serve_with_sudo(&bus, Arc::new(PolkitAuthorizer::new(polkit.clone())), &fake);
+    let conn = client(&bus);
+    let policy: String = proxy(&conn).call("GetSudoPolicy", &(my_uid(),)).unwrap();
+    assert_eq!(policy, "root-password");
+    let error = proxy(&conn).call::<_, _, String>("GetSudoPolicy", &(my_uid() + 1,)).unwrap_err();
+    assert!(error.to_string().contains("AuthFailed"), "{error}");
+    assert!(polkit.asked.lock().unwrap().is_empty());
+}
+
+#[test]
+fn switching_sudo_to_the_own_password_needs_polkit_and_purge_restores_it() {
+    let bus = PrivateBus::start();
+    let fake = FakeSudo::new(TUMBLEWEED_DEFAULTS, Visudo::Accepts, Reads::DropIns);
+    let polkit = Arc::new(ScriptedPolkit { authorized: true, asked: Default::default() });
+    serve_with_sudo(&bus, Arc::new(PolkitAuthorizer::new(polkit.clone())), &fake);
+    let conn = client(&bus);
+    let policy: String = proxy(&conn).call("UseOwnPasswordForSudo", &(my_uid(),)).unwrap();
+    assert_eq!(policy, "own-password");
+    assert!(fake.drop_in(my_uid()).exists());
+    let rule = std::fs::read_to_string(polkit_rule(&fake)).unwrap();
+    assert!(rule.contains("\"unix-user:0\""), "sudo asked for root before, so root stays a choice: {rule}");
+    assert_eq!(*polkit.asked.lock().unwrap(), vec!["io.openhello.biometrics.sudo-own-password"]);
+    assert_eq!(proxy(&conn).call::<_, _, String>("GetSudoPolicy", &(my_uid(),)).unwrap(), "own-password");
+
+    proxy(&conn).call::<_, _, bool>("Purge", &(my_uid(),)).unwrap();
+    assert!(!fake.drop_in(my_uid()).exists());
+    assert!(!polkit_rule(&fake).exists());
+    assert_eq!(proxy(&conn).call::<_, _, String>("GetSudoPolicy", &(my_uid(),)).unwrap(), "root-password");
+}
+
+#[test]
+fn a_polkit_refusal_leaves_sudo_untouched() {
+    let bus = PrivateBus::start();
+    let fake = FakeSudo::new(TUMBLEWEED_DEFAULTS, Visudo::Accepts, Reads::DropIns);
+    let polkit = Arc::new(ScriptedPolkit { authorized: false, asked: Default::default() });
+    serve_with_sudo(&bus, Arc::new(PolkitAuthorizer::new(polkit)), &fake);
+    let conn = client(&bus);
+    let error = proxy(&conn).call::<_, _, String>("UseOwnPasswordForSudo", &(my_uid(),)).unwrap_err();
+    assert!(error.to_string().contains("AuthFailed"), "{error}");
+    assert!(fake.entries().is_empty());
+}
+
+#[test]
+fn a_failed_switch_returns_a_short_message_without_paths_or_tool_output() {
+    let bus = PrivateBus::start();
+    let fake = FakeSudo::new(TUMBLEWEED_DEFAULTS, Visudo::Rejects, Reads::DropIns);
+    serve_with_sudo(&bus, Arc::new(AllowAll), &fake);
+    let conn = client(&bus);
+    let error = proxy(&conn).call::<_, _, String>("UseOwnPasswordForSudo", &(my_uid(),)).unwrap_err().to_string();
+    assert!(error.contains("sudo could not be changed"), "{error}");
+    assert!(!error.contains("sudoers") && !error.contains("syntax error"), "{error}");
+    assert!(fake.entries().is_empty());
+    assert!(!polkit_rule(&fake).exists());
+}
+
+fn polkit_rule(fake: &FakeSudo) -> std::path::PathBuf {
+    fake.dir.path().join(format!("etc/polkit-1/rules.d/49-openhello-uid{}.rules", my_uid()))
+}
+
+struct CountingSensor(Arc<AtomicUsize>);
+
+impl SensorBackend for CountingSensor {
+    fn capture(&mut self) -> Result<CapturedFrame, DaemonError> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Ok(CapturedFrame { width: 1, height: 1, pixels: vec![0] })
+    }
+}
+
+fn enrolled_service(bus: &PrivateBus) -> (zbus::blocking::Connection, Arc<AtomicUsize>) {
+    let captures = Arc::new(AtomicUsize::new(0));
+    let engine = Engine { begins: Arc::default(), candidates: Vec::new() };
+    let core = Biometrics::new(Box::new(CountingSensor(captures.clone())), Box::new(engine), Box::new(Storage::default()), DEFAULT_TARGET_FAR);
+    serve_core(bus, Arc::new(AllowAll), core);
+    let conn = client(bus);
+    let handle: String = proxy(&conn).call("EnrollBegin", &(1000u32,)).unwrap();
+    proxy(&conn).call::<_, _, (String, String, u32, u32)>("EnrollCapture", &(handle.as_str(),)).unwrap();
+    proxy(&conn).call::<_, _, bool>("EnrollCommit", &(handle.as_str(),)).unwrap();
+    captures.store(0, Ordering::SeqCst);
+    (conn, captures)
+}
+
+fn sign_in_from_another_process(bus: &PrivateBus) -> String {
+    let out = Command::new("dbus-send")
+        .arg(format!("--bus={}", bus.address))
+        .args(["--print-reply", "--dest=io.openhello.Biometrics1", "/io/openhello/Biometrics1", "io.openhello.Biometrics1.VerifyForSignIn", "uint32:1000"])
+        .output()
+        .expect("dbus-send must be installed");
+    format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
+}
+
+#[test]
+fn a_sign_in_process_keeps_its_match_without_the_camera_and_others_get_their_own() {
+    let bus = PrivateBus::start();
+    let (conn, captures) = enrolled_service(&bus);
+    assert!(proxy(&conn).call::<_, _, bool>("VerifyForSignIn", &(1000u32,)).unwrap());
+    let first = captures.load(Ordering::SeqCst);
+    assert!(first > 0);
+    assert!(proxy(&conn).call::<_, _, bool>("VerifyForSignIn", &(1000u32,)).unwrap(), "a lock screen re-asking keeps its unlock");
+    let fresh = client(&bus);
+    assert!(proxy(&fresh).call::<_, _, bool>("VerifyForSignIn", &(1000u32,)).unwrap());
+    assert_eq!(captures.load(Ordering::SeqCst), first, "the camera stays off for the same process");
+    assert!(sign_in_from_another_process(&bus).contains("boolean true"));
+    assert!(captures.load(Ordering::SeqCst) > first, "another process is checked afresh");
+}
+
+#[test]
+fn a_refused_face_sends_that_process_to_the_password_without_the_camera() {
+    let bus = PrivateBus::start();
+    let (conn, captures) = enrolled_service(&bus);
+    assert!(!proxy(&conn).call::<_, _, bool>("VerifyForSignIn", &(1001u32,)).unwrap());
+    let first = captures.load(Ordering::SeqCst);
+    let again = proxy(&conn).call::<_, _, bool>("VerifyForSignIn", &(1001u32,)).unwrap_err().to_string();
+    assert!(again.contains("io.openhello.Error.AlreadyDecided"), "{again}");
+    assert_eq!(captures.load(Ordering::SeqCst), first);
+}
+
+#[test]
+fn a_decision_belongs_to_the_user_it_was_made_for() {
+    let bus = PrivateBus::start();
+    let (conn, captures) = enrolled_service(&bus);
+    assert!(!proxy(&conn).call::<_, _, bool>("VerifyForSignIn", &(1001u32,)).unwrap());
+    let first = captures.load(Ordering::SeqCst);
+    assert!(proxy(&conn).call::<_, _, bool>("VerifyForSignIn", &(1000u32,)).unwrap());
+    assert!(captures.load(Ordering::SeqCst) > first, "a refusal for one user never answers for another");
+}
+
+#[test]
+fn the_window_test_button_keeps_verifying_as_often_as_asked() {
+    let bus = PrivateBus::start();
+    let (conn, captures) = enrolled_service(&bus);
+    for round in 1..=3 {
+        assert!(proxy(&conn).call::<_, _, bool>("Verify", &(1000u32,)).unwrap());
+        assert!(captures.load(Ordering::SeqCst) >= round);
+    }
+}
+
+#[test]
+fn the_process_start_time_is_read_past_a_command_name_with_spaces_and_parentheses() {
+    let stat = "4242 (kscreenlocker (greet)) S 1 4242 4242 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 3 0 987654 1000 200 18446744073709551615";
+    assert_eq!(openhellod::dbus_service::process_start_time(stat), Some(987654));
+    assert_eq!(openhellod::dbus_service::process_start_time("garbage"), None);
 }

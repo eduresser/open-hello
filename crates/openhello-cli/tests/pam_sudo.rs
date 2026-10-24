@@ -2,15 +2,16 @@
 mod support;
 
 use std::io::{Read, Write};
-use std::os::unix::net::UnixStream;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use openhello_keyd::{
     Protectors, TicketSocket, TicketSocketConfig, TokenSocket, TokenSocketConfig, OP_TICKET,
-    OP_TICKET_KEY, STATUS_ACCEPTED,
+    OP_TICKET_KEY, OP_TOKEN_SEAL_SECRET, STATUS_ACCEPTED,
 };
 use openhello_ticket::{Issuer, TicketKey, KEY_LEN};
 use support::{rig, Rig};
@@ -44,7 +45,8 @@ const SLOW_VERIFY: Duration = Duration::from_secs(6);
 const MODULE_BUDGET: Duration = Duration::from_secs(30);
 const STRICT_CONTROL: &str = "[success=done ignore=ignore default=die]";
 const PAM_AUTH_ERR: i32 = 7;
-const AUTH_OP: u8 = 11;
+const AUTH_OP: u8 = openhello_auth_proto::OP_TOKEN_AUTH_RELEASE;
+const SEALED_PASSWORD: &str = "Correct-Horse-7-battery";
 
 const CLIENT_C: &str = r#"
 #include <security/pam_appl.h>
@@ -91,6 +93,12 @@ int main(int argc, char **argv) {
   sigprocmask(SIG_UNBLOCK, &only_int, NULL);
   printf("RESULT %d\n", rc);
   printf("SIGINT %d\n", (int)interrupted);
+  if (rc == PAM_SUCCESS && getenv("PAMTEST_SETCRED"))
+    printf("SETCRED %d\n", pam_setcred(h, PAM_ESTABLISH_CRED));
+  if (rc == PAM_SUCCESS && getenv("PAMTEST_POLKIT")) {
+    rc = pam_acct_mgmt(h, 0);
+    printf("ACCT %d\n", rc);
+  }
   pam_end(h, rc);
   return 0;
 }
@@ -123,6 +131,72 @@ int pam_sm_setcred(pam_handle_t *h, int flags, int argc, const char **argv) {
 }
 "#;
 
+const PASSWORD_CHECK_C: &str = r#"
+#include <security/pam_ext.h>
+#include <security/pam_modules.h>
+#include <stdio.h>
+#include <string.h>
+
+static const char *arg(int argc, const char **argv, const char *key) {
+  size_t n = strlen(key);
+  for (int i = 0; i < argc; i++)
+    if (strncmp(argv[i], key, n) == 0) return argv[i] + n;
+  return NULL;
+}
+
+int pam_sm_authenticate(pam_handle_t *h, int flags, int argc, const char **argv) {
+  const char *token = NULL;
+  const char *expected = arg(argc, argv, "password=");
+  const char *path = arg(argc, argv, "path=");
+  (void)flags;
+  int ok = pam_get_authtok(h, PAM_AUTHTOK, &token, NULL) == PAM_SUCCESS && token && expected &&
+           strcmp(token, expected) == 0;
+  FILE *f = path ? fopen(path, "a") : NULL;
+  if (f) {
+    fprintf(f, "password=%s\n", ok ? "accepted" : "rejected");
+    fclose(f);
+  }
+  return ok ? PAM_SUCCESS : PAM_AUTH_ERR;
+}
+
+int pam_sm_setcred(pam_handle_t *h, int flags, int argc, const char **argv) {
+  (void)h; (void)flags; (void)argc; (void)argv;
+  return PAM_SUCCESS;
+}
+
+int pam_sm_acct_mgmt(pam_handle_t *h, int flags, int argc, const char **argv) {
+  (void)h; (void)flags; (void)argc; (void)argv;
+  return PAM_SUCCESS;
+}
+"#;
+
+const KEYRING_C: &str = r#"
+#include <security/pam_modules.h>
+#include <stdio.h>
+#include <string.h>
+
+int pam_sm_authenticate(pam_handle_t *h, int flags, int argc, const char **argv) {
+  const void *token = NULL;
+  (void)flags;
+  for (int i = 0; i < argc; i++) {
+    if (strncmp(argv[i], "path=", 5) == 0) {
+      pam_get_item(h, PAM_AUTHTOK, &token);
+      FILE *f = fopen(argv[i] + 5, "a");
+      if (f) {
+        fprintf(f, "keyring=%s\n", token ? (const char *)token : "(unset)");
+        fclose(f);
+      }
+    }
+  }
+  return PAM_IGNORE;
+}
+
+int pam_sm_setcred(pam_handle_t *h, int flags, int argc, const char **argv) {
+  (void)h; (void)flags; (void)argc; (void)argv;
+  return PAM_IGNORE;
+}
+"#;
+
 #[derive(Clone, Copy, PartialEq)]
 enum Verify {
     Matches,
@@ -130,6 +204,13 @@ enum Verify {
     NoTicket,
     Slow,
     Hangs,
+    AlreadyDecided,
+}
+
+#[derive(Debug, zbus::DBusError)]
+#[zbus(prefix = "io.openhello.Error")]
+enum FakeError {
+    AlreadyDecided(String),
 }
 
 struct VerifyState {
@@ -144,14 +225,14 @@ struct FakeBiometrics;
 
 #[zbus::interface(name = "io.openhello.Biometrics1")]
 impl FakeBiometrics {
-    async fn verify(&self, uid: u32) -> bool {
+    async fn verify_for_sign_in(&self, uid: u32) -> Result<bool, FakeError> {
         let (mode, socket) = {
             let mut guard = VERIFY.lock().unwrap_or_else(PoisonError::into_inner);
             let state = guard.as_mut().expect("verify state set by the test");
             state.calls += 1;
             (state.mode, state.ticket_socket.clone())
         };
-        match mode {
+        Ok(match mode {
             Verify::NoMatch => false,
             Verify::NoTicket => true,
             Verify::Slow => {
@@ -163,7 +244,8 @@ impl FakeBiometrics {
                 false
             }
             Verify::Matches => deliver_ticket(&socket, uid),
-        }
+            Verify::AlreadyDecided => return Err(FakeError::AlreadyDecided("face already checked".into())),
+        })
     }
 }
 
@@ -332,6 +414,8 @@ struct Fixture {
     protectors: Arc<Protectors>,
     client: PathBuf,
     recorder: PathBuf,
+    password_check: PathBuf,
+    keyring: PathBuf,
 }
 
 static FIXTURE: Mutex<Option<Fixture>> = Mutex::new(None);
@@ -351,6 +435,46 @@ impl Fixture {
     fn public_key_file(&self) -> PathBuf {
         self.config.auth_dir.join(format!("{}.pub", uid()))
     }
+
+    fn write_shadow(&self, salt: &str) -> String {
+        let entry = format!(
+            "{}:$6$rounds=5000${salt}$SGFzaEZvclRoZVRlc3RVc2Vy:20000:0:99999:7:::",
+            linux_user_name(uid()).unwrap()
+        );
+        std::fs::write(&self.config.shadow_file, format!("{entry}\n")).unwrap();
+        entry
+    }
+
+    fn seal_password(&self) -> String {
+        let secrets = self.protectors.login_secrets();
+        secrets.purge(uid()).unwrap();
+        let entry = self.write_shadow("saltsalt");
+        secrets.seal(uid(), SEALED_PASSWORD, &entry).unwrap();
+        entry
+    }
+
+    fn still_sealed(&self, entry: &str) -> bool {
+        self.sealed(entry).as_deref() == Some(SEALED_PASSWORD)
+    }
+
+    fn sealed(&self, entry: &str) -> Option<String> {
+        self.protectors
+            .login_secrets()
+            .release(uid(), entry)
+            .unwrap()
+            .map(|secret| secret.as_str().to_string())
+    }
+
+    fn sealed_bytes(&self) -> Vec<u8> {
+        std::fs::read(
+            self.config
+                .store_dir
+                .join("login-secrets")
+                .join(uid().to_string())
+                .join("secret.bin"),
+        )
+        .unwrap()
+    }
 }
 
 fn with_fixture<R>(rig: &Rig, body: impl FnOnce(&Fixture) -> R) -> R {
@@ -367,18 +491,23 @@ fn build_fixture(rig: &Rig) -> Fixture {
     std::fs::create_dir_all(dir.path().join("etc")).unwrap();
     let mut config = rig.config.clone();
     config.user_name = Some(user_name_for);
+    config.shadow_file = dir.path().join("shadow");
     let protectors = Arc::new(Protectors::new(config.clone()).unwrap());
     protectors.provision_protectors(OTHER_UID).unwrap();
     protectors.provision_protectors(uid()).unwrap();
 
     let client = compile(rig, dir.path(), "pamtest", CLIENT_C, false);
     let recorder = compile(rig, dir.path(), "recorder", RECORDER_C, true);
+    let password_check = compile(rig, dir.path(), "password_check", PASSWORD_CHECK_C, true);
+    let keyring = compile(rig, dir.path(), "keyring", KEYRING_C, true);
     Fixture {
         dir,
         config,
         protectors,
         client,
         recorder,
+        password_check,
+        keyring,
     }
 }
 
@@ -394,6 +523,11 @@ struct Stack {
     user: Option<&'static str>,
     interrupt_after: Option<Duration>,
     block_sigint: bool,
+    password_after: Option<&'static str>,
+    capture: bool,
+    typed: Option<&'static str>,
+    setcred: bool,
+    polkit: bool,
 }
 
 impl Stack {
@@ -410,6 +544,18 @@ impl Stack {
             user: None,
             interrupt_after: None,
             block_sigint: false,
+            password_after: None,
+            capture: false,
+            typed: None,
+            setcred: false,
+            polkit: false,
+        }
+    }
+
+    fn password_after(verify: Verify, accepted: &'static str) -> Self {
+        Self {
+            password_after: Some(accepted),
+            ..Self::common(verify, SERVICE)
         }
     }
 
@@ -457,6 +603,8 @@ struct Outcome {
     elapsed: Duration,
     verify_calls: u32,
     sigint_seen: bool,
+    setcred: Option<i32>,
+    acct: Option<i32>,
 }
 
 impl Outcome {
@@ -564,11 +712,34 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
     let services = fixture.dir.path().join("services");
     std::fs::create_dir_all(&services).unwrap();
     let stack_text = service_text(stack, &hooks_conf, &fixture.config.auth_dir, &etc);
-    let recorder = format!(
-        "auth required {} path={}\n",
-        fixture.recorder.display(),
-        fixture.dir.path().join("reached").display()
-    );
+    let reached_file = fixture.dir.path().join("reached");
+    let capture = if stack.capture {
+        format!(
+            "auth optional {} capture config={} authdir={} trusted_uid={}\n",
+            pam_module().display(),
+            hooks_conf.display(),
+            fixture.config.auth_dir.display(),
+            unsafe { libc::geteuid() }
+        )
+    } else {
+        String::new()
+    };
+    let recorder = match stack.password_after {
+        Some(accepted) => format!(
+            "auth required {} path={} password={accepted}\nauth optional {} path={}\n{capture}\
+             account required {}\n",
+            fixture.password_check.display(),
+            reached_file.display(),
+            fixture.keyring.display(),
+            reached_file.display(),
+            fixture.password_check.display()
+        ),
+        None => format!(
+            "auth required {} path={}\n",
+            fixture.recorder.display(),
+            reached_file.display()
+        ),
+    };
     let service = if let Some(name) = stack.direct {
         std::fs::write(services.join(name), stack_text + &recorder).unwrap();
         name
@@ -581,7 +752,6 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
         .unwrap();
         SERVICE
     };
-    let reached_file = fixture.dir.path().join("reached");
     let _ = std::fs::remove_file(&reached_file);
     set_verify(stack.verify, 0);
 
@@ -596,6 +766,15 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
     }
     if stack.block_sigint {
         client.env("PAMTEST_BLOCK_SIGINT", "1");
+    }
+    if let Some(password) = stack.typed {
+        client.env("PAMTEST_PIN", password);
+    }
+    if stack.setcred {
+        client.env("PAMTEST_SETCRED", "1");
+    }
+    if stack.polkit {
+        client.env("PAMTEST_POLKIT", "1");
     }
     let child = client
         .args([
@@ -660,6 +839,14 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
         elapsed,
         verify_calls: verify_calls(),
         sigint_seen: stdout.lines().any(|l| l == "SIGINT 1"),
+        setcred: stdout
+            .lines()
+            .find_map(|l| l.strip_prefix("SETCRED "))
+            .map(|rc| rc.parse().unwrap()),
+        acct: stdout
+            .lines()
+            .find_map(|l| l.strip_prefix("ACCT "))
+            .map(|rc| rc.parse().unwrap()),
     }
 }
 
@@ -683,8 +870,10 @@ fn verify_calls() -> u32 {
 
 struct Services {
     token_path: PathBuf,
+    root_token_path: PathBuf,
     _ticket: TicketSocket,
     _token: TokenSocket,
+    _root_token: TokenSocket,
     _dir: tempfile::TempDir,
 }
 
@@ -708,6 +897,15 @@ fn services(rig: &Rig, fixture: &Fixture) -> Services {
         },
     )
     .unwrap();
+    let root_token_path = dir.path().join("root-token.sock");
+    let root_token = TokenSocket::bind_with_peer_uid(
+        fixture.protectors.clone(),
+        TokenSocketConfig {
+            path: root_token_path.clone(),
+        },
+        0,
+    )
+    .unwrap();
     serve_fake_biometrics(&rig.config.env[0].1);
     *VERIFY.lock().unwrap_or_else(PoisonError::into_inner) = Some(VerifyState {
         ticket_socket: ticket_path,
@@ -716,8 +914,10 @@ fn services(rig: &Rig, fixture: &Fixture) -> Services {
     });
     Services {
         token_path,
+        root_token_path,
         _ticket: ticket,
         _token: token,
+        _root_token: root_token,
         _dir: dir,
     }
 }
@@ -1305,7 +1505,7 @@ fn write_frame(stream: &mut UnixStream, tag: u8, body: &[u8]) -> std::io::Result
     stream.write_all(&frame)
 }
 
-// @spec:AC-041
+// @spec:AC-046
 #[test]
 fn an_interrupt_while_the_camera_waits_ends_the_module_at_once_and_hands_the_signal_back_to_the_caller() {
     let rig = rig();
@@ -1342,5 +1542,453 @@ fn an_interrupt_while_the_camera_waits_ends_the_module_at_once_and_hands_the_sig
             blocked.elapsed
         );
         assert!(blocked.sigint_seen, "the caller never saw its SIGINT");
+    });
+}
+
+#[test]
+fn a_face_already_decided_for_this_process_falls_through_to_the_password_without_a_message() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        let outcome = scenario(&rig, fixture, &services, Stack::face(Verify::AlreadyDecided));
+        assert!(!outcome.granted());
+        assert_eq!(outcome.reached, ["authtok=unset"]);
+        assert_eq!(outcome.verify_calls, 1);
+        assert!(outcome.showed_no_message());
+        assert!(outcome.elapsed < WITHIN_BUDGET, "{:?}", outcome.elapsed);
+    });
+}
+
+fn released_to_root(services: &Services, accepted: &'static str) -> Stack {
+    Stack {
+        token_socket: Some(services.root_token_path.clone()),
+        ..Stack::password_after(Verify::Matches, accepted)
+    }
+}
+
+// @spec:AC-078
+#[test]
+fn release_after_a_face_match_hands_the_keyring_module_exactly_the_sealed_password() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        fixture.seal_password();
+
+        let outcome = scenario(
+            &rig,
+            fixture,
+            &services,
+            released_to_root(&services, SEALED_PASSWORD),
+        );
+
+        assert!(outcome.granted(), "{:?}", outcome.reached);
+        assert_eq!(
+            outcome.reached,
+            [
+                "password=accepted".to_string(),
+                format!("keyring={SEALED_PASSWORD}")
+            ]
+        );
+    });
+}
+
+// @spec:AC-079
+#[test]
+fn release_after_a_face_match_ignores_and_lets_the_password_module_grant_without_a_prompt() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        fixture.seal_password();
+
+        let accepted = scenario(
+            &rig,
+            fixture,
+            &services,
+            released_to_root(&services, SEALED_PASSWORD),
+        );
+        assert!(accepted.granted());
+        assert_eq!(accepted.reached[0], "password=accepted");
+        assert!(accepted.prompts.is_empty(), "{:?}", accepted.prompts);
+        assert_eq!(accepted.verify_calls, 1);
+
+        let rejected = scenario(
+            &rig,
+            fixture,
+            &services,
+            released_to_root(&services, "Other-Password-1"),
+        );
+        assert!(
+            !rejected.granted(),
+            "OpenHello must not grant a released sign-in by itself"
+        );
+        assert_eq!(rejected.reached[0], "password=rejected");
+        assert!(rejected.prompts.is_empty(), "{:?}", rejected.prompts);
+    });
+}
+
+// @spec:AC-081
+#[test]
+fn release_without_a_sealed_password_grants_by_face_alone_before_the_password_module() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        fixture.protectors.login_secrets().purge(uid()).unwrap();
+        fixture.write_shadow("saltsalt");
+
+        let outcome = scenario(
+            &rig,
+            fixture,
+            &services,
+            released_to_root(&services, SEALED_PASSWORD),
+        );
+
+        assert!(outcome.granted());
+        assert!(outcome.reached.is_empty(), "{:?}", outcome.reached);
+        assert!(outcome.prompts.is_empty(), "{:?}", outcome.prompts);
+        assert_eq!(outcome.verify_calls, 1);
+    });
+}
+
+// @spec:AC-085
+#[test]
+fn release_is_withheld_from_a_non_root_caller_and_the_face_signs_in_as_today() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        let entry = fixture.seal_password();
+
+        let outcome = scenario(
+            &rig,
+            fixture,
+            &services,
+            Stack::password_after(Verify::Matches, SEALED_PASSWORD),
+        );
+
+        assert!(outcome.granted());
+        assert!(outcome.reached.is_empty(), "{:?}", outcome.reached);
+        assert!(outcome.prompts.is_empty(), "{:?}", outcome.prompts);
+        assert!(
+            fixture.still_sealed(&entry),
+            "a non-root caller must not discard the secret"
+        );
+    });
+}
+
+// @spec:AC-080
+#[test]
+fn release_after_a_password_change_withholds_and_discards_the_secret_and_the_face_signs_in_alone() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        let entry = fixture.seal_password();
+        fixture.write_shadow("changed1");
+
+        let outcome = scenario(
+            &rig,
+            fixture,
+            &services,
+            released_to_root(&services, SEALED_PASSWORD),
+        );
+
+        assert!(outcome.granted());
+        assert!(outcome.reached.is_empty(), "{:?}", outcome.reached);
+        assert!(outcome.prompts.is_empty(), "{:?}", outcome.prompts);
+        fixture.write_shadow("saltsalt");
+        assert!(
+            !fixture.still_sealed(&entry),
+            "the stale secret must be discarded"
+        );
+    });
+}
+
+fn typed_with_capture(
+    services: &Services,
+    accepted: &'static str,
+    typed: &'static str,
+    setcred: bool,
+) -> Stack {
+    Stack {
+        token_socket: Some(services.root_token_path.clone()),
+        capture: true,
+        typed: Some(typed),
+        setcred,
+        ..Stack::password_after(Verify::NoMatch, accepted).lenient()
+    }
+}
+
+const NEW_PASSWORD: &str = "New-Password-2";
+const THIRD_PASSWORD: &str = "Third-Password-3";
+
+struct SealCounter {
+    path: PathBuf,
+    seals: Arc<AtomicU32>,
+    _dir: tempfile::TempDir,
+}
+
+impl SealCounter {
+    fn seals(&self) -> u32 {
+        self.seals.load(Ordering::SeqCst)
+    }
+}
+
+fn seal_counter(upstream: &Path) -> SealCounter {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("counted-token.sock");
+    let listener = UnixListener::bind(&path).unwrap();
+    let seals = Arc::new(AtomicU32::new(0));
+    let (counted, upstream) = (seals.clone(), upstream.to_path_buf());
+    std::thread::spawn(move || {
+        for client in listener.incoming().flatten() {
+            let (seals, upstream) = (counted.clone(), upstream.clone());
+            std::thread::spawn(move || relay(client, &upstream, &seals));
+        }
+    });
+    SealCounter {
+        path,
+        seals,
+        _dir: dir,
+    }
+}
+
+fn relay(mut client: UnixStream, upstream: &Path, seals: &AtomicU32) {
+    let Ok(mut keyd) = UnixStream::connect(upstream) else {
+        return;
+    };
+    let forward = |from: &mut UnixStream, to: &mut UnixStream| -> std::io::Result<u8> {
+        let mut header = [0u8; 3];
+        from.read_exact(&mut header)?;
+        let mut body = vec![0u8; usize::from(u16::from_be_bytes([header[1], header[2]]))];
+        from.read_exact(&mut body)?;
+        to.write_all(&header)?;
+        to.write_all(&body)?;
+        Ok(header[0])
+    };
+    while let Ok(op) = forward(&mut client, &mut keyd) {
+        if op == OP_TOKEN_SEAL_SECRET {
+            seals.fetch_add(1, Ordering::SeqCst);
+        }
+        if forward(&mut keyd, &mut client).is_err() {
+            return;
+        }
+    }
+}
+
+fn polkit_like(services: &Services, accepted: &'static str, typed: &'static str) -> Stack {
+    Stack {
+        polkit: true,
+        ..typed_with_capture(services, accepted, typed, false)
+    }
+}
+
+// @spec:AC-091
+#[test]
+fn capture_learns_the_password_at_a_polkit_prompt_before_enrollment_and_the_first_face_releases_it() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        fixture.protectors.purge(uid()).unwrap();
+        assert!(!fixture.public_key_file().exists());
+        let entry = fixture.write_shadow("saltsalt");
+
+        let prompt = scenario(
+            &rig,
+            fixture,
+            &services,
+            polkit_like(&services, NEW_PASSWORD, NEW_PASSWORD),
+        );
+        assert!(prompt.granted(), "{:?}", prompt.reached);
+        assert_eq!(prompt.acct, Some(0));
+        assert_eq!(prompt.setcred, None);
+        assert_eq!(
+            fixture.sealed(&entry),
+            None,
+            "nothing stored before enrolling"
+        );
+
+        fixture.protectors.provision_protectors(uid()).unwrap();
+        assert!(fixture.public_key_file().exists());
+        assert_eq!(fixture.sealed(&entry).as_deref(), Some(NEW_PASSWORD));
+
+        let released = scenario(
+            &rig,
+            fixture,
+            &services,
+            released_to_root(&services, NEW_PASSWORD),
+        );
+        assert!(released.granted(), "{:?}", released.reached);
+        assert!(released.prompts.is_empty(), "{:?}", released.prompts);
+        assert_eq!(
+            released.reached,
+            [
+                "password=accepted".to_string(),
+                format!("keyring={NEW_PASSWORD}")
+            ]
+        );
+    });
+}
+
+#[test]
+fn capture_seals_nothing_when_a_polkit_like_prompt_ends_with_a_wrong_password() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        fixture.protectors.login_secrets().purge(uid()).unwrap();
+        let entry = fixture.write_shadow("saltsalt");
+        let counter = seal_counter(&services.root_token_path);
+
+        let prompt = scenario(
+            &rig,
+            fixture,
+            &services,
+            Stack {
+                token_socket: Some(counter.path.clone()),
+                ..polkit_like(&services, NEW_PASSWORD, "Wrong-Password-9")
+            },
+        );
+        assert!(!prompt.granted());
+        assert_eq!(prompt.reached[0], "password=rejected");
+        assert_eq!(prompt.acct, None);
+        assert_eq!(counter.seals(), 0);
+        assert_eq!(fixture.sealed(&entry), None);
+    });
+}
+
+#[test]
+fn capture_seals_exactly_once_when_setcred_runs_before_pam_end() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        fixture.protectors.login_secrets().purge(uid()).unwrap();
+        let entry = fixture.write_shadow("saltsalt");
+        let counter = seal_counter(&services.root_token_path);
+
+        let outcome = scenario(
+            &rig,
+            fixture,
+            &services,
+            Stack {
+                token_socket: Some(counter.path.clone()),
+                ..typed_with_capture(&services, NEW_PASSWORD, NEW_PASSWORD, true)
+            },
+        );
+        assert!(outcome.granted(), "{:?}", outcome.reached);
+        assert_eq!(outcome.setcred, Some(0));
+        assert_eq!(counter.seals(), 1);
+        assert_eq!(fixture.sealed(&entry).as_deref(), Some(NEW_PASSWORD));
+    });
+}
+
+// @spec:AC-082
+#[test]
+fn capture_seals_a_typed_password_once_the_sign_in_succeeds_with_or_without_setcred() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        fixture.protectors.login_secrets().purge(uid()).unwrap();
+        let entry = fixture.write_shadow("saltsalt");
+
+        let outcome = scenario(
+            &rig,
+            fixture,
+            &services,
+            typed_with_capture(&services, NEW_PASSWORD, NEW_PASSWORD, true),
+        );
+
+        assert!(outcome.granted(), "{:?}", outcome.reached);
+        assert_eq!(outcome.password_prompts(), 1, "{:?}", outcome.prompts);
+        assert_eq!(outcome.setcred, Some(0));
+        assert_eq!(fixture.sealed(&entry).as_deref(), Some(NEW_PASSWORD));
+        let stored = fixture.sealed_bytes();
+        assert!(!stored
+            .windows(NEW_PASSWORD.len())
+            .any(|w| w == NEW_PASSWORD.as_bytes()));
+
+        let without_setcred = scenario(
+            &rig,
+            fixture,
+            &services,
+            typed_with_capture(&services, THIRD_PASSWORD, THIRD_PASSWORD, false),
+        );
+        assert!(without_setcred.granted(), "{:?}", without_setcred.reached);
+        assert_eq!(without_setcred.setcred, None);
+        assert_eq!(fixture.sealed(&entry).as_deref(), Some(THIRD_PASSWORD));
+    });
+}
+
+// @spec:AC-083
+#[test]
+fn capture_replaces_the_sealed_password_with_a_new_one_and_the_next_face_sign_in_releases_it() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        fixture.seal_password();
+
+        let typed = scenario(
+            &rig,
+            fixture,
+            &services,
+            typed_with_capture(&services, NEW_PASSWORD, NEW_PASSWORD, true),
+        );
+        assert!(typed.granted(), "{:?}", typed.reached);
+        assert_eq!(typed.setcred, Some(0));
+
+        let released = scenario(
+            &rig,
+            fixture,
+            &services,
+            released_to_root(&services, NEW_PASSWORD),
+        );
+        assert!(released.granted(), "{:?}", released.reached);
+        assert!(released.prompts.is_empty(), "{:?}", released.prompts);
+        assert_eq!(
+            released.reached,
+            [
+                "password=accepted".to_string(),
+                format!("keyring={NEW_PASSWORD}")
+            ]
+        );
+    });
+}
+
+// @spec:AC-084
+#[test]
+fn capture_leaves_the_sealed_password_after_a_failed_or_a_released_sign_in() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        let entry = fixture.seal_password();
+        let before = fixture.sealed_bytes();
+
+        let failed = scenario(
+            &rig,
+            fixture,
+            &services,
+            typed_with_capture(&services, SEALED_PASSWORD, "Wrong-Password-9", true),
+        );
+        assert!(!failed.granted());
+        assert_eq!(failed.reached[0], "password=rejected");
+        assert_eq!(fixture.sealed_bytes(), before, "a failed sign-in");
+
+        let released = scenario(
+            &rig,
+            fixture,
+            &services,
+            Stack {
+                capture: true,
+                setcred: true,
+                ..released_to_root(&services, SEALED_PASSWORD)
+            },
+        );
+        assert!(released.granted(), "{:?}", released.reached);
+        assert_eq!(released.setcred, Some(0));
+        assert_eq!(
+            released.reached,
+            [
+                "password=accepted".to_string(),
+                format!("keyring={SEALED_PASSWORD}")
+            ]
+        );
+        assert_eq!(fixture.sealed_bytes(), before, "a face sign-in that released");
+        assert!(fixture.still_sealed(&entry));
     });
 }

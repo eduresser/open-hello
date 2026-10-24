@@ -29,6 +29,7 @@ pub const OP_TOKEN_ATTRIBUTES: u8 = 8;
 pub const OP_TOKEN_SIGN_CHECK: u8 = 9;
 pub const OP_TOKEN_SIGN: u8 = 10;
 pub const OP_TOKEN_AUTH: u8 = 11;
+pub use openhello_auth_proto::{OP_TOKEN_AUTH_RELEASE, OP_TOKEN_SEAL_SECRET};
 
 pub const TOKEN_OK: u8 = 0;
 pub const TOKEN_PIN_INCORRECT: u8 = 1;
@@ -284,8 +285,8 @@ fn serve(protectors: &Protectors, mut stream: UnixStream, peer: u32) {
         };
         let reply = connection.handle(op, &payload);
         let (status, body) = match reply {
-            Ok(body) => (TOKEN_OK, body),
-            Err(status) => (status, Vec::new()),
+            Ok(body) => (TOKEN_OK, Zeroizing::new(body)),
+            Err(status) => (status, Zeroizing::new(Vec::new())),
         };
         if write_reply(&mut stream, status, &body).is_err() {
             break;
@@ -312,6 +313,8 @@ impl Connection<'_> {
             OP_TOKEN_SIGN_CHECK => self.sign_check(payload),
             OP_TOKEN_SIGN => self.sign(uid, payload),
             OP_TOKEN_AUTH => self.auth(uid, payload),
+            OP_TOKEN_AUTH_RELEASE => self.auth_release(uid, payload),
+            OP_TOKEN_SEAL_SECRET => self.seal_secret(uid, payload),
             _ => Err(self.violation("unknown or malformed operation")),
         }
     }
@@ -563,6 +566,79 @@ impl Connection<'_> {
 
 impl Connection<'_> {
     fn auth(&mut self, uid: u32, payload: &[u8]) -> Reply {
+        self.signed_challenge(uid, payload)
+    }
+
+    fn auth_release(&mut self, uid: u32, payload: &[u8]) -> Reply {
+        let signature = self.signed_challenge(uid, payload)?;
+        let secret = if self.peer == ROOT_UID {
+            self.release_secret(uid)
+        } else {
+            None
+        };
+        let secret = secret.as_ref().map_or(&b""[..], |s| s.as_bytes());
+        let len = u16::try_from(secret.len()).map_err(|_| TOKEN_FAILED)?;
+        let mut reply = Vec::with_capacity(signature.len() + 2 + secret.len());
+        reply.extend_from_slice(&signature);
+        reply.extend_from_slice(&len.to_be_bytes());
+        reply.extend_from_slice(secret);
+        Ok(reply)
+    }
+
+    fn release_secret(&self, uid: u32) -> Option<Zeroizing<String>> {
+        let secrets = self.protectors.login_secrets();
+        let released = secrets.shadow_entry(uid).and_then(|entry| match entry {
+            Some(entry) => secrets.release(uid, &entry),
+            None => Ok(None),
+        });
+        match released {
+            Ok(secret) => secret,
+            Err(error) => {
+                log(
+                    Level::Warn,
+                    "token-release-withheld",
+                    &[
+                        ("uid", Value::Uid(uid)),
+                        ("reason", Value::Label(release_reason(&error))),
+                    ],
+                );
+                None
+            }
+        }
+    }
+
+    fn seal_secret(&mut self, uid: u32, payload: &[u8]) -> Reply {
+        let result = self.try_seal(uid, payload);
+        let (level, event) = match result {
+            Ok(true) => (Level::Info, "token-secret-sealed"),
+            Ok(false) => (Level::Info, "token-secret-pending"),
+            Err(_) => (Level::Warn, "token-seal-refused"),
+        };
+        log(level, event, &[("uid", Value::Uid(uid))]);
+        result.map(|_| Vec::new())
+    }
+
+    fn try_seal(&mut self, uid: u32, payload: &[u8]) -> Result<bool, u8> {
+        if self.peer != ROOT_UID {
+            return Err(TOKEN_REFUSED);
+        }
+        let (named, password) =
+            openhello_auth_proto::split_seal_payload(payload).ok_or(TOKEN_REFUSED)?;
+        if named != uid {
+            return Err(TOKEN_REFUSED);
+        }
+        let password = std::str::from_utf8(password).map_err(|_| TOKEN_REFUSED)?;
+        self.protectors
+            .learn_login_password(uid, password)
+            .map_err(|e| match e {
+                KeydError::InvalidPassword
+                | KeydError::NoShadowEntry
+                | KeydError::InvalidUid(_) => TOKEN_REFUSED,
+                _ => TOKEN_FAILED,
+            })
+    }
+
+    fn signed_challenge(&mut self, uid: u32, payload: &[u8]) -> Reply {
         let Some((service, challenge)) = openhello_auth_proto::parse_request(payload) else {
             return Err(self.violation("malformed auth request"));
         };
@@ -657,6 +733,14 @@ fn sign_target(open: &Open, request: &[u8]) -> Result<ObjectHandle, u8> {
     match open.exposed.get(&handle) {
         Some((object, class)) if *class == ObjectClass::PRIVATE_KEY => Ok(*object),
         _ => Err(TOKEN_BAD_HANDLE),
+    }
+}
+
+fn release_reason(error: &KeydError) -> &'static str {
+    match error {
+        KeydError::NoShadowEntry => "no shadow entry",
+        KeydError::LoginSecretDamaged => "stored secret damaged",
+        _ => "store failure",
     }
 }
 
@@ -756,7 +840,7 @@ fn write_reply(stream: &mut UnixStream, status: u8, payload: &[u8]) -> std::io::
         Ok(_) => (status, payload),
         Err(_) => (TOKEN_FAILED, &[][..]),
     };
-    let mut frame = Vec::with_capacity(3 + payload.len());
+    let mut frame = Zeroizing::new(Vec::with_capacity(3 + payload.len()));
     frame.push(status);
     frame.extend_from_slice(&(payload.len() as u16).to_be_bytes());
     frame.extend_from_slice(payload);
