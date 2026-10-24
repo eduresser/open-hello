@@ -1,0 +1,9 @@
+; polkit's agent helper (policykit_auth_t) runs pam_openhello: it judges the session through
+; logind's runtime files and asks openhello-keyd, an unconfined service, to sign the challenge.
+(allow policykit_auth_t systemd_logind_sessions_t (dir (getattr open read search)))
+(allow policykit_auth_t systemd_logind_sessions_t (file (getattr open read)))
+(allow policykit_auth_t systemd_logind_var_run_t (dir (getattr open read search)))
+(allow policykit_auth_t systemd_logind_var_run_t (file (getattr open read)))
+(allow policykit_auth_t var_run_t (dir (getattr open search)))
+(allow policykit_auth_t var_run_t (sock_file (getattr write)))
+(allow policykit_auth_t unconfined_service_t (unix_stream_socket (connectto)))

@@ -17,7 +17,7 @@ impl Sandbox {
         fs::create_dir(dir.path().join("bin")).unwrap();
         fs::create_dir(dir.path().join("systemd")).unwrap();
         let log = dir.path().join("calls");
-        for (tool, exit) in [("openhello-cli", pam_enable_exit), ("systemctl", 0)] {
+        for (tool, exit) in [("openhello-cli", pam_enable_exit), ("systemctl", 0), ("semodule", 0)] {
             let script = format!(
                 "#!/bin/sh\necho \"{tool} $*\" >> {log}\n[ \"$1 $2\" = \"pam enable\" ] && exit {exit}\n[ \"$1 $2\" = \"admin own-password\" ] && exit ${{FAKE_SUDO_EXIT:-0}}\nexit 0\n",
                 log = log.display()
@@ -26,6 +26,9 @@ impl Sandbox {
             fs::write(&path, script).unwrap();
             fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
         }
+        let selinux = dir.path().join("bin/selinuxenabled");
+        fs::write(&selinux, "#!/bin/sh\nexit ${FAKE_SELINUX:-1}\n").unwrap();
+        fs::set_permissions(&selinux, fs::Permissions::from_mode(0o755)).unwrap();
         Sandbox { dir }
     }
 
@@ -50,6 +53,7 @@ impl Sandbox {
             .env("OPENHELLO_PKG_SYSTEMD_RUN_DIR", self.dir.path().join("systemd"))
             .env("OPENHELLO_PKG_SUDOERS_DIR", self.sudoers())
             .env("OPENHELLO_PKG_POLKIT_RULES_DIR", self.polkit_rules())
+            .env("OPENHELLO_PKG_SELINUX_MODULE", "/pkg/openhello.cil")
             .output()
             .unwrap();
         (out.status.code().unwrap(), String::from_utf8_lossy(&out.stderr).into_owned())
@@ -241,4 +245,31 @@ fn removal_forgets_the_sudo_decision_so_a_reinstall_applies_it_again() {
     sandbox.run_with("postinstall.sh", &["configure"], &[("SUDO_UID", "1000")]);
     sandbox.run("preremove.sh", &["remove"]);
     assert!(!sandbox.state().join("admin-own-password-by-package").exists());
+}
+
+#[test]
+fn the_selinux_module_is_loaded_and_removed_only_where_selinux_is_enabled() {
+    let enforcing = Sandbox::new(0);
+    enforcing.run_with("postinstall.sh", &["configure"], &[("FAKE_SELINUX", "0")]);
+    assert!(enforcing.calls().contains("semodule -i /pkg/openhello.cil"), "{}", enforcing.calls());
+    enforcing.run_with("preremove.sh", &["upgrade"], &[("FAKE_SELINUX", "0")]);
+    assert!(!enforcing.calls().contains("semodule -r"), "upgrades keep the module");
+    enforcing.run_with("preremove.sh", &["remove"], &[("FAKE_SELINUX", "0")]);
+    assert!(enforcing.calls().contains("semodule -r openhello"), "{}", enforcing.calls());
+
+    let without = Sandbox::new(0);
+    without.run("postinstall.sh", &["configure"]);
+    without.run("preremove.sh", &["remove"]);
+    assert!(!without.calls().contains("semodule"), "{}", without.calls());
+}
+
+#[test]
+fn the_packaged_selinux_module_only_widens_the_polkit_agent_helper_domain() {
+    let module = fs::read_to_string(repo().join("packaging/selinux/openhello.cil")).unwrap();
+    let rules: Vec<&str> = module.lines().filter(|l| !l.trim().is_empty() && !l.starts_with(';')).collect();
+    assert!(!rules.is_empty());
+    for rule in rules {
+        assert!(rule.starts_with("(allow policykit_auth_t "), "{rule}");
+    }
+    assert!(packaged_destinations().contains(&"/usr/share/openhello/selinux/openhello.cil".to_string()));
 }

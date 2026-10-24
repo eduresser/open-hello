@@ -7,10 +7,15 @@ SYSTEMD_RUN_DIR="${OPENHELLO_PKG_SYSTEMD_RUN_DIR:-/run/systemd/system}"
 PAM_DECIDED="$STATE_DIR/pam-enabled-by-package"
 ADMIN_DECIDED="$STATE_DIR/admin-own-password-by-package"
 INSTALLER_UID="${SUDO_UID:-${PKEXEC_UID:-}}"
+SELINUX_MODULE="${OPENHELLO_PKG_SELINUX_MODULE:-/usr/share/openhello/selinux/openhello.cil}"
 
 warn() { echo "openhello: $*" >&2; }
 
 mkdir -p -m 0700 "$STATE_DIR"
+
+if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled && command -v semodule >/dev/null 2>&1; then
+  semodule -i "$SELINUX_MODULE" || warn "could not load the SELinux module; pkexec and other polkit prompts will ask for the password"
+fi
 
 openhello-cli pam migrate >/dev/null 2>&1 || warn "could not migrate PAM files left by an earlier installer; run: sudo openhello-cli pam migrate"
 
