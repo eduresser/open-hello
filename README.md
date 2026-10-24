@@ -85,19 +85,18 @@ Each authentication request gets up to 3 recognition attempts within 10 seconds.
 
 ## How it works
 
-```
- sudo / lock screen / login
-            │  PAM
-            ▼
-      pam_openhello
-            │  D-Bus
-   ┌────────┴─────────┐
-   ▼                  ▼
-openhellod        openhello-keyd
-capture and       TPM key,
-recognition       PKCS#11 tokens
-   │   short-lived ticket
-   └─────────────────►
+```mermaid
+flowchart TD
+    apps["sudo · lock screen · login"] -->|PAM| pam["pam_openhello"]
+    gui["openhello-gui<br/>setup, test, admin prompts"]
+    pam -->|D-Bus| bio["openhellod<br/>capture and recognition"]
+    pam -->|D-Bus| keyd["openhello-keyd<br/>TPM key, PKCS#11 tokens"]
+    gui -->|D-Bus| bio
+    gui -->|D-Bus| keyd
+    bio -. "short-lived ticket" .-> keyd
+    cam[("IR camera")] --> bio
+    keyd -->|signing key| tpm[("TPM 2.0")]
+    bio -->|sealed template key| tpm
 ```
 
 - **`openhellod`**: captures frames from the IR camera, extracts the face embedding and compares it with the enrolled templates. It never touches the key.
