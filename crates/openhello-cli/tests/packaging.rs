@@ -80,6 +80,7 @@ fn first_install_enables_pam_once_and_starts_both_daemons() {
     let calls = sandbox.calls();
     assert!(calls.contains("openhello-cli pam migrate"), "{calls}");
     assert!(calls.contains("openhello-cli pam enable\n"), "{calls}");
+    assert!(!calls.contains("pam upgrade"), "{calls}");
     assert!(calls.contains("systemctl enable openhello-keyd.service openhellod.service"), "{calls}");
     assert!(calls.contains("systemctl restart openhellod.service"), "{calls}");
     assert!(sandbox.state().join("pam-enabled-by-package").exists());
@@ -95,6 +96,20 @@ fn upgrade_keeps_the_owner_pam_choice_and_restarts_daemons() {
     let calls = sandbox.calls();
     assert!(!calls.contains("pam enable"), "{calls}");
     assert!(calls.contains("systemctl restart openhello-keyd.service"), "{calls}");
+}
+
+#[test]
+fn upgrade_adds_the_capture_line_through_pam_upgrade_and_never_enables_again() {
+    let sandbox = Sandbox::new(0);
+    sandbox.run("postinstall.sh", &["configure"]);
+    fs::remove_file(sandbox.dir.path().join("calls")).unwrap();
+    let (status, _) = sandbox.run("postinstall.sh", &["2"]);
+    assert_eq!(status, 0);
+    let calls = sandbox.calls();
+    assert!(calls.contains("openhello-cli pam upgrade\n"), "{calls}");
+    assert!(!calls.contains("pam enable"), "{calls}");
+    let migrate = calls.find("pam migrate").unwrap();
+    assert!(migrate < calls.find("pam upgrade").unwrap(), "{calls}");
 }
 
 #[test]

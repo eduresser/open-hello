@@ -31,9 +31,13 @@ const PAM_TTY: c_int = 3;
 const PAM_RHOST: c_int = 4;
 const PAM_USER: c_int = 2;
 const PAM_AUTHTOK: c_int = 6;
+const PAM_ESTABLISH_CRED: c_int = 0x2;
+const PAM_REINITIALIZE_CRED: c_int = 0x8;
+const CAPTURE_ARG: &str = "capture";
 const INTERRUPT_POLL: Duration = Duration::from_millis(50);
 pub const RELEASED_DATA: &CStr = c"openhello_released";
 static RELEASED_MARK: u8 = 1;
+const CAPTURED_DATA: &CStr = c"openhello_captured";
 const HANDLED_SIGNALS: [c_int; 2] = [libc::SIGINT, libc::SIGTERM];
 
 static INTERRUPTION: AtomicI32 = AtomicI32::new(0);
@@ -150,6 +154,7 @@ extern "C" {
         prompt: *const c_char,
     ) -> c_int;
     fn pam_set_item(pamh: *mut c_void, item: c_int, value: *const c_void) -> c_int;
+    fn pam_get_data(pamh: *const c_void, name: *const c_char, data: *mut *const c_void) -> c_int;
     fn pam_set_data(
         pamh: *mut c_void,
         name: *const c_char,
@@ -166,6 +171,11 @@ pub unsafe extern "C" fn pam_sm_authenticate(
     argv: *const *const c_char,
 ) -> c_int {
     let args = arguments(argc, argv);
+    forget_captured(pamh);
+    if args.iter().any(|a| a == CAPTURE_ARG) {
+        capture(pamh, &args);
+        return PAM_IGNORE;
+    }
     let Exit { code, reason } = authenticate(pamh, &args).unwrap_or_else(|exit| exit);
     let service = item_text(pamh, PAM_SERVICE).unwrap_or_default();
     debug::report(
@@ -320,6 +330,66 @@ unsafe fn hand_over(pamh: *mut c_void, secret: &[u8]) -> Exit {
         return granted();
     }
     ignore(Reason::Released)
+}
+
+struct Captured {
+    uid: u32,
+    password: Zeroizing<Vec<u8>>,
+}
+
+unsafe extern "C" fn wipe_captured(_pamh: *mut c_void, data: *mut c_void, _status: c_int) {
+    if !data.is_null() {
+        drop(Box::from_raw(data.cast::<Captured>()));
+    }
+}
+
+unsafe fn forget_captured(pamh: *mut c_void) {
+    pam_set_data(pamh, CAPTURED_DATA.as_ptr(), std::ptr::null_mut(), None);
+}
+
+unsafe fn data_present(pamh: *mut c_void, name: &CStr) -> Option<*const c_void> {
+    let mut data: *const c_void = std::ptr::null();
+    (pam_get_data(pamh, name.as_ptr(), &mut data) == PAM_SUCCESS && !data.is_null())
+        .then_some(data)
+}
+
+// Runs after the password module, so PAM_AUTHTOK is the typed password; libpam wipes it before setcred.
+unsafe fn capture(pamh: *mut c_void, args: &[String]) {
+    if data_present(pamh, RELEASED_DATA).is_some() {
+        return;
+    }
+    let Ok((uid, _, _)) = eligible(pamh, args) else {
+        return;
+    };
+    let Some(password) = typed_password(pamh) else {
+        return;
+    };
+    let stash = Box::into_raw(Box::new(Captured { uid, password }));
+    if pam_set_data(pamh, CAPTURED_DATA.as_ptr(), stash.cast(), Some(wipe_captured)) != PAM_SUCCESS
+    {
+        drop(Box::from_raw(stash));
+    }
+}
+
+unsafe fn typed_password(pamh: *mut c_void) -> Option<Zeroizing<Vec<u8>>> {
+    let mut value: *const c_void = std::ptr::null();
+    if pam_get_item(pamh, PAM_AUTHTOK, &mut value) != PAM_SUCCESS || value.is_null() {
+        return None;
+    }
+    let bytes = CStr::from_ptr(value.cast()).to_bytes();
+    (!bytes.is_empty() && bytes.len() <= openhello_auth_proto::MAX_PASSWORD_LEN)
+        .then(|| Zeroizing::new(bytes.to_vec()))
+}
+
+unsafe fn seal_captured(pamh: *mut c_void, args: &[String]) {
+    let Some(data) = data_present(pamh, CAPTURED_DATA) else {
+        return;
+    };
+    let captured = &*data.cast::<Captured>();
+    let Some(socket) = module_settings(args).ok().and_then(|s| s.token_socket) else {
+        return;
+    };
+    let _ = challenge::seal_secret(&socket, captured.uid, &captured.password, SIGN_TIMEOUT);
 }
 
 fn released_token(secret: &[u8]) -> Option<Zeroizing<Vec<u8>>> {
@@ -496,11 +566,19 @@ fn permitted(locality: Locality, service: &str) -> Result<(), Reason> {
 
 #[no_mangle]
 pub unsafe extern "C" fn pam_sm_setcred(
-    _pamh: *mut c_void,
-    _flags: c_int,
-    _argc: c_int,
-    _argv: *const *const c_char,
+    pamh: *mut c_void,
+    flags: c_int,
+    argc: c_int,
+    argv: *const *const c_char,
 ) -> c_int {
+    let args = arguments(argc, argv);
+    if !args.iter().any(|a| a == CAPTURE_ARG) {
+        return PAM_IGNORE;
+    }
+    if flags & (PAM_ESTABLISH_CRED | PAM_REINITIALIZE_CRED) != 0 {
+        seal_captured(pamh, &args);
+    }
+    forget_captured(pamh);
     PAM_IGNORE
 }
 

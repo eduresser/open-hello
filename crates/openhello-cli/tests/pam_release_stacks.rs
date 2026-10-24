@@ -8,6 +8,7 @@ const DISTROS: [&str; 4] = ["opensuse", "fedora", "debian", "arch"];
 const COVERED: [&str; 3] = ["opensuse", "debian", "arch"];
 const PASSWORD: &str = "Correct-Horse-7";
 const STALE: &str = "Stale-Password-1";
+const WRONG: &str = "Wrong-Password-9";
 const PAM_SUCCESS: &str = "0";
 const PAM_AUTH_ERR: &str = "7";
 
@@ -248,6 +249,50 @@ fn stale_token_fails_without_prompt_and_setcred_never_sees_the_typed_password() 
     assert_eq!(packaged.prompts.len(), 1, "{}", fedora.output);
     assert!(
         !packaged.log.iter().any(|l| l.starts_with("OPENHELLO")),
+        "{}",
+        fedora.output
+    );
+}
+
+// @spec:AC-082
+#[test]
+fn capture_line_placed_by_enable_sees_only_the_typed_password_that_pam_unix_verified() {
+    let runs = runs();
+    for distro in COVERED {
+        let run = &runs[distro];
+        let typed = run.scenario(distro, "packaged:typed");
+        assert_eq!(typed.auth.as_deref(), Some(PAM_SUCCESS), "{distro}: {}", run.output);
+        assert_eq!(typed.prompts.len(), 1, "{distro}: {}", run.output);
+        assert!(
+            typed.logged(&format!("OPENHELLO capture authenticate authtok={PASSWORD}")),
+            "{distro}: {}",
+            run.output
+        );
+        assert_eq!(typed.setcred.as_deref(), Some(PAM_SUCCESS), "{distro}: {}", run.output);
+        assert!(
+            typed.logged("OPENHELLO capture setcred authtok=(unset)"),
+            "{distro}: {}",
+            run.output
+        );
+
+        let wrong = run.scenario(distro, "packaged:typed-wrong");
+        assert_eq!(wrong.auth.as_deref(), Some(PAM_AUTH_ERR), "{distro}: {}", run.output);
+        assert_eq!(wrong.setcred, None, "{distro}: {}", run.output);
+        let unverified = format!("OPENHELLO capture authenticate authtok={WRONG}");
+        assert!(
+            wrong
+                .log
+                .iter()
+                .filter(|l| l.starts_with("OPENHELLO capture"))
+                .all(|l| *l == unverified),
+            "{distro}: {}",
+            run.output
+        );
+    }
+
+    let fedora = &runs["fedora"];
+    assert!(
+        !fedora.output.contains("pam_openhello.so capture"),
         "{}",
         fedora.output
     );

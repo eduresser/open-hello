@@ -5,7 +5,8 @@ use std::time::Duration;
 
 use openhello_auth_proto::{
     auth_message, decode_public_key, public_key_file_name, request_payload, split_release_reply,
-    CHALLENGE_LEN, MAX_RELEASE_REPLY, OP_TOKEN_AUTH_RELEASE, SIGNATURE_LEN,
+    CHALLENGE_LEN, MAX_PASSWORD_LEN, MAX_RELEASE_REPLY, OP_TOKEN_AUTH_RELEASE,
+    OP_TOKEN_SEAL_SECRET, SIGNATURE_LEN,
 };
 use p256::ecdsa::signature::hazmat::PrehashVerifier;
 use p256::ecdsa::{Signature, VerifyingKey};
@@ -75,19 +76,7 @@ pub fn request_signature(
     timeout: Duration,
 ) -> Result<Signed, SignError> {
     let payload = request_payload(service, challenge).ok_or(SignError::Unavailable)?;
-    let timeout = timeout.max(Duration::from_millis(1));
-    let mut stream = UnixStream::connect(socket).map_err(|_| SignError::Unavailable)?;
-    stream
-        .set_read_timeout(Some(timeout))
-        .and_then(|()| stream.set_write_timeout(Some(timeout)))
-        .map_err(|_| SignError::Unavailable)?;
-    exchange(&mut stream, OP_HELLO, &uid.to_be_bytes())
-        .map_err(|_| SignError::Unavailable)
-        .and_then(|(status, _)| {
-            (status == STATUS_OK)
-                .then_some(())
-                .ok_or(SignError::Unavailable)
-        })?;
+    let mut stream = connect_as(socket, uid, timeout).ok_or(SignError::Unavailable)?;
     let (status, body) = exchange(&mut stream, OP_TOKEN_AUTH_RELEASE, &payload)
         .map_err(|_| SignError::Unavailable)?;
     match status {
@@ -95,6 +84,28 @@ pub fn request_signature(
         STATUS_REFUSED | STATUS_PIN_INCORRECT => Err(SignError::Refused),
         _ => Err(SignError::Unavailable),
     }
+}
+
+pub fn seal_secret(socket: &Path, uid: u32, password: &[u8], timeout: Duration) -> bool {
+    if password.is_empty() || password.len() > MAX_PASSWORD_LEN {
+        return false;
+    }
+    let mut payload = Zeroizing::new(uid.to_be_bytes().to_vec());
+    payload.extend_from_slice(password);
+    connect_as(socket, uid, timeout)
+        .and_then(|mut stream| exchange(&mut stream, OP_TOKEN_SEAL_SECRET, &payload).ok())
+        .is_some_and(|(status, _)| status == STATUS_OK)
+}
+
+fn connect_as(socket: &Path, uid: u32, timeout: Duration) -> Option<UnixStream> {
+    let timeout = timeout.max(Duration::from_millis(1));
+    let mut stream = UnixStream::connect(socket).ok()?;
+    stream
+        .set_read_timeout(Some(timeout))
+        .and_then(|()| stream.set_write_timeout(Some(timeout)))
+        .ok()?;
+    let (status, _) = exchange(&mut stream, OP_HELLO, &uid.to_be_bytes()).ok()?;
+    (status == STATUS_OK).then_some(stream)
 }
 
 fn signed(body: &[u8]) -> Option<Signed> {
@@ -110,7 +121,7 @@ fn exchange(
     op: u8,
     payload: &[u8],
 ) -> std::io::Result<(u8, Zeroizing<Vec<u8>>)> {
-    let mut frame = vec![op];
+    let mut frame = Zeroizing::new(vec![op]);
     frame.extend_from_slice(&(payload.len() as u16).to_be_bytes());
     frame.extend_from_slice(payload);
     stream.write_all(&frame)?;

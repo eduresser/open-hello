@@ -92,6 +92,8 @@ int main(int argc, char **argv) {
   sigprocmask(SIG_UNBLOCK, &only_int, NULL);
   printf("RESULT %d\n", rc);
   printf("SIGINT %d\n", (int)interrupted);
+  if (rc == PAM_SUCCESS && getenv("PAMTEST_SETCRED"))
+    printf("SETCRED %d\n", pam_setcred(h, PAM_ESTABLISH_CRED));
   pam_end(h, rc);
   return 0;
 }
@@ -442,11 +444,26 @@ impl Fixture {
     }
 
     fn still_sealed(&self, entry: &str) -> bool {
+        self.sealed(entry).as_deref() == Some(SEALED_PASSWORD)
+    }
+
+    fn sealed(&self, entry: &str) -> Option<String> {
         self.protectors
             .login_secrets()
             .release(uid(), entry)
             .unwrap()
-            .is_some_and(|secret| secret.as_str() == SEALED_PASSWORD)
+            .map(|secret| secret.as_str().to_string())
+    }
+
+    fn sealed_bytes(&self) -> Vec<u8> {
+        std::fs::read(
+            self.config
+                .store_dir
+                .join("login-secrets")
+                .join(uid().to_string())
+                .join("secret.bin"),
+        )
+        .unwrap()
     }
 }
 
@@ -497,6 +514,9 @@ struct Stack {
     interrupt_after: Option<Duration>,
     block_sigint: bool,
     password_after: Option<&'static str>,
+    capture: bool,
+    typed: Option<&'static str>,
+    setcred: bool,
 }
 
 impl Stack {
@@ -514,6 +534,9 @@ impl Stack {
             interrupt_after: None,
             block_sigint: false,
             password_after: None,
+            capture: false,
+            typed: None,
+            setcred: false,
         }
     }
 
@@ -568,6 +591,7 @@ struct Outcome {
     elapsed: Duration,
     verify_calls: u32,
     sigint_seen: bool,
+    setcred: Option<i32>,
 }
 
 impl Outcome {
@@ -676,9 +700,20 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
     std::fs::create_dir_all(&services).unwrap();
     let stack_text = service_text(stack, &hooks_conf, &fixture.config.auth_dir, &etc);
     let reached_file = fixture.dir.path().join("reached");
+    let capture = if stack.capture {
+        format!(
+            "auth optional {} capture config={} authdir={} trusted_uid={}\n",
+            pam_module().display(),
+            hooks_conf.display(),
+            fixture.config.auth_dir.display(),
+            unsafe { libc::geteuid() }
+        )
+    } else {
+        String::new()
+    };
     let recorder = match stack.password_after {
         Some(accepted) => format!(
-            "auth required {} path={} password={accepted}\nauth optional {} path={}\n",
+            "auth required {} path={} password={accepted}\nauth optional {} path={}\n{capture}",
             fixture.password_check.display(),
             reached_file.display(),
             fixture.keyring.display(),
@@ -716,6 +751,12 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
     }
     if stack.block_sigint {
         client.env("PAMTEST_BLOCK_SIGINT", "1");
+    }
+    if let Some(password) = stack.typed {
+        client.env("PAMTEST_PIN", password);
+    }
+    if stack.setcred {
+        client.env("PAMTEST_SETCRED", "1");
     }
     let child = client
         .args([
@@ -780,6 +821,10 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
         elapsed,
         verify_calls: verify_calls(),
         sigint_seen: stdout.lines().any(|l| l == "SIGINT 1"),
+        setcred: stdout
+            .lines()
+            .find_map(|l| l.strip_prefix("SETCRED "))
+            .map(|rc| rc.parse().unwrap()),
     }
 }
 
@@ -1631,5 +1676,137 @@ fn release_after_a_password_change_withholds_and_discards_the_secret_and_the_fac
             !fixture.still_sealed(&entry),
             "the stale secret must be discarded"
         );
+    });
+}
+
+fn typed_with_capture(
+    services: &Services,
+    accepted: &'static str,
+    typed: &'static str,
+    setcred: bool,
+) -> Stack {
+    Stack {
+        token_socket: Some(services.root_token_path.clone()),
+        capture: true,
+        typed: Some(typed),
+        setcred,
+        ..Stack::password_after(Verify::NoMatch, accepted).lenient()
+    }
+}
+
+const NEW_PASSWORD: &str = "New-Password-2";
+
+// @spec:AC-082
+#[test]
+fn capture_seals_a_typed_password_once_the_sign_in_and_setcred_succeed() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        fixture.protectors.login_secrets().purge(uid()).unwrap();
+        let entry = fixture.write_shadow("saltsalt");
+
+        let outcome = scenario(
+            &rig,
+            fixture,
+            &services,
+            typed_with_capture(&services, NEW_PASSWORD, NEW_PASSWORD, true),
+        );
+
+        assert!(outcome.granted(), "{:?}", outcome.reached);
+        assert_eq!(outcome.password_prompts(), 1, "{:?}", outcome.prompts);
+        assert_eq!(outcome.setcred, Some(0));
+        assert_eq!(fixture.sealed(&entry).as_deref(), Some(NEW_PASSWORD));
+        let stored = fixture.sealed_bytes();
+        assert!(!stored
+            .windows(NEW_PASSWORD.len())
+            .any(|w| w == NEW_PASSWORD.as_bytes()));
+    });
+}
+
+// @spec:AC-083
+#[test]
+fn capture_replaces_the_sealed_password_with_a_new_one_and_the_next_face_sign_in_releases_it() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        fixture.seal_password();
+
+        let typed = scenario(
+            &rig,
+            fixture,
+            &services,
+            typed_with_capture(&services, NEW_PASSWORD, NEW_PASSWORD, true),
+        );
+        assert!(typed.granted(), "{:?}", typed.reached);
+        assert_eq!(typed.setcred, Some(0));
+
+        let released = scenario(
+            &rig,
+            fixture,
+            &services,
+            released_to_root(&services, NEW_PASSWORD),
+        );
+        assert!(released.granted(), "{:?}", released.reached);
+        assert!(released.prompts.is_empty(), "{:?}", released.prompts);
+        assert_eq!(
+            released.reached,
+            [
+                "password=accepted".to_string(),
+                format!("keyring={NEW_PASSWORD}")
+            ]
+        );
+    });
+}
+
+// @spec:AC-084
+#[test]
+fn capture_leaves_the_sealed_password_after_a_failed_a_setcred_less_or_a_released_sign_in() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        let entry = fixture.seal_password();
+        let before = fixture.sealed_bytes();
+
+        let failed = scenario(
+            &rig,
+            fixture,
+            &services,
+            typed_with_capture(&services, SEALED_PASSWORD, "Wrong-Password-9", true),
+        );
+        assert!(!failed.granted());
+        assert_eq!(failed.reached[0], "password=rejected");
+        assert_eq!(fixture.sealed_bytes(), before, "a failed sign-in");
+
+        let without_setcred = scenario(
+            &rig,
+            fixture,
+            &services,
+            typed_with_capture(&services, NEW_PASSWORD, NEW_PASSWORD, false),
+        );
+        assert!(without_setcred.granted());
+        assert_eq!(without_setcred.setcred, None);
+        assert_eq!(fixture.sealed_bytes(), before, "a sign-in without setcred");
+
+        let released = scenario(
+            &rig,
+            fixture,
+            &services,
+            Stack {
+                capture: true,
+                setcred: true,
+                ..released_to_root(&services, SEALED_PASSWORD)
+            },
+        );
+        assert!(released.granted(), "{:?}", released.reached);
+        assert_eq!(released.setcred, Some(0));
+        assert_eq!(
+            released.reached,
+            [
+                "password=accepted".to_string(),
+                format!("keyring={SEALED_PASSWORD}")
+            ]
+        );
+        assert_eq!(fixture.sealed_bytes(), before, "a face sign-in that released");
+        assert!(fixture.still_sealed(&entry));
     });
 }

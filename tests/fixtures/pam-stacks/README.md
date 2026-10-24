@@ -6,11 +6,11 @@ Spike for AC-090, ASM-025 and ASM-026. Run with `cargo test -p openhello-cli --t
 
 - One root container per distribution, built from `<distro>.Containerfile`: the distribution image, its compiler and PAM headers, `sudo`, and the `sddm` package's own PAM files (extracted from the package, not edited). User `hello` with password `Correct-Horse-7` in the real `/etc/shadow`.
 - `run.sh` compiles three stubs and runs the real `openhello-cli pam enable` (the host build, mounted at `/opt/openhello-cli`):
-  - `pam_openhello_stub.c` installed as `pam_openhello.so`: in authenticate, sets PAM_AUTHTOK from `/run/pamstack/release` when present, returns PAM_IGNORE; logs PAM_AUTHTOK in authenticate and setcred.
+  - `pam_openhello_stub.c` installed as `pam_openhello.so`: in authenticate, sets PAM_AUTHTOK from `/run/pamstack/release` when present, returns PAM_IGNORE; logs PAM_AUTHTOK in authenticate and setcred. With the `capture` argument (the second line `pam enable` places, T-083) it only logs, as `OPENHELLO capture`.
   - `pam_keyring_stub.c` installed as `pam_kwallet5.so`, so the unmodified `sddm` file loads it at the distribution's own keyring position; logs PAM_AUTHTOK.
   - `client.c`: `pam_start("sddm", "hello")`, `pam_authenticate`, then `pam_setcred(PAM_ESTABLISH_CRED)` on success; prints every conversation prompt.
 - openSUSE only: `pam-config -a --kwallet5` first, which is what the `pam_kwallet` package runs in `%post`.
-- Scenarios: `release` (correct password released, conversation answers empty), `wrong-token` (stale password released, conversation answers the correct one), `typed` (nothing released, conversation answers the correct password).
+- Scenarios: `release` (correct password released, conversation answers empty), `wrong-token` (stale password released, conversation answers the correct one), `typed` (nothing released, conversation answers the correct password), `typed-wrong` (nothing released, conversation answers a wrong password).
 
 ## Stacks (lines on the sddm auth path after `pam enable`)
 
@@ -46,3 +46,16 @@ On every stack where OpenHello sits (openSUSE, Debian, Arch, Fedora manual) the 
 - In the typed scenario OpenHello's own authenticate saw PAM_AUTHTOK unset (it runs before the prompt). Only modules after pam_unix saw the typed password (Debian, Arch, Fedora keyring stub); on openSUSE the keyring stub before pam_unix saw it unset.
 
 ASM-025 is false: the typed password cannot be read in setcred.
+
+## Capture line after the password check (T-083, ASM-029)
+
+`pam enable` also places `auth optional pam_openhello.so capture` after the last `auth` line of the common stack (appending keeps every `[success=N]` jump valid). Run by `capture_line_placed_by_enable_sees_only_the_typed_password_that_pam_unix_verified`.
+
+| Distro | Capture line position | `typed`: capture saw | `typed-wrong` |
+|---|---|---|---|
+| openSUSE Tumbleweed | wrapper `common-auth`: after `auth include common-auth-pc` (so after `auth required pam_unix.so try_first_pass`) | `Correct-Horse-7`, setcred called | runs (pam_unix is `required`, the stack continues) and sees the wrong password; AUTH 7, no setcred |
+| Debian 13 | `common-auth`: after `auth required pam_permit.so` | `Correct-Horse-7`, setcred called | does not run (`pam_deny.so` is `requisite`); AUTH 7 |
+| Arch | `system-auth`: after `auth required pam_faillock.so authsucc`, before the account lines | `Correct-Horse-7`, setcred called | does not run (`pam_faillock.so authfail` is `default=die`); AUTH 7 |
+| Fedora 44 | not placed (enable fails as above) | — | — |
+
+ASM-029 holds on openSUSE, Debian and Arch: the capture line runs after pam_unix verified the typed password and still sees it in PAM_AUTHTOK. In setcred PAM_AUTHTOK is unset again, so the module stashes the password during authenticate. A failed sign-in can still reach the capture line (openSUSE), so the module seals only in setcred, which applications call only after a successful pam_authenticate. In the `release` scenario the capture line sees the released password; the real module skips it because OpenHello marked the release.
