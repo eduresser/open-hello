@@ -70,6 +70,12 @@ As the owner, I want OpenHello to learn my password whenever I sign in with it, 
 - **When** that prompt succeeds (polkit's helper authenticates and ends the transaction without calling pam_setcred)
 - **Then** the password is sealed, so the very first face sign-in afterwards releases it and the keyrings open with no extra step
 
+#### AC-093 — Enrolling a face asks for the password only once
+
+- **Given** a user starting a face enrollment in the Open Hello window
+- **When** they authorize the start of the enrollment with their password
+- **Then** that same authorization also covers creating their login key at the end (polkit imply), so no second password prompt appears, and that one password is the one OpenHello learns (AC-091)
+
 #### AC-092 — A password typed by someone who never finishes enrolling is never stored
 
 - **Given** a user with no face enrolled who types their password at a system sign-in or authorization prompt
