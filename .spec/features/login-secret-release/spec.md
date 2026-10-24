@@ -1,7 +1,7 @@
 # Spec: Login secret release
 
 > feature: login-secret-release
-> status: draft
+> status: implemented
 
 ## Context
 
