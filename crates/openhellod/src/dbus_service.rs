@@ -20,10 +20,18 @@ use crate::sudo_policy::{SudoPolicy, SudoPolicyStore};
 
 pub const BUS_NAME: &str = "io.openhello.Biometrics1";
 pub const OBJECT_PATH: &str = "/io/openhello/Biometrics1";
-// Lock screens re-run PAM every second while shown; one face decision per process in this window keeps the camera from looping.
+// Lock screens re-run PAM every second while shown and drop an earlier success on each new run, so one process
+// keeps its face decision for this window instead of looping the camera or losing the unlock.
 pub const SIGN_IN_COOLDOWN: Duration = Duration::from_secs(60);
 
 type ProcessKey = (u32, u64);
+
+#[derive(Clone, Copy)]
+struct Decision {
+    at: Instant,
+    uid: u32,
+    matched: bool,
+}
 
 #[derive(Debug)]
 pub enum ServiceError {
@@ -150,7 +158,7 @@ pub struct Service {
     enrollment_owners: Arc<Mutex<HashMap<String, zbus::Task<()>>>>,
     sudo: Arc<SudoPolicyStore>,
     polkit_admin: Arc<PolkitAdminStore>,
-    sign_in_decisions: Arc<Mutex<HashMap<ProcessKey, Instant>>>,
+    sign_in_decisions: Arc<Mutex<HashMap<ProcessKey, Decision>>>,
 }
 
 struct CallerWatch {
@@ -208,15 +216,15 @@ impl Service {
         }
     }
 
-    fn decided_recently(&self, process: ProcessKey) -> bool {
-        let Ok(mut decisions) = self.sign_in_decisions.lock() else { return false };
-        decisions.retain(|_, at| at.elapsed() < SIGN_IN_COOLDOWN);
-        decisions.contains_key(&process)
+    fn recent_decision(&self, process: ProcessKey, uid: u32) -> Option<bool> {
+        let mut decisions = self.sign_in_decisions.lock().ok()?;
+        decisions.retain(|_, decision| decision.at.elapsed() < SIGN_IN_COOLDOWN);
+        decisions.get(&process).filter(|decision| decision.uid == uid).map(|decision| decision.matched)
     }
 
-    fn remember_decision(&self, process: ProcessKey) {
+    fn remember_decision(&self, process: ProcessKey, uid: u32, matched: bool) {
         if let Ok(mut decisions) = self.sign_in_decisions.lock() {
-            decisions.insert(process, Instant::now());
+            decisions.insert(process, Decision { at: Instant::now(), uid, matched });
         }
     }
 
@@ -471,13 +479,25 @@ impl Service {
         #[zbus(header)] header: Header<'_>,
     ) -> Result<bool, ServiceError> {
         let process = caller_process(conn, &header).await;
-        if process.is_some_and(|p| self.decided_recently(p)) {
-            self.logger.log(Level::Info, "sign-in-repeat-skipped", &[("uid", Value::Uid(uid))]);
-            return Err(ServiceError::AlreadyDecided("face already checked for this sign-in; use the password".into()));
+        match process.and_then(|p| self.recent_decision(p, uid)) {
+            Some(true) => {
+                self.logger.log(Level::Info, "sign-in-match-reused", &[("uid", Value::Uid(uid))]);
+                self.with_core(move |core| {
+                    core.reissue_ticket(uid);
+                    Ok(())
+                })
+                .await?;
+                return Ok(true);
+            }
+            Some(false) => {
+                self.logger.log(Level::Info, "sign-in-repeat-skipped", &[("uid", Value::Uid(uid))]);
+                return Err(ServiceError::AlreadyDecided("face already checked for this sign-in; use the password".into()));
+            }
+            None => {}
         }
         let verdict = self.verify_caller(uid, conn, &header).await?;
         if let Some(process) = process {
-            self.remember_decision(process);
+            self.remember_decision(process, uid, verdict);
         }
         Ok(verdict)
     }
