@@ -19,6 +19,42 @@ fn user_dir(rig: &Rig, uid: u32) -> PathBuf {
         .join(uid.to_string())
 }
 
+fn persistent_handles(rig: &Rig) -> Vec<String> {
+    let out = rig.tpm2("tpm2_getcap", &["handles-persistent"]);
+    assert!(out.status.success());
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|l| l.trim().trim_start_matches("- ").to_ascii_lowercase())
+        .filter(|l| !l.is_empty())
+        .collect()
+}
+
+fn key_handle(uid: u32) -> String {
+    format!("0x{:x}", 0x8109_0000u32 | uid)
+}
+
+fn copy_tree(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap().flatten() {
+        let target = to.join(entry.file_name());
+        if entry.path().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
+struct Evict<'a>(&'a Rig, Vec<String>);
+
+impl Drop for Evict<'_> {
+    fn drop(&mut self) {
+        for handle in &self.1 {
+            let _ = self.0.tpm2("tpm2_evictcontrol", &["-C", "o", "-c", handle]);
+        }
+    }
+}
+
 fn files_contain(dir: &Path, needle: &[u8]) -> bool {
     std::fs::read_dir(dir)
         .into_iter()
@@ -72,13 +108,12 @@ fn a_new_password_replaces_the_sealed_one() {
             .map(String::as_str),
         Some("second password")
     );
-    for name in ["key.blob", "secret.bin"] {
-        let mode = std::fs::metadata(user_dir(&rig, uid).join(name))
-            .unwrap()
-            .permissions()
-            .mode();
-        assert_eq!(mode & 0o777, 0o600, "{name}");
-    }
+    let mode = std::fs::metadata(user_dir(&rig, uid).join("secret.bin"))
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o600);
+    assert!(!user_dir(&rig, uid).join("key.blob").exists());
     let leftovers: Vec<_> = std::fs::read_dir(user_dir(&rig, uid))
         .unwrap()
         .flatten()
@@ -170,7 +205,7 @@ fn the_password_and_shadow_entry_never_reach_files_errors_or_logs() {
 
 // @spec:AC-089
 #[test]
-fn after_purge_a_restored_ciphertext_cannot_be_released() {
+fn after_purge_a_restored_backup_cannot_be_released() {
     let rig = rig();
     let protectors = Protectors::new(rig.config.clone()).unwrap();
     let uid = 4104;
@@ -178,20 +213,160 @@ fn after_purge_a_restored_ciphertext_cannot_be_released() {
         .login_secrets()
         .seal(uid, "purged password", SHADOW)
         .unwrap();
-    let dir = user_dir(&rig, uid);
-    let ciphertext = std::fs::read(dir.join("secret.bin")).unwrap();
+    let secrets_dir = rig.config.store_dir.join("login-secrets");
+    let backup = tempfile::tempdir().unwrap();
+    copy_tree(&secrets_dir, backup.path());
+    assert!(persistent_handles(&rig).contains(&key_handle(uid)));
 
     protectors.purge(uid).unwrap();
 
-    assert!(!dir.exists());
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("secret.bin"), &ciphertext).unwrap();
+    assert!(!user_dir(&rig, uid).exists());
+    assert!(!persistent_handles(&rig).contains(&key_handle(uid)));
+    copy_tree(backup.path(), &secrets_dir);
+    assert!(user_dir(&rig, uid).join("secret.bin").exists());
     assert!(protectors
         .login_secrets()
         .release(uid, SHADOW)
         .unwrap()
         .is_none());
-    assert!(!dir.join("secret.bin").exists());
+    assert!(!user_dir(&rig, uid).exists());
+}
+
+#[test]
+fn a_reseal_reuses_the_same_handle_and_purge_frees_it() {
+    let rig = rig();
+    let secrets = LoginSecrets::new(rig.config.clone());
+    let uid = 4108;
+    let before = persistent_handles(&rig);
+    assert!(!before.contains(&key_handle(uid)));
+
+    secrets.seal(uid, "first", SHADOW).unwrap();
+    let sealed = persistent_handles(&rig);
+    assert_eq!(sealed.len(), before.len() + 1);
+    assert!(sealed.contains(&key_handle(uid)));
+    secrets.seal(uid, "second", CHANGED_SHADOW).unwrap();
+    assert_eq!(persistent_handles(&rig), sealed);
+    assert_eq!(
+        secrets
+            .release(uid, CHANGED_SHADOW)
+            .unwrap()
+            .as_deref()
+            .map(String::as_str),
+        Some("second")
+    );
+
+    secrets.purge(uid).unwrap();
+
+    assert_eq!(persistent_handles(&rig), before);
+    secrets.purge(uid).unwrap();
+    assert_eq!(persistent_handles(&rig), before);
+}
+
+#[test]
+fn an_old_key_blob_is_dropped_and_the_next_password_reseals() {
+    let rig = rig();
+    let secrets = LoginSecrets::new(rig.config.clone());
+    let uid = 4109;
+    let dir = user_dir(&rig, uid);
+    secrets.seal(uid, "old install", SHADOW).unwrap();
+    let handle = key_handle(uid);
+    assert!(rig
+        .tpm2("tpm2_evictcontrol", &["-C", "o", "-c", &handle])
+        .status
+        .success());
+    std::fs::write(dir.join("key.blob"), b"sealed by an old install").unwrap();
+
+    assert!(secrets.release(uid, SHADOW).unwrap().is_none());
+    assert!(!dir.exists());
+
+    secrets.seal(uid, "old install", SHADOW).unwrap();
+    std::fs::write(dir.join("key.blob"), b"sealed by an old install").unwrap();
+    secrets.seal(uid, "typed again", SHADOW).unwrap();
+    assert!(!dir.join("key.blob").exists());
+    assert_eq!(
+        secrets
+            .release(uid, SHADOW)
+            .unwrap()
+            .as_deref()
+            .map(String::as_str),
+        Some("typed again")
+    );
+    secrets.purge(uid).unwrap();
+    assert!(!persistent_handles(&rig).contains(&handle));
+}
+
+#[test]
+fn a_full_tpm_refuses_to_seal_without_leaving_a_secret() {
+    let rig = rig();
+    let secrets = LoginSecrets::new(rig.config.clone());
+    let uid = 4110;
+    let work = tempfile::tempdir().unwrap();
+    let path = |name: &str| work.path().join(name).display().to_string();
+    let (primary, public, private, loaded) =
+        (path("p.ctx"), path("f.pub"), path("f.priv"), path("f.ctx"));
+    for (tool, args) in [
+        (
+            "tpm2_createprimary",
+            vec!["-C", "o", "-c", primary.as_str()],
+        ),
+        (
+            "tpm2_create",
+            vec![
+                "-C",
+                &primary,
+                "-G",
+                "aes128cfb",
+                "-u",
+                &public,
+                "-r",
+                &private,
+            ],
+        ),
+        (
+            "tpm2_load",
+            vec!["-C", &primary, "-u", &public, "-r", &private, "-c", &loaded],
+        ),
+    ] {
+        let out = rig.tpm2(tool, &args);
+        assert!(
+            out.status.success(),
+            "{tool}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let mut fillers = Evict(&rig, Vec::new());
+    for slot in 0..256u32 {
+        let handle = format!("0x{:x}", 0x810a_0000u32 | slot);
+        if !rig
+            .tpm2("tpm2_evictcontrol", &["-C", "o", "-c", &loaded, &handle])
+            .status
+            .success()
+        {
+            break;
+        }
+        fillers.1.push(handle);
+    }
+    assert!(fillers.1.len() < 256, "the TPM never filled up");
+
+    assert!(matches!(
+        secrets.seal(uid, "no room", SHADOW),
+        Err(KeydError::Tpm)
+    ));
+    assert!(!user_dir(&rig, uid).join("secret.bin").exists());
+    assert!(!persistent_handles(&rig).contains(&key_handle(uid)));
+    assert!(secrets.release(uid, SHADOW).unwrap().is_none());
+
+    drop(fillers);
+    secrets.seal(uid, "room again", SHADOW).unwrap();
+    assert_eq!(
+        secrets
+            .release(uid, SHADOW)
+            .unwrap()
+            .as_deref()
+            .map(String::as_str),
+        Some("room again")
+    );
+    secrets.purge(uid).unwrap();
 }
 
 #[test]

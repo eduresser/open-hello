@@ -11,17 +11,20 @@ use sha2::Sha256;
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::certificate::linux_user_name;
-use crate::protector::{seal_object, unseal_object};
+use crate::protector::{evict_persistent, persistent_exists, seal_persistent, unseal_persistent};
 use crate::tpm::failure;
 use crate::{validate_uid, KeydConfig, KeydError};
 
 const LOGIN_SECRETS_DIR: &str = "login-secrets";
-const KEY_FILE: &str = "key.blob";
+// T-080 kept the key as a loadable blob; such blobs are dropped and the next typed password reseals.
+const LEGACY_KEY_FILE: &str = "key.blob";
 const SECRET_FILE: &str = "secret.bin";
 pub(crate) const SHADOW_FILE: &str = "/etc/shadow";
 const MAGIC: &[u8; 4] = b"OHLS";
 const VERSION: u8 = 1;
 const KEY_LEN: usize = 32;
+// Beside the template keys' 0x8108xxxx range, so the two never collide.
+const PERSISTENT_HANDLE_BASE: u32 = 0x8109_0000;
 const FINGERPRINT_LEN: usize = 32;
 const NONCE_LEN: usize = 24;
 const HEADER_LEN: usize = MAGIC.len() + 1 + FINGERPRINT_LEN + NONCE_LEN;
@@ -89,14 +92,14 @@ impl LoginSecrets {
         let _lock = self.lock.lock().unwrap_or_else(PoisonError::into_inner);
         self.prepare_dir(uid)?;
         let dir = self.user_dir(uid);
-        let keys = match read_optional(&dir.join(KEY_FILE))? {
-            Some(blob) => Keys::from_unsealed(unseal_object(&self.config, &blob, None)?)?,
-            None => {
-                let keys = Keys::generate()?;
-                let blob = seal_object(&self.config, &keys.material, None, true)?;
-                write_atomically(&dir, KEY_FILE, &blob)?;
-                keys
-            }
+        shred(&dir.join(LEGACY_KEY_FILE))?;
+        let handle = key_handle(uid);
+        let keys = if persistent_exists(&self.config, handle)? {
+            Keys::from_unsealed(unseal_persistent(&self.config, handle)?)?
+        } else {
+            let keys = Keys::generate()?;
+            seal_persistent(&self.config, &keys.material, handle)?;
+            keys
         };
         let fingerprint = keys.mac(uid, shadow_entry).finalize().into_bytes();
         let mut nonce = [0u8; NONCE_LEN];
@@ -131,17 +134,18 @@ impl LoginSecrets {
         let Some(stored) = read_optional(&dir.join(SECRET_FILE))? else {
             return Ok(None);
         };
-        let Some(blob) = read_optional(&dir.join(KEY_FILE))? else {
+        let handle = key_handle(uid);
+        if !persistent_exists(&self.config, handle)? {
             self.destroy(uid)?;
             return Ok(None);
-        };
+        }
         if stored.len() < HEADER_LEN
             || &stored[..MAGIC.len()] != MAGIC
             || stored[MAGIC.len()] != VERSION
         {
             return Err(KeydError::LoginSecretDamaged);
         }
-        let keys = Keys::from_unsealed(unseal_object(&self.config, &blob, None)?)?;
+        let keys = Keys::from_unsealed(unseal_persistent(&self.config, handle)?)?;
         let (header, ciphertext) = stored.split_at(HEADER_LEN);
         let fingerprint = &header[MAGIC.len() + 1..MAGIC.len() + 1 + FINGERPRINT_LEN];
         if current_shadow_entry.is_empty()
@@ -190,8 +194,12 @@ impl LoginSecrets {
 
     // The key goes first so that a crash mid-purge never leaves a decryptable secret behind (P-008).
     fn destroy(&self, uid: u32) -> Result<(), KeydError> {
+        let handle = key_handle(uid);
+        if persistent_exists(&self.config, handle)? {
+            evict_persistent(&self.config, handle)?;
+        }
         let dir = self.user_dir(uid);
-        shred(&dir.join(KEY_FILE))?;
+        shred(&dir.join(LEGACY_KEY_FILE))?;
         shred(&dir.join(SECRET_FILE))?;
         match std::fs::remove_dir_all(&dir) {
             Ok(()) => Ok(()),
@@ -233,6 +241,10 @@ pub fn read_shadow_entry(
         .lines()
         .find(|line| line.split(':').next() == Some(user))
         .map(|line| Zeroizing::new(line.to_string())))
+}
+
+fn key_handle(uid: u32) -> u32 {
+    PERSISTENT_HANDLE_BASE | uid
 }
 
 fn associated_data(uid: u32, header: &[u8]) -> Vec<u8> {
