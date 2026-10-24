@@ -29,6 +29,6 @@
 ## T-083 — PAM: capture line after the password check seals the verified password [pending]
 
 - Refs: US-026, AC-082, AC-083, AC-084
-- Files: crates/openhello-pam/src/lib.rs, crates/openhello-pam/src/challenge.rs, crates/openhello-cli/src/pam_enable.rs, crates/openhello-cli/tests/pam_enable.rs, crates/openhello-cli/tests/pam_release.rs, crates/openhello-cli/tests/pam_release_stacks.rs
-- Notes: first prove ASM-029 on the T-079 container stacks; `pam enable`/`disable`/`status` place and remove the capture line (`auth optional pam_openhello.so capture`) after the password check; the capture line stashes the token and seals it in setcred only when the whole authentication succeeded and OpenHello did not release it itself. Depends on T-081; runs after T-082 (shared files).
+- Files: crates/openhello-pam/src/lib.rs, crates/openhello-pam/src/challenge.rs, crates/openhello-cli/src/pam_enable.rs, crates/openhello-cli/tests/pam_enable.rs, crates/openhello-cli/tests/pam_sudo.rs, crates/openhello-cli/tests/pam_release_stacks.rs, packaging/package/postinstall.sh, crates/openhello-cli/tests/packaging.rs
+- Notes: first prove ASM-029 on the T-079 container stacks; `pam enable`/`disable`/`status` place and remove the capture line (`auth optional pam_openhello.so capture`) after the password check; the capture line stashes the token and seals it in setcred only when the whole authentication succeeded and OpenHello did not release it itself; package upgrades add the capture line wherever OpenHello's first line is present (never re-enable after a `pam disable`). Depends on T-081; runs after T-082 (shared files).
 - Effort: medium
