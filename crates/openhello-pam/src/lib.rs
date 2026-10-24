@@ -9,7 +9,6 @@ use std::time::{Duration, Instant};
 
 mod challenge;
 mod debug;
-mod memory;
 mod session;
 
 // Shared source, not a dependency: depending on the wrapper crate would export its PKCS#11 symbols from this module.
@@ -20,10 +19,7 @@ mod config;
 use challenge::SignError;
 use config::Settings;
 use debug::Reason;
-use memory::SuccessMemory;
 use session::Locality;
-
-static RECENT_SUCCESS: Mutex<SuccessMemory> = Mutex::new(SuccessMemory::new());
 
 const PAM_SUCCESS: c_int = 0;
 const PAM_AUTH_ERR: c_int = 7;
@@ -246,10 +242,6 @@ fn with_default_socket(
 unsafe fn authenticate(pamh: *mut c_void, args: &[String]) -> Result<(), Exit> {
     let started = Instant::now();
     let (uid, service, key) = eligible(pamh, args)?;
-    if RECENT_SUCCESS.lock().is_ok_and(|memory| memory.recalls(uid, &service, Instant::now())) {
-        debug::report_text(args.iter().any(|a| a == "debug"), &debug::syslog, "reused a success from this process");
-        return Ok(());
-    }
     if login_manager_helper(pamh) && !password_left_empty(pamh) {
         return Err(ignore(Reason::PasswordTyped));
     }
@@ -282,9 +274,6 @@ unsafe fn authenticate(pamh: *mut c_void, args: &[String]) -> Result<(), Exit> {
         Ok(signature)
             if challenge::signature_is_valid(&key, uid, &service, &challenge, &signature) =>
         {
-            if let Ok(mut memory) = RECENT_SUCCESS.lock() {
-                memory.remember(uid, &service, Instant::now());
-            }
             Ok(())
         }
         Ok(_) => Err(refuse(Reason::SignatureInvalid)),
