@@ -74,5 +74,14 @@
       <allow_active>auth_admin</allow_active>
     </defaults>
   </action>
+  <action id="io.openhello.biometrics.sudo-root-password">
+    <description>Let sudo ask for the root password again</description>
+    <message>Administrator authentication is required to make sudo ask for the root password again</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+  </action>
 
 </policyconfig>

@@ -855,12 +855,45 @@ fn switching_sudo_to_the_own_password_needs_polkit_and_purge_restores_it() {
     let rule = std::fs::read_to_string(polkit_rule(&fake)).unwrap();
     assert!(rule.contains("\"unix-user:0\""), "sudo asked for root before, so root stays a choice: {rule}");
     assert_eq!(*polkit.asked.lock().unwrap(), vec!["io.openhello.biometrics.sudo-own-password"]);
-    assert_eq!(proxy(&conn).call::<_, _, String>("GetSudoPolicy", &(my_uid(),)).unwrap(), "own-password");
+    assert_eq!(proxy(&conn).call::<_, _, String>("GetSudoPolicy", &(my_uid(),)).unwrap(), "switched");
 
     proxy(&conn).call::<_, _, bool>("Purge", &(my_uid(),)).unwrap();
     assert!(!fake.drop_in(my_uid()).exists());
     assert!(!polkit_rule(&fake).exists());
     assert_eq!(proxy(&conn).call::<_, _, String>("GetSudoPolicy", &(my_uid(),)).unwrap(), "root-password");
+}
+
+// @spec:AC-095
+#[test]
+fn switching_back_needs_its_own_polkit_action_and_removes_both_rules() {
+    let bus = PrivateBus::start();
+    let fake = FakeSudo::new(TUMBLEWEED_DEFAULTS, Visudo::Accepts, Reads::DropIns);
+    let polkit = Arc::new(ScriptedPolkit { authorized: true, asked: Default::default() });
+    serve_with_sudo(&bus, Arc::new(PolkitAuthorizer::new(polkit.clone())), &fake);
+    let conn = client(&bus);
+    proxy(&conn).call::<_, _, String>("UseOwnPasswordForSudo", &(my_uid(),)).unwrap();
+    let policy: String = proxy(&conn).call("RestoreRootPasswordForSudo", &(my_uid(),)).unwrap();
+    assert_eq!(policy, "root-password");
+    assert!(!fake.drop_in(my_uid()).exists());
+    assert!(!polkit_rule(&fake).exists());
+    assert_eq!(*polkit.asked.lock().unwrap(), vec!["io.openhello.biometrics.sudo-own-password", "io.openhello.biometrics.sudo-root-password"]);
+    assert_eq!(proxy(&conn).call::<_, _, String>("GetSudoPolicy", &(my_uid(),)).unwrap(), "root-password");
+    assert_eq!(proxy(&conn).call::<_, _, String>("RestoreRootPasswordForSudo", &(my_uid(),)).unwrap(), "root-password");
+}
+
+// @spec:AC-095
+#[test]
+fn a_polkit_refusal_keeps_the_switch_in_place() {
+    let bus = PrivateBus::start();
+    let fake = FakeSudo::new(TUMBLEWEED_DEFAULTS, Visudo::Accepts, Reads::DropIns);
+    fake.store().use_own_password(my_uid()).unwrap();
+    let polkit = Arc::new(ScriptedPolkit { authorized: false, asked: Default::default() });
+    serve_with_sudo(&bus, Arc::new(PolkitAuthorizer::new(polkit)), &fake);
+    let conn = client(&bus);
+    let error = proxy(&conn).call::<_, _, String>("RestoreRootPasswordForSudo", &(my_uid(),)).unwrap_err();
+    assert!(error.to_string().contains("AuthFailed"), "{error}");
+    assert!(fake.drop_in(my_uid()).exists());
+    assert_eq!(proxy(&conn).call::<_, _, String>("GetSudoPolicy", &(my_uid(),)).unwrap(), "switched");
 }
 
 #[test]

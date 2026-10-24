@@ -112,6 +112,10 @@ impl SudoPolicyStore {
         }
     }
 
+    pub fn is_switched(&self, uid: u32) -> bool {
+        self.drop_in(uid).is_file()
+    }
+
     pub fn restore(&self, uid: u32) -> Result<bool, String> {
         match fs::remove_file(self.drop_in(uid)) {
             Ok(()) => Ok(true),

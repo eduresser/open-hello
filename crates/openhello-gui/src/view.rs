@@ -1,11 +1,11 @@
-use openhello_gui_core::{FailureCause, Strings, TestOutcome, Text};
+use openhello_gui_core::{FailureCause, Strings, SudoAccess, TestOutcome, Text};
 use slint::platform::WindowEvent;
 use slint::{ComponentHandle, Image, LogicalPosition, Rgb8Pixel, SharedPixelBuffer, SharedString};
 
 use crate::backend::Event;
 use crate::gate;
 use crate::capture::CaptureView;
-use crate::{pointer, trace, MainWindow, Page, T};
+use crate::{pointer, trace, MainWindow, Page, Tone, T};
 
 pub fn init(window: &MainWindow, strings: &Strings) {
     let texts = window.global::<T>();
@@ -19,6 +19,8 @@ pub fn init(window: &MainWindow, strings: &Strings) {
     texts.set_identity_title(get(Text::IdentityTitle));
     texts.set_identity_body(get(Text::IdentityBody));
     texts.set_capture_title(get(Text::CaptureTitle));
+    texts.set_saving(get(Text::Saving));
+    texts.set_saving_body(get(Text::SavingBody));
     texts.set_done_title(get(Text::DoneTitle));
     texts.set_done_body(get(Text::DoneBody));
     texts.set_manage_body(get(Text::ManageBody));
@@ -29,8 +31,9 @@ pub fn init(window: &MainWindow, strings: &Strings) {
     texts.set_delete_confirm_title(get(Text::DeleteConfirmTitle));
     texts.set_delete_confirm_body(get(Text::DeleteConfirmBody));
     texts.set_set_up_again(get(Text::SetUpAgain));
-    texts.set_sudo_notice(get(Text::SudoNotice));
     texts.set_sudo_use_own(get(Text::SudoUseOwn));
+    texts.set_sudo_toggle_off(get(Text::SudoToggleOff));
+    texts.set_sudo_toggle_on(get(Text::SudoToggleOn));
 }
 
 pub fn apply(window: &MainWindow, strings: &Strings, event: Event) {
@@ -54,32 +57,38 @@ fn handle(window: &MainWindow, strings: &Strings, event: Event) {
         Event::Identity => show(window, Page::Identity),
         Event::CaptureStarted => show_capture_start(window),
         Event::Capture(view) => show_capture(window, view),
+        Event::Saving => show_saving(window),
         Event::Done => show(window, Page::Done),
         Event::Failed(cause) => show_failure(window, strings, cause),
         Event::Manage { blocked } => show_manage(window, strings, blocked),
         Event::TestResult(outcome) => show_test_result(window, strings, &outcome),
-        Event::SudoNotice(asks_root) => show_sudo_notice(window, asks_root),
+        Event::SudoNotice(access) => show_sudo_notice(window, access),
         Event::SudoChanged(outcome) => show_sudo_change(window, strings, outcome),
     }
 }
 
-fn show_sudo_notice(window: &MainWindow, asks_root: bool) {
-    window.set_sudo_asks_root(asks_root);
+fn show_sudo_notice(window: &MainWindow, access: SudoAccess) {
+    window.set_sudo_asks_root(access == SudoAccess::RootPassword);
+    window.set_sudo_switched(access == SudoAccess::Switched);
     gate::settle(window);
 }
 
-fn show_sudo_change(window: &MainWindow, strings: &Strings, outcome: Result<(), FailureCause>) {
+fn show_sudo_change(window: &MainWindow, strings: &Strings, outcome: Result<SudoAccess, FailureCause>) {
     let message = match outcome {
-        Ok(()) => strings.get(Text::SudoChanged).to_string(),
-        Err(cause) => strings.sudo_failure(cause),
+        Ok(_) => SharedString::new(),
+        Err(cause) => strings.sudo_failure(cause).into(),
     };
-    window.set_sudo_message(message.into());
+    window.set_sudo_message(message);
+    window.set_sudo_tone(Tone::Negative);
+    gate::settle(window);
 }
 
 fn show(window: &MainWindow, page: Page) {
     window.set_page(page);
     gate::settle(window);
+    window.set_saving(false);
     window.set_test_result(SharedString::new());
+    window.set_test_tone(Tone::Neutral);
     window.set_sudo_message(SharedString::new());
     window.set_confirming(false);
 }
@@ -126,6 +135,11 @@ fn show_capture(window: &MainWindow, view: CaptureView) {
     }
 }
 
+fn show_saving(window: &MainWindow) {
+    window.set_saving(true);
+    window.set_busy(true);
+}
+
 fn image_of(buffer: SharedPixelBuffer<Rgb8Pixel>) -> Image {
     Image::from_rgb8(buffer)
 }
@@ -133,4 +147,12 @@ fn image_of(buffer: SharedPixelBuffer<Rgb8Pixel>) -> Image {
 fn show_test_result(window: &MainWindow, strings: &Strings, outcome: &TestOutcome) {
     show_manage(window, strings, None);
     window.set_test_result(strings.test_message(outcome).into());
+    window.set_test_tone(tone_of(outcome));
+}
+
+fn tone_of(outcome: &TestOutcome) -> Tone {
+    match outcome {
+        TestOutcome::Recognized => Tone::Positive,
+        TestOutcome::NotRecognized | TestOutcome::Failed(_) => Tone::Negative,
+    }
 }

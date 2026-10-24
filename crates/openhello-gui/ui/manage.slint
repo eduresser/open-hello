@@ -1,28 +1,27 @@
-import { ActionButton, Brand, Column, Footer, Intro, SudoNotice, LinkButton, MarkRow, Spacer, TestStatus } from "components.slint";
+import { ActionButton, AdminSwitch, Brand, Column, Footer, Intro, LinkButton, MarkRow, Spacer, TestStatus, Tone } from "components.slint";
 import { T } from "texts.slint";
 
 export component ManagePage inherits VerticalLayout {
     in property <bool> busy;
     in property <bool> testing;
     in property <string> result;
+    in property <Tone> tone;
     in property <bool> blocked;
     in property <string> blocked-title;
     in property <string> blocked-body;
     in-out property <bool> confirming;
     in property <bool> sudo-asks-root;
+    in property <bool> sudo-switched;
     in property <string> sudo-message;
+    in property <Tone> sudo-tone;
     callback test();
     callback use-own-sudo();
+    callback restore-root-sudo();
     callback set-up-again();
 
     property <bool> usable: !root.busy && !root.confirming && !root.blocked;
 
     Column {
-        TestStatus {
-            busy: root.busy;
-            testing: root.testing;
-            result: root.result;
-        }
         MarkRow {
             fill: root.blocked ? Brand.muted : Brand.positive;
             troubled: root.blocked;
@@ -31,11 +30,20 @@ export component ManagePage inherits VerticalLayout {
             title: root.blocked ? root.blocked-title : T.window-title;
             body: root.blocked ? root.blocked-body : T.manage-body;
         }
-        SudoNotice {
-            asks-root: root.sudo-asks-root && !root.blocked;
-            message: root.sudo-message;
+        TestStatus {
+            busy: root.busy;
+            testing: root.testing;
+            result: root.result;
+            tone: root.tone;
+        }
+        AdminSwitch {
+            shown: (root.sudo-asks-root || root.sudo-switched) && !root.blocked;
+            on: root.sudo-switched;
             enabled: root.usable;
-            use-own => { root.use-own-sudo(); }
+            message: root.sudo-message;
+            tone: root.sudo-tone;
+            turn-on => { root.use-own-sudo(); }
+            turn-off => { root.restore-root-sudo(); }
         }
     }
     Footer {

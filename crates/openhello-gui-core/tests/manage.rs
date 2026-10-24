@@ -135,17 +135,20 @@ impl ManageClient for SudoOnly {
 fn daemon_policy_names_map_to_sudo_access_and_unknown_names_are_unavailable() {
     assert_eq!(SudoAccess::parse("own-password"), SudoAccess::OwnPassword);
     assert_eq!(SudoAccess::parse("root-password"), SudoAccess::RootPassword);
+    assert_eq!(SudoAccess::parse("switched"), SudoAccess::Switched);
     assert_eq!(SudoAccess::parse("unavailable"), SudoAccess::Unavailable);
     assert_eq!(SudoAccess::parse("something-new"), SudoAccess::Unavailable);
 }
 
+// @spec:AC-095
 #[test]
-fn the_notice_is_due_only_when_sudo_asks_for_root_and_errors_hide_it() {
-    let due = |answer| Manager::new(SudoOnly(answer), 1000).sudo_asks_root();
-    assert!(due(Ok(SudoAccess::RootPassword)));
-    assert!(!due(Ok(SudoAccess::OwnPassword)));
-    assert!(!due(Ok(SudoAccess::Unavailable)));
-    assert!(!due(Err(ClientError::new(ClientErrorKind::AuthDenied, "denied"))));
+fn the_sudo_access_is_read_from_the_daemon_and_errors_or_old_daemons_read_as_unavailable() {
+    let access = |answer| Manager::new(SudoOnly(answer), 1000).sudo_access();
+    assert_eq!(access(Ok(SudoAccess::RootPassword)), SudoAccess::RootPassword);
+    assert_eq!(access(Ok(SudoAccess::Switched)), SudoAccess::Switched);
+    assert_eq!(access(Ok(SudoAccess::OwnPassword)), SudoAccess::OwnPassword);
+    assert_eq!(access(Err(ClientError::new(ClientErrorKind::AuthDenied, "denied"))), SudoAccess::Unavailable);
     let (mut legacy, _) = manage(Ok(true), None);
-    assert!(!legacy.sudo_asks_root());
+    assert_eq!(legacy.sudo_access(), SudoAccess::Unavailable);
+    assert_eq!(legacy.restore_root_password_for_sudo(), Ok(SudoAccess::Unavailable));
 }

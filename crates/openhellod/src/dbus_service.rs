@@ -100,6 +100,8 @@ impl zbus::DBusError for ServiceError {
     }
 }
 
+const SWITCHED_POLICY: &str = "switched";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     EnrollBegin,
@@ -109,6 +111,7 @@ pub enum Action {
     EnrollDiscard,
     Purge,
     SudoOwnPassword,
+    SudoRootPassword,
 }
 
 impl Action {
@@ -121,6 +124,7 @@ impl Action {
             Action::EnrollDiscard => "io.openhello.biometrics.enroll-discard",
             Action::Purge => "io.openhello.biometrics.purge",
             Action::SudoOwnPassword => "io.openhello.biometrics.sudo-own-password",
+            Action::SudoRootPassword => "io.openhello.biometrics.sudo-root-password",
         }
     }
 }
@@ -533,7 +537,37 @@ impl Service {
     ) -> Result<String, ServiceError> {
         self.authorize_own_uid(conn, &header, uid).await?;
         let store = self.sudo.clone();
-        Ok(blocking::unblock(move || store.detect(uid)).await.as_str().into())
+        Ok(blocking::unblock(move || match store.detect(uid) {
+            SudoPolicy::OwnPassword if store.is_switched(uid) => SWITCHED_POLICY,
+            policy => policy.as_str(),
+        })
+        .await
+        .into())
+    }
+
+    async fn restore_root_password_for_sudo(
+        &self,
+        uid: u32,
+        #[zbus(connection)] conn: &Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> Result<String, ServiceError> {
+        self.authorize(conn, &header, Action::SudoRootPassword, uid).await?;
+        let (store, admin) = (self.sudo.clone(), self.polkit_admin.clone());
+        let restored = blocking::unblock(move || {
+            store.restore(uid)?;
+            admin.restore(uid)?;
+            Ok::<_, String>(store.detect(uid))
+        });
+        match restored.await {
+            Ok(policy) => {
+                self.logger.log(Level::Info, "sudo-policy-restored", &[("uid", Value::Uid(uid)), ("policy", Value::Label(policy.as_str()))]);
+                Ok(policy.as_str().into())
+            }
+            Err(reason) => {
+                self.logger.log(Level::Error, "sudo-policy-restore-failed", &[("uid", Value::Uid(uid)), ("reason", Value::Reason(reason))]);
+                Err(fdo::Error::Failed("sudo could not be changed; check the service logs".into()).into())
+            }
+        }
     }
 
     async fn use_own_password_for_sudo(

@@ -79,6 +79,7 @@ fn wire(window: &MainWindow, commands: &Sender<Command>) {
     window.on_test(busy_sender(window, commands, "test", true, || Command::Test));
     window.on_delete(busy_sender(window, commands, "delete", false, || Command::Remove));
     window.on_use_own_sudo(busy_sender(window, commands, "use my face for sudo", false, || Command::UseOwnSudo));
+    window.on_restore_root_sudo(busy_sender(window, commands, "ask for the root password again", false, || Command::RestoreRootSudo));
 }
 
 impl gate::Flags for MainWindow {
