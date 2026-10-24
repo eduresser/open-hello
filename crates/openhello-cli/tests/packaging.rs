@@ -264,12 +264,12 @@ fn the_selinux_module_is_loaded_and_removed_only_where_selinux_is_enabled() {
 }
 
 #[test]
-fn the_packaged_selinux_module_only_widens_the_polkit_agent_helper_domain() {
+fn the_packaged_selinux_module_only_widens_the_polkit_helper_and_login_manager_domains() {
     let module = fs::read_to_string(repo().join("packaging/selinux/openhello.cil")).unwrap();
     let rules: Vec<&str> = module.lines().filter(|l| !l.trim().is_empty() && !l.starts_with(';')).collect();
     assert!(!rules.is_empty());
     for rule in rules {
-        assert!(rule.starts_with("(allow policykit_auth_t "), "{rule}");
+        assert!(rule.starts_with("(allow policykit_auth_t ") || rule.starts_with("(allow xdm_t "), "{rule}");
     }
     assert!(packaged_destinations().contains(&"/usr/share/openhello/selinux/openhello.cil".to_string()));
 }
