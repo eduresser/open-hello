@@ -3445,9 +3445,11 @@ version = "0.2.0"
 dependencies = [
  "async-io",
  "blocking",
+ "chacha20poly1305",
  "cryptoki",
  "cryptoki-sys",
  "getrandom 0.2.17",
+ "hmac",
  "libc",
  "libloading 0.8.9",
  "openhello-auth-proto",
@@ -3470,6 +3472,7 @@ dependencies = [
  "p256",
  "tempfile",
  "zbus",
+ "zeroize",
 ]
 
 [[package]]

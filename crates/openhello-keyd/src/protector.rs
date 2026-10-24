@@ -12,8 +12,9 @@ use std::time::{Duration, Instant};
 use openhello_ticket::{Ticket, TicketKey, Verifier, DEFAULT_TTL_MS, KEY_LEN};
 use zeroize::{Zeroize, Zeroizing};
 
+use crate::logging::{log, Level, Value};
 use crate::tpm::failure;
-use crate::{validate_uid, Keyd, KeydConfig, KeydError, Secret};
+use crate::{validate_uid, Keyd, KeydConfig, KeydError, LoginSecrets, Secret};
 
 const PROTECTORS_DIR: &str = "protectors";
 const SECRET_BYTES: usize = 20;
@@ -40,6 +41,40 @@ impl LockoutPolicy {
         recovery_time_s: 600,
         lockout_recovery_time_s: 86_400,
     };
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DaState {
+    pub lockout_auth_set: bool,
+    pub max_tries: u32,
+    pub recovery_time_s: u32,
+    pub lockout_recovery_time_s: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LockoutOutcome {
+    Applied,
+    KeptExisting(DaState),
+}
+
+pub fn parse_da_state(getcap: &str) -> Option<DaState> {
+    let field = |name: &str| {
+        getcap
+            .lines()
+            .find_map(|l| l.trim().strip_prefix(name)?.trim().strip_prefix(':'))
+            .map(str::trim)
+    };
+    let hex = |name: &str| u32::from_str_radix(field(name)?.trim_start_matches("0x"), 16).ok();
+    Some(DaState {
+        lockout_auth_set: match field("lockoutAuthSet")? {
+            "1" => true,
+            "0" => false,
+            _ => return None,
+        },
+        max_tries: hex("TPM2_PT_MAX_AUTH_FAIL")?,
+        recovery_time_s: hex("TPM2_PT_LOCKOUT_INTERVAL")?,
+        lockout_recovery_time_s: hex("TPM2_PT_LOCKOUT_RECOVERY")?,
+    })
 }
 
 pub struct RecoveryCode(Zeroizing<String>);
@@ -82,6 +117,7 @@ pub(crate) struct Grant {
 pub struct Protectors {
     pub(crate) config: KeydConfig,
     keyd: Keyd,
+    login_secrets: LoginSecrets,
     ticket_key: Zeroizing<[u8; KEY_LEN]>,
     verifier: Mutex<Verifier>,
     pub(crate) grants: Mutex<HashMap<u32, Grant>>,
@@ -95,6 +131,7 @@ impl Protectors {
             .map_err(|e| failure("gathering randomness", &e.to_string(), &[]))?;
         Ok(Self {
             keyd: Keyd::new(config.clone()),
+            login_secrets: LoginSecrets::new(config.clone()),
             config,
             verifier: Mutex::new(Verifier::new(TicketKey::from_bytes(*bytes))),
             ticket_key: bytes,
@@ -105,6 +142,10 @@ impl Protectors {
 
     pub fn keyd(&self) -> &Keyd {
         &self.keyd
+    }
+
+    pub fn login_secrets(&self) -> &LoginSecrets {
+        &self.login_secrets
     }
 
     pub fn ticket_key(&self) -> TicketKey {
@@ -148,7 +189,44 @@ impl Protectors {
             let _ = std::fs::remove_dir_all(&dir);
             return Err(error);
         }
+        self.seal_pending_password(uid);
         Ok(RecoveryCode(code))
+    }
+
+    // Callers must check the root peer; false means it waits in memory for this uid's Provision.
+    pub fn learn_login_password(&self, uid: u32, password: &str) -> Result<bool, KeydError> {
+        let uid = validate_uid(uid)?;
+        let _store = self.store.lock().unwrap_or_else(PoisonError::into_inner);
+        let entry = self
+            .login_secrets
+            .shadow_entry(uid)?
+            .ok_or(KeydError::NoShadowEntry)?;
+        if self.is_provisioned(uid) {
+            self.login_secrets.seal(uid, password, &entry)?;
+            Ok(true)
+        } else {
+            self.login_secrets.hold(uid, password, &entry)?;
+            Ok(false)
+        }
+    }
+
+    fn seal_pending_password(&self, uid: u32) {
+        match self.login_secrets.seal_pending(uid) {
+            Ok(true) => log(
+                Level::Info,
+                "token-secret-sealed",
+                &[("uid", Value::Uid(uid))],
+            ),
+            Ok(false) => {}
+            Err(error) => log(
+                Level::Warn,
+                "pending-secret-not-sealed",
+                &[
+                    ("uid", Value::Uid(uid)),
+                    ("reason", Value::Reason(error.to_string())),
+                ],
+            ),
+        }
     }
 
     // Unseals K through the biometric Protector, so the caller must be authorized before this runs (dbus_service).
@@ -222,6 +300,45 @@ impl Protectors {
         _material: &[u8],
     ) -> Result<Secret, KeydError> {
         Err(KeydError::Refused)
+    }
+
+    pub fn read_da_state(&self) -> Result<DaState, KeydError> {
+        let run = run_tool(
+            &self.config,
+            "tpm2_getcap",
+            &["properties-variable".into()],
+            &[],
+            None,
+        )?;
+        let text = String::from_utf8_lossy(&run.stdout);
+        match parse_da_state(&text) {
+            Some(state) if run.success => Ok(state),
+            _ => Err(failure(
+                "reading the dictionary-attack state",
+                &run.last_error(),
+                &[],
+            )),
+        }
+    }
+
+    // Another OS (e.g. Windows) may own lockoutAuth; trying it with an empty value would lock the lockout hierarchy for a day.
+    pub fn ensure_lockout_policy(
+        &self,
+        policy: &LockoutPolicy,
+    ) -> Result<LockoutOutcome, KeydError> {
+        let state = self.read_da_state()?;
+        if !state.lockout_auth_set {
+            self.apply_lockout_policy(policy)?;
+            return Ok(LockoutOutcome::Applied);
+        }
+        if state.recovery_time_s == 0 {
+            return Err(failure(
+                "keeping the TPM lockout policy owned by another system",
+                "dictionary-attack protection is disabled (lockout interval 0)",
+                &[],
+            ));
+        }
+        Ok(LockoutOutcome::KeptExisting(state))
     }
 
     pub fn apply_lockout_policy(&self, policy: &LockoutPolicy) -> Result<(), KeydError> {
@@ -322,116 +439,250 @@ impl Protectors {
     }
 
     fn seal(&self, data: &[u8], auth: Option<&str>, no_da: bool) -> Result<Vec<u8>, KeydError> {
-        let work = WorkDir::new(&self.config)?;
-        let secrets: Vec<&str> = auth.into_iter().collect();
-        self.create_primary(&work)?;
-        let attributes = if no_da {
-            format!("{SEAL_ATTRIBUTES}|noda")
-        } else {
-            SEAL_ATTRIBUTES.to_string()
-        };
-        let mut args: Vec<OsString> = vec![
-            "-C".into(),
-            work.path("primary.ctx").into(),
-            "-i".into(),
-            "-".into(),
-            "-u".into(),
-            work.path("seal.pub").into(),
-            "-r".into(),
-            work.path("seal.priv").into(),
-            "-a".into(),
-            attributes.into(),
-        ];
-        let auth_fd = auth.map(memory_file).transpose()?;
-        if let Some(fd) = &auth_fd {
-            args.push("-p".into());
-            args.push(format!("file:/proc/self/fd/{}", fd.fd()).into());
-        }
-        let run = run_tool(&self.config, "tpm2_create", &args, &secrets, Some(data))?;
-        drop(auth_fd);
-        if !run.success {
-            return Err(failure("sealing a protector", &run.last_error(), &secrets));
-        }
-        let read = |name: &str| {
-            std::fs::read(work.path(name))
-                .map_err(|e| failure("reading the sealed object", &e.to_string(), &[]))
-        };
-        Ok(encode_blob(&read("seal.pub")?, &read("seal.priv")?))
+        seal_object(&self.config, data, auth, no_da)
     }
 
     fn unseal_kind(&self, uid: u32, kind: Kind, auth: Option<&str>) -> Result<Secret, KeydError> {
         let blob = self.read_blob(uid, kind)?;
-        let (public, private) = decode_blob(&blob)
-            .ok_or_else(|| failure("reading a protector", "corrupt protector file", &[]))?;
-        let work = WorkDir::new(&self.config)?;
-        let secrets: Vec<&str> = auth.into_iter().collect();
-        std::fs::write(work.path("seal.pub"), public)
-            .and_then(|_| std::fs::write(work.path("seal.priv"), private))
-            .map_err(|e| failure("staging a protector", &e.to_string(), &[]))?;
-        self.create_primary(&work)?;
-        let loaded = run_tool(
-            &self.config,
-            "tpm2_load",
-            &[
-                "-C".into(),
-                work.path("primary.ctx").into(),
-                "-u".into(),
-                work.path("seal.pub").into(),
-                "-r".into(),
-                work.path("seal.priv").into(),
-                "-c".into(),
-                work.path("seal.ctx").into(),
-            ],
-            &[],
-            None,
-        )?;
-        if !loaded.success {
-            return Err(failure("loading a protector", &loaded.last_error(), &[]));
-        }
-        let mut args: Vec<OsString> = vec!["-c".into(), work.path("seal.ctx").into()];
-        if auth.is_some() {
-            args.push("-p".into());
-            args.push("file:-".into());
-        }
-        let run = run_tool(
-            &self.config,
-            "tpm2_unseal",
-            &args,
-            &secrets,
-            auth.map(str::as_bytes),
-        )?;
-        if !run.success {
-            return Err(classify_unseal(&run, &secrets));
-        }
-        let text = Zeroizing::new(
-            String::from_utf8(run.stdout.to_vec())
-                .map_err(|_| failure("unsealing a protector", "output is not text", &[]))?,
-        );
-        Secret::new(text.as_str())
+        let bytes = unseal_object(&self.config, &blob, auth)?;
+        let text = std::str::from_utf8(&bytes)
+            .map_err(|_| failure("unsealing a protector", "output is not text", &[]))?;
+        Secret::new(text)
     }
+}
 
-    fn create_primary(&self, work: &WorkDir) -> Result<(), KeydError> {
-        let run = run_tool(
-            &self.config,
-            "tpm2_createprimary",
-            &[
-                "-C".into(),
-                "o".into(),
-                "-G".into(),
-                "ecc256".into(),
-                "-a".into(),
-                PRIMARY_ATTRIBUTES.into(),
-                "-c".into(),
-                work.path("primary.ctx").into(),
-            ],
+pub(crate) fn seal_object(
+    config: &KeydConfig,
+    data: &[u8],
+    auth: Option<&str>,
+    no_da: bool,
+) -> Result<Vec<u8>, KeydError> {
+    let work = WorkDir::new(config)?;
+    create_sealed(config, &work, data, auth, no_da)?;
+    let read = |name: &str| {
+        std::fs::read(work.path(name))
+            .map_err(|e| failure("reading the sealed object", &e.to_string(), &[]))
+    };
+    Ok(encode_blob(&read("seal.pub")?, &read("seal.priv")?))
+}
+
+pub(crate) fn seal_persistent(
+    config: &KeydConfig,
+    data: &[u8],
+    handle: u32,
+) -> Result<(), KeydError> {
+    let work = WorkDir::new(config)?;
+    create_sealed(config, &work, data, None, true)?;
+    load_sealed(config, &work)?;
+    let run = run_tool(
+        config,
+        "tpm2_evictcontrol",
+        &[
+            "-C".into(),
+            "o".into(),
+            "-c".into(),
+            work.path("seal.ctx").into(),
+            format!("0x{handle:X}").into(),
+        ],
+        &[],
+        None,
+    )?;
+    if run.success {
+        Ok(())
+    } else {
+        Err(failure(
+            "storing a sealed object in a persistent handle",
+            &run.last_error(),
             &[],
-            None,
-        )?;
-        if run.success {
-            Ok(())
-        } else {
-            Err(failure("creating the primary key", &run.last_error(), &[]))
-        }
+        ))
+    }
+}
+
+pub(crate) fn unseal_persistent(
+    config: &KeydConfig,
+    handle: u32,
+) -> Result<Zeroizing<Vec<u8>>, KeydError> {
+    let run = run_tool(
+        config,
+        "tpm2_unseal",
+        &["-c".into(), format!("0x{handle:X}").into()],
+        &[],
+        None,
+    )?;
+    if !run.success {
+        return Err(classify_unseal(&run, &[]));
+    }
+    Ok(run.stdout)
+}
+
+pub(crate) fn persistent_exists(config: &KeydConfig, handle: u32) -> Result<bool, KeydError> {
+    let run = run_tool(
+        config,
+        "tpm2_getcap",
+        &["handles-persistent".into()],
+        &[],
+        None,
+    )?;
+    if !run.success {
+        return Err(failure(
+            "listing persistent handles",
+            &run.last_error(),
+            &[],
+        ));
+    }
+    let wanted = format!("0x{handle:X}");
+    Ok(String::from_utf8_lossy(&run.stdout).lines().any(|line| {
+        line.trim_start_matches("- ")
+            .trim()
+            .eq_ignore_ascii_case(&wanted)
+    }))
+}
+
+pub(crate) fn evict_persistent(config: &KeydConfig, handle: u32) -> Result<(), KeydError> {
+    let run = run_tool(
+        config,
+        "tpm2_evictcontrol",
+        &[
+            "-C".into(),
+            "o".into(),
+            "-c".into(),
+            format!("0x{handle:X}").into(),
+        ],
+        &[],
+        None,
+    )?;
+    if run.success {
+        Ok(())
+    } else {
+        Err(failure(
+            "evicting a persistent handle",
+            &run.last_error(),
+            &[],
+        ))
+    }
+}
+
+fn create_sealed(
+    config: &KeydConfig,
+    work: &WorkDir,
+    data: &[u8],
+    auth: Option<&str>,
+    no_da: bool,
+) -> Result<(), KeydError> {
+    let secrets: Vec<&str> = auth.into_iter().collect();
+    create_primary(config, work)?;
+    let attributes = if no_da {
+        format!("{SEAL_ATTRIBUTES}|noda")
+    } else {
+        SEAL_ATTRIBUTES.to_string()
+    };
+    let mut args: Vec<OsString> = vec![
+        "-C".into(),
+        work.path("primary.ctx").into(),
+        "-i".into(),
+        "-".into(),
+        "-u".into(),
+        work.path("seal.pub").into(),
+        "-r".into(),
+        work.path("seal.priv").into(),
+        "-a".into(),
+        attributes.into(),
+    ];
+    let auth_fd = auth.map(memory_file).transpose()?;
+    if let Some(fd) = &auth_fd {
+        args.push("-p".into());
+        args.push(format!("file:/proc/self/fd/{}", fd.fd()).into());
+    }
+    let run = run_tool(config, "tpm2_create", &args, &secrets, Some(data))?;
+    drop(auth_fd);
+    if run.success {
+        Ok(())
+    } else {
+        Err(failure("sealing an object", &run.last_error(), &secrets))
+    }
+}
+
+fn load_sealed(config: &KeydConfig, work: &WorkDir) -> Result<(), KeydError> {
+    let loaded = run_tool(
+        config,
+        "tpm2_load",
+        &[
+            "-C".into(),
+            work.path("primary.ctx").into(),
+            "-u".into(),
+            work.path("seal.pub").into(),
+            "-r".into(),
+            work.path("seal.priv").into(),
+            "-c".into(),
+            work.path("seal.ctx").into(),
+        ],
+        &[],
+        None,
+    )?;
+    if loaded.success {
+        Ok(())
+    } else {
+        Err(failure(
+            "loading a sealed object",
+            &loaded.last_error(),
+            &[],
+        ))
+    }
+}
+
+pub(crate) fn unseal_object(
+    config: &KeydConfig,
+    blob: &[u8],
+    auth: Option<&str>,
+) -> Result<Zeroizing<Vec<u8>>, KeydError> {
+    let (public, private) = decode_blob(blob)
+        .ok_or_else(|| failure("reading a sealed object", "corrupt sealed object", &[]))?;
+    let work = WorkDir::new(config)?;
+    let secrets: Vec<&str> = auth.into_iter().collect();
+    std::fs::write(work.path("seal.pub"), public)
+        .and_then(|_| std::fs::write(work.path("seal.priv"), private))
+        .map_err(|e| failure("staging a sealed object", &e.to_string(), &[]))?;
+    create_primary(config, &work)?;
+    load_sealed(config, &work)?;
+    let mut args: Vec<OsString> = vec!["-c".into(), work.path("seal.ctx").into()];
+    if auth.is_some() {
+        args.push("-p".into());
+        args.push("file:-".into());
+    }
+    let run = run_tool(
+        config,
+        "tpm2_unseal",
+        &args,
+        &secrets,
+        auth.map(str::as_bytes),
+    )?;
+    if !run.success {
+        return Err(classify_unseal(&run, &secrets));
+    }
+    Ok(run.stdout)
+}
+
+fn create_primary(config: &KeydConfig, work: &WorkDir) -> Result<(), KeydError> {
+    let run = run_tool(
+        config,
+        "tpm2_createprimary",
+        &[
+            "-C".into(),
+            "o".into(),
+            "-G".into(),
+            "ecc256".into(),
+            "-a".into(),
+            PRIMARY_ATTRIBUTES.into(),
+            "-c".into(),
+            work.path("primary.ctx").into(),
+        ],
+        &[],
+        None,
+    )?;
+    if run.success {
+        Ok(())
+    } else {
+        Err(failure("creating the primary key", &run.last_error(), &[]))
     }
 }
 
@@ -494,7 +745,7 @@ fn classify_unseal(run: &ToolRun, secrets: &[&str]) -> KeydError {
     } else if text.contains("0X98E") || text.contains("0X9A2") {
         KeydError::AuthenticationFailed
     } else {
-        failure("unsealing a protector", &run.stderr, secrets)
+        failure("unsealing an object", &run.stderr, secrets)
     }
 }
 

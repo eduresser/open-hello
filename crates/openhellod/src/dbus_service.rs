@@ -3,6 +3,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use futures_lite::StreamExt;
 
@@ -14,9 +15,23 @@ use zbus::{fdo, interface, Connection};
 use crate::backends::DaemonError;
 use crate::core::Biometrics;
 use crate::logging::{Level, Logger, Value};
+use crate::polkit_admin::PolkitAdminStore;
+use crate::sudo_policy::{SudoPolicy, SudoPolicyStore};
 
 pub const BUS_NAME: &str = "io.openhello.Biometrics1";
 pub const OBJECT_PATH: &str = "/io/openhello/Biometrics1";
+// Lock screens re-run PAM every second while shown and drop an earlier success on each new run, so one process
+// keeps its face decision for this window instead of looping the camera or losing the unlock.
+pub const SIGN_IN_COOLDOWN: Duration = Duration::from_secs(60);
+
+type ProcessKey = (u32, u64);
+
+#[derive(Clone, Copy)]
+struct Decision {
+    at: Instant,
+    uid: u32,
+    matched: bool,
+}
 
 #[derive(Debug)]
 pub enum ServiceError {
@@ -25,6 +40,7 @@ pub enum ServiceError {
     SensorStuck(String),
     NoCamera(String),
     TpmUnavailable(String),
+    AlreadyDecided(String),
 }
 
 impl ServiceError {
@@ -35,6 +51,7 @@ impl ServiceError {
             ServiceError::SensorStuck(message) => Some(("io.openhello.Error.SensorStuck", message)),
             ServiceError::NoCamera(message) => Some(("io.openhello.Error.NoCamera", message)),
             ServiceError::TpmUnavailable(message) => Some(("io.openhello.Error.TpmUnavailable", message)),
+            ServiceError::AlreadyDecided(message) => Some(("io.openhello.Error.AlreadyDecided", message)),
         }
     }
 }
@@ -91,6 +108,7 @@ pub enum Action {
     EnrollCommit,
     EnrollDiscard,
     Purge,
+    SudoOwnPassword,
 }
 
 impl Action {
@@ -102,6 +120,7 @@ impl Action {
             Action::EnrollCommit => "io.openhello.biometrics.enroll-commit",
             Action::EnrollDiscard => "io.openhello.biometrics.enroll-discard",
             Action::Purge => "io.openhello.biometrics.purge",
+            Action::SudoOwnPassword => "io.openhello.biometrics.sudo-own-password",
         }
     }
 }
@@ -137,6 +156,9 @@ pub struct Service {
     authorizer: Arc<dyn Authorizer>,
     logger: Logger,
     enrollment_owners: Arc<Mutex<HashMap<String, zbus::Task<()>>>>,
+    sudo: Arc<SudoPolicyStore>,
+    polkit_admin: Arc<PolkitAdminStore>,
+    sign_in_decisions: Arc<Mutex<HashMap<ProcessKey, Decision>>>,
 }
 
 struct CallerWatch {
@@ -183,7 +205,57 @@ async fn watch_name(conn: &Connection, name: &str, gone: Arc<AtomicBool>) -> Opt
 impl Service {
     pub fn new(core: Biometrics, authorizer: Arc<dyn Authorizer>) -> Self {
         let logger = core.logger().clone();
-        Self { core: Arc::new(Mutex::new(core)), authorizer, logger, enrollment_owners: Arc::default() }
+        Self {
+            core: Arc::new(Mutex::new(core)),
+            authorizer,
+            logger,
+            enrollment_owners: Arc::default(),
+            sudo: Arc::new(SudoPolicyStore::system()),
+            polkit_admin: Arc::new(PolkitAdminStore::system()),
+            sign_in_decisions: Arc::default(),
+        }
+    }
+
+    fn recent_decision(&self, process: ProcessKey, uid: u32) -> Option<bool> {
+        let mut decisions = self.sign_in_decisions.lock().ok()?;
+        decisions.retain(|_, decision| decision.at.elapsed() < SIGN_IN_COOLDOWN);
+        decisions.get(&process).filter(|decision| decision.uid == uid).map(|decision| decision.matched)
+    }
+
+    fn remember_decision(&self, process: ProcessKey, uid: u32, matched: bool) {
+        if let Ok(mut decisions) = self.sign_in_decisions.lock() {
+            decisions.insert(process, Decision { at: Instant::now(), uid, matched });
+        }
+    }
+
+    async fn verify_caller(&self, uid: u32, conn: &Connection, header: &Header<'_>) -> Result<bool, ServiceError> {
+        let watch = CallerWatch::start(conn, header).await;
+        let gone = watch.flag();
+        self.with_core(move |core| core.verify_cancellable(uid, &|| gone.load(Ordering::SeqCst))).await
+    }
+
+    pub fn with_polkit_admin(mut self, store: PolkitAdminStore) -> Self {
+        self.polkit_admin = Arc::new(store);
+        self
+    }
+
+    pub fn with_sudo_policy(mut self, store: SudoPolicyStore) -> Self {
+        self.sudo = Arc::new(store);
+        self
+    }
+
+    async fn restore_sudo_policy(&self, uid: u32) {
+        let (store, admin) = (self.sudo.clone(), self.polkit_admin.clone());
+        let restored = blocking::unblock(move || {
+            let sudo = store.restore(uid);
+            let polkit = admin.restore(uid);
+            Ok(sudo? | polkit?)
+        });
+        match restored.await {
+            Ok(true) => self.logger.log(Level::Info, "sudo-policy-restored", &[("uid", Value::Uid(uid))]),
+            Ok(false) => {}
+            Err(reason) => self.logger.log(Level::Warn, "sudo-policy-restore-failed", &[("uid", Value::Uid(uid)), ("reason", Value::Reason(reason))]),
+        }
     }
 
     async fn with_core<T: Send + 'static>(
@@ -307,6 +379,18 @@ fn sealed_memory_file(pixels: &[u8]) -> std::io::Result<std::fs::File> {
     Ok(file)
 }
 
+async fn caller_process(conn: &Connection, header: &Header<'_>) -> Option<ProcessKey> {
+    let sender = header.sender()?;
+    let dbus = fdo::DBusProxy::new(conn).await.ok()?;
+    let pid = dbus.get_connection_unix_process_id(sender.clone().into()).await.ok()?;
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    Some((pid, process_start_time(&stat)?))
+}
+
+pub fn process_start_time(stat: &str) -> Option<u64> {
+    stat.rsplit_once(')')?.1.split_whitespace().nth(19)?.parse().ok()
+}
+
 async fn resolve_caller(conn: &Connection, header: &Header<'_>) -> fdo::Result<Caller> {
     let sender = header.sender().ok_or_else(|| fdo::Error::AuthFailed("message has no sender".into()))?;
     let dbus = fdo::DBusProxy::new(conn).await?;
@@ -385,9 +469,37 @@ impl Service {
         #[zbus(connection)] conn: &Connection,
         #[zbus(header)] header: Header<'_>,
     ) -> Result<bool, ServiceError> {
-        let watch = CallerWatch::start(conn, &header).await;
-        let gone = watch.flag();
-        self.with_core(move |core| core.verify_cancellable(uid, &|| gone.load(Ordering::SeqCst))).await
+        self.verify_caller(uid, conn, &header).await
+    }
+
+    async fn verify_for_sign_in(
+        &self,
+        uid: u32,
+        #[zbus(connection)] conn: &Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> Result<bool, ServiceError> {
+        let process = caller_process(conn, &header).await;
+        match process.and_then(|p| self.recent_decision(p, uid)) {
+            Some(true) => {
+                self.logger.log(Level::Info, "sign-in-match-reused", &[("uid", Value::Uid(uid))]);
+                self.with_core(move |core| {
+                    core.reissue_ticket(uid);
+                    Ok(())
+                })
+                .await?;
+                return Ok(true);
+            }
+            Some(false) => {
+                self.logger.log(Level::Info, "sign-in-repeat-skipped", &[("uid", Value::Uid(uid))]);
+                return Err(ServiceError::AlreadyDecided("face already checked for this sign-in; use the password".into()));
+            }
+            None => {}
+        }
+        let verdict = self.verify_caller(uid, conn, &header).await?;
+        if let Some(process) = process {
+            self.remember_decision(process, uid, verdict);
+        }
+        Ok(verdict)
     }
 
     async fn identify(
@@ -409,7 +521,45 @@ impl Service {
     ) -> Result<bool, ServiceError> {
         self.authorize(conn, &header, Action::Purge, uid).await?;
         self.with_core(move |core| core.purge(uid)).await?;
+        self.restore_sudo_policy(uid).await;
         Ok(true)
+    }
+
+    async fn get_sudo_policy(
+        &self,
+        uid: u32,
+        #[zbus(connection)] conn: &Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> Result<String, ServiceError> {
+        self.authorize_own_uid(conn, &header, uid).await?;
+        let store = self.sudo.clone();
+        Ok(blocking::unblock(move || store.detect(uid)).await.as_str().into())
+    }
+
+    async fn use_own_password_for_sudo(
+        &self,
+        uid: u32,
+        #[zbus(connection)] conn: &Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> Result<String, ServiceError> {
+        self.authorize(conn, &header, Action::SudoOwnPassword, uid).await?;
+        let (store, admin) = (self.sudo.clone(), self.polkit_admin.clone());
+        let switched = blocking::unblock(move || {
+            let before = store.detect(uid);
+            let policy = store.use_own_password(uid)?;
+            admin.use_own_identity(uid, before != SudoPolicy::OwnPassword)?;
+            Ok::<_, String>(policy)
+        });
+        match switched.await {
+            Ok(policy) => {
+                self.logger.log(Level::Info, "sudo-policy-changed", &[("uid", Value::Uid(uid)), ("policy", Value::Label(policy.as_str()))]);
+                Ok(policy.as_str().into())
+            }
+            Err(reason) => {
+                self.logger.log(Level::Error, "sudo-policy-change-failed", &[("uid", Value::Uid(uid)), ("reason", Value::Reason(reason))]);
+                Err(fdo::Error::Failed("sudo could not be changed; check the service logs".into()).into())
+            }
+        }
     }
 
     async fn check_ready(&self) -> Result<(), ServiceError> {

@@ -47,16 +47,60 @@ pub fn locate(probes: &Probes) -> Locality {
     }
 }
 
+pub fn describe(probes: &Probes) -> String {
+    let cgroup = (probes.cgroup)();
+    let unit = |cgroup: &Option<String>| {
+        cgroup
+            .as_deref()
+            .and_then(|text| text.trim().rsplit('/').next())
+            .unwrap_or("none")
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@'))
+            .take(80)
+            .collect::<String>()
+    };
+    let peer = socket_peer_pid(libc::STDIN_FILENO);
+    format!(
+        "locality cgroup={} peer_pid={} logind_remote={:?} rhost={} tty={}",
+        unit(&cgroup),
+        peer.map_or("none".to_string(), |pid| pid.to_string()),
+        logind_remote(probes),
+        probes.rhost,
+        probes.tty,
+    )
+}
+
 pub fn is_login_manager_helper(probes: &Probes) -> bool {
     let Some(cgroup) = (probes.cgroup)() else {
         return false;
     };
-    let in_user_tree = session_id(&cgroup).is_some()
+    !in_user_tree(&cgroup) && local_greeter_present(probes)
+}
+
+fn in_user_tree(cgroup: &str) -> bool {
+    session_id(cgroup).is_some()
         || cgroup
             .lines()
             .flat_map(|line| line.split('/'))
-            .any(|part| part.starts_with("user-") && part.ends_with(".slice"));
-    !in_user_tree && local_greeter_present(probes)
+            .any(|part| part.starts_with("user-") && part.ends_with(".slice"))
+}
+
+// polkit 126+ runs its agent helper as a socket-activated system service; the agent on the
+// other end of stdin lives in the requesting session, so its cgroup is the one to judge.
+pub fn requester_cgroup(own: Option<String>, peer: impl FnOnce() -> Option<String>) -> Option<String> {
+    match own {
+        Some(own) if in_user_tree(&own) => Some(own),
+        own => peer().filter(|cgroup| in_user_tree(cgroup)).or(own),
+    }
+}
+
+pub fn socket_peer_pid(fd: i32) -> Option<i32> {
+    let mut credentials: libc::ucred = unsafe { std::mem::zeroed() };
+    let mut length = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    let rc = unsafe {
+        libc::getsockopt(fd, libc::SOL_SOCKET, libc::SO_PEERCRED, (&mut credentials as *mut libc::ucred).cast(), &mut length)
+    };
+    (rc == 0 && credentials.pid > 0).then_some(credentials.pid)
 }
 
 fn local_greeter_present(probes: &Probes) -> bool {
@@ -103,7 +147,10 @@ pub fn process_env(name: &str) -> Option<String> {
 }
 
 pub fn process_cgroup() -> Option<String> {
-    std::fs::read_to_string("/proc/self/cgroup").ok()
+    requester_cgroup(std::fs::read_to_string("/proc/self/cgroup").ok(), || {
+        let pid = socket_peer_pid(libc::STDIN_FILENO)?;
+        std::fs::read_to_string(format!("/proc/{pid}/cgroup")).ok()
+    })
 }
 
 pub fn process_session(id: &str) -> Option<String> {
@@ -434,5 +481,29 @@ mod tests {
             user: &user,
             sessions: &sessions,
         })
+    }
+
+    const HELPER_CGROUP: &str = "0::/system.slice/system-polkit\\x2dagent\\x2dhelper.slice/polkit-agent-helper@3-1234-1000.service\n";
+
+    // @covers:AC-028-pam-local-session
+    #[test]
+    fn a_socket_activated_polkit_helper_is_judged_by_the_session_of_the_agent_it_serves() {
+        let agent = Some(SERVICE_CGROUP.to_string());
+        assert_eq!(requester_cgroup(Some(HELPER_CGROUP.into()), || agent.clone()), agent);
+        assert_eq!(requester_cgroup(Some(SESSION_CGROUP.into()), || panic!("own session wins")), Some(SESSION_CGROUP.into()));
+        assert_eq!(requester_cgroup(Some(HELPER_CGROUP.into()), || None), Some(HELPER_CGROUP.into()));
+        let system_peer = Some("0::/system.slice/cron.service\n".to_string());
+        assert_eq!(requester_cgroup(Some(HELPER_CGROUP.into()), || system_peer), Some(HELPER_CGROUP.into()));
+        assert_eq!(requester_cgroup(None, || agent.clone()), agent);
+    }
+
+    #[test]
+    fn the_peer_of_a_unix_socket_is_the_process_on_the_other_end_and_other_fds_have_none() {
+        use std::os::fd::AsRawFd;
+        let (left, _right) = std::os::unix::net::UnixStream::pair().unwrap();
+        assert_eq!(socket_peer_pid(left.as_raw_fd()), Some(std::process::id() as i32));
+        let file = std::fs::File::open("/dev/null").unwrap();
+        assert_eq!(socket_peer_pid(file.as_raw_fd()), None);
+        assert_eq!(socket_peer_pid(-1), None);
     }
 }

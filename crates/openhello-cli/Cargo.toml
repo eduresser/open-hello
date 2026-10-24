@@ -8,9 +8,9 @@ license.workspace = true
 libc = "0.2"
 serde = "1"
 zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
+openhellod = { path = "../openhellod" }
 
 [dev-dependencies]
-openhellod = { path = "../openhellod" }
 async-io = "2"
 openhello-keyd = { path = "../openhello-keyd" }
 openhello-ticket = { path = "../openhello-ticket" }

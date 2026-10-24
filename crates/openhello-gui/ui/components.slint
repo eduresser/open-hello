@@ -258,3 +258,46 @@ export component TestStatus inherits Rectangle {
         }
     }
 }
+
+export component SudoNotice inherits Rectangle {
+    in property <bool> asks-root;
+    in property <string> message;
+    in property <bool> enabled: true;
+    callback use-own();
+
+    property <bool> shown: root.asks-root || root.message != "";
+
+    visible: root.shown;
+    height: root.shown ? layout.preferred-height : 0px;
+    border-radius: 6px;
+    background: Palette.foreground.with-alpha(0.04);
+    border-width: 1px;
+    border-color: Palette.foreground.with-alpha(0.08);
+
+    layout := VerticalLayout {
+        padding: 14px;
+        spacing: 10px;
+        if root.message != "": Text {
+            text: root.message;
+            font-size: 14px;
+            font-weight: 600;
+            color: Palette.foreground;
+            wrap: word-wrap;
+        }
+        if root.asks-root: Text {
+            text: T.sudo-notice;
+            font-size: 14px;
+            color: Palette.foreground.with-alpha(0.8);
+            wrap: word-wrap;
+        }
+        if root.asks-root: HorizontalLayout {
+            alignment: start;
+            ActionButton {
+                text: T.sudo-use-own;
+                secondary: true;
+                enabled: root.enabled;
+                clicked => { root.use-own(); }
+            }
+        }
+    }
+}

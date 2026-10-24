@@ -3,9 +3,10 @@ use std::io::Write;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
-pub const PAM_USAGE: &str = "usage: openhello-cli pam <enable [service...] | disable [service...] | status | migrate> [--root DIR] [--arg flag|key=value]...";
+pub const PAM_USAGE: &str = "usage: openhello-cli pam <enable [service...] | disable [service...] | status | migrate | upgrade> [--root DIR] [--arg flag|key=value]...";
 
 const MODULE: &str = "pam_openhello.so";
+const CAPTURE_ARG: &str = "capture";
 const LEGACY_SERVICES_PATH: &str = "/etc/openhello/pam-services";
 const LEGACY_SERVICES_HEADER: &str = "# Services where pam_openhello may use the camera";
 const FALLBACK: &str =
@@ -23,6 +24,8 @@ const COMMON_STACKS: &[&str] = &[
 const OLD_STACK_FILES: &[&str] = &["sudo-openhello", "openhello-lockscreen"];
 const OLD_INCLUDES: &[&str] = &["sudo-openhello", "openhello-lockscreen"];
 const BACKUP_SUFFIX: &str = ".openhello.bak";
+const WRAPPER_HEADER: &str =
+    "# open-hello wrapper: `openhello-cli pam disable` restores the symlink to";
 
 #[derive(Debug)]
 pub struct PamFailure {
@@ -50,6 +53,7 @@ enum Action {
     Disable,
     Status,
     Migrate,
+    Upgrade,
 }
 
 struct Request {
@@ -71,6 +75,7 @@ fn parse(args: &[String]) -> Result<Request, PamFailure> {
         Some("disable") => Action::Disable,
         Some("status") => Action::Status,
         Some("migrate") => Action::Migrate,
+        Some("upgrade") => Action::Upgrade,
         Some(other) => return Err(usage(format!("unknown pam command `{other}`"))),
         None => return Err(usage("a pam command is required")),
     };
@@ -98,7 +103,7 @@ fn parse(args: &[String]) -> Result<Request, PamFailure> {
             name => services.push(name.to_string()),
         }
     }
-    if matches!(action, Action::Status | Action::Migrate) && !services.is_empty() {
+    if matches!(action, Action::Status | Action::Migrate | Action::Upgrade) && !services.is_empty() {
         return Err(usage("this command takes no service names"));
     }
     Ok(Request {
@@ -157,6 +162,7 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), PamFailure> {
     match request.action {
         Action::Status => status(&dirs, &mut say).map_err(failed),
         Action::Migrate => migrate(&dirs, &mut say).map(|_| ()).map_err(failed),
+        Action::Upgrade => upgrade_common(&dirs, &mut say).map_err(failed),
         Action::Enable | Action::Disable => {
             if request.action == Action::Enable {
                 migrate(&dirs, &mut say).map_err(failed)?;
@@ -201,6 +207,15 @@ fn is_our_line(line: &str) -> bool {
         && tokens.next() == Some(MODULE)
 }
 
+fn is_capture_line(line: &str) -> bool {
+    let tokens: Vec<&str> = line.split_whitespace().collect();
+    matches!(tokens.as_slice(), ["auth", "optional", MODULE, rest @ ..] if rest.contains(&CAPTURE_ARG))
+}
+
+fn is_any_line(line: &str) -> bool {
+    is_our_line(line) || is_capture_line(line)
+}
+
 fn is_old_include(line: &str) -> bool {
     let tokens: Vec<&str> = line.split_whitespace().collect();
     matches!(tokens.as_slice(), ["auth", "include", name] if OLD_INCLUDES.contains(name))
@@ -234,6 +249,34 @@ fn insert_before(content: &str, line: &str, anchors: &[&str]) -> String {
     result
 }
 
+// Appending after the last auth line keeps every `[success=N]` jump count of the stack valid.
+fn insert_after_last_auth(content: &str, line: &str) -> String {
+    let lines: Vec<&str> = content.split_inclusive('\n').collect();
+    let at = lines
+        .iter()
+        .rposition(|l| matches!(first_token(l), Some("auth" | "-auth")))
+        .map_or(lines.len(), |i| i + 1);
+    let mut result = String::with_capacity(content.len() + line.len() + 2);
+    for (index, existing) in lines.iter().enumerate() {
+        if index == at {
+            result.push_str(line);
+            result.push('\n');
+        }
+        result.push_str(existing);
+        if index + 1 == at && !existing.ends_with('\n') {
+            result.push('\n');
+        }
+    }
+    if at == lines.len() {
+        if !result.is_empty() && !result.ends_with('\n') {
+            result.push('\n');
+        }
+        result.push_str(line);
+        result.push('\n');
+    }
+    result
+}
+
 fn remove_lines(content: &str, matches: impl Fn(&str) -> bool) -> (String, usize) {
     let mut removed = 0;
     let kept: String = content
@@ -248,7 +291,14 @@ fn remove_lines(content: &str, matches: impl Fn(&str) -> bool) -> (String, usize
 }
 
 fn our_line(module_args: &[String]) -> String {
-    let mut line = format!("auth sufficient {MODULE}");
+    with_args(format!("auth sufficient {MODULE}"), module_args)
+}
+
+fn capture_line(module_args: &[String]) -> String {
+    with_args(format!("auth optional {MODULE} {CAPTURE_ARG}"), module_args)
+}
+
+fn with_args(mut line: String, module_args: &[String]) -> String {
     for arg in module_args {
         line.push(' ');
         line.push_str(arg);
@@ -369,6 +419,9 @@ fn disable_one(dirs: &Dirs, service: &str) -> Result<String, String> {
         ));
     }
     let content = read_text(&path)?;
+    if let Some(message) = unwrap_if_wrapper(dirs, service, &content)? {
+        return Ok(message);
+    }
     let (kept, removed) = remove_lines(&content, is_our_line);
     if removed == 0 {
         return Ok(format!("{service}: not enabled"));
@@ -415,25 +468,143 @@ fn enable_common(
 ) -> Result<(), String> {
     let with_fallback = |e: String| format!("{e}\n{FALLBACK}");
     let name = discover_common_stack(dirs).map_err(with_fallback)?;
+    if let Some(target) = sibling_symlink_target(dirs, &name) {
+        wrap_symlink(dirs, &name, &target, module_args)?;
+        say(format!(
+            "{name}: enabled through a wrapper that includes {target}, which your PAM tool keeps managing"
+        ));
+        return remove_other_service_lines(dirs, &name, say);
+    }
     let path = materialize(dirs, &name).map_err(with_fallback)?;
     let content = read_text(&path)?;
-    if content.lines().any(is_our_line) {
+    let first = content.lines().any(is_our_line);
+    let capture = content.lines().any(is_capture_line);
+    if first && capture {
         say(format!("{name}: already enabled in {}", path.display()));
     } else {
-        let line = our_line(module_args);
-        rewrite(
-            &path,
-            &name,
-            &insert_before(&content, &line, &["auth", "-auth"]),
-        )?;
-        say(format!("{name}: enabled in {}", path.display()));
+        let mut updated = content;
+        if !first {
+            updated = insert_before(&updated, &our_line(module_args), &["auth", "-auth"]);
+        }
+        if !capture {
+            updated = insert_after_last_auth(&updated, &capture_line(module_args));
+        }
+        rewrite(&path, &name, &updated)?;
+        say(if first {
+            format!("{name}: added the capture line in {}", path.display())
+        } else {
+            format!("{name}: enabled in {}", path.display())
+        });
     }
+    remove_other_service_lines(dirs, &name, say)
+}
+
+fn upgrade_common(dirs: &Dirs, say: &mut dyn FnMut(String)) -> Result<(), String> {
+    let Ok(name) = discover_common_stack(dirs) else {
+        say("common stack: not found, nothing to upgrade".to_string());
+        return Ok(());
+    };
+    let path = dirs.etc.join(&name);
+    let content = is_regular(&path)
+        .then(|| fs::read_to_string(&path).ok())
+        .flatten()
+        .unwrap_or_default();
+    let Some(first) = content.lines().find(|l| is_our_line(l)) else {
+        say(format!("{name}: not enabled, left alone"));
+        return Ok(());
+    };
+    if content.lines().any(is_capture_line) {
+        say(format!("{name}: capture line already present"));
+        return Ok(());
+    }
+    let args: Vec<String> = first.split_whitespace().skip(3).map(str::to_string).collect();
+    rewrite(
+        &path,
+        &name,
+        &insert_after_last_auth(&content, &capture_line(&args)),
+    )?;
+    say(format!("{name}: added the capture line in {}", path.display()));
+    Ok(())
+}
+
+fn remove_other_service_lines(
+    dirs: &Dirs,
+    common: &str,
+    say: &mut dyn FnMut(String),
+) -> Result<(), String> {
     for service in editable_names(dirs)? {
-        if service != name {
+        if service != common {
             remove_service_lines(dirs, &service, say)?;
         }
     }
     Ok(())
+}
+
+fn sibling_symlink_target(dirs: &Dirs, name: &str) -> Option<String> {
+    let target = fs::read_link(dirs.etc.join(name)).ok()?;
+    let target = target.to_str()?;
+    (!target.contains('/') && is_regular(&dirs.etc.join(target))).then(|| target.to_string())
+}
+
+fn wrapper_content(module_args: &[String], target: &str) -> String {
+    format!(
+        "{WRAPPER_HEADER} {target}\n{}\nauth include {target}\n{}\n",
+        our_line(module_args),
+        capture_line(module_args)
+    )
+}
+
+fn wrapped_target(content: &str) -> Option<&str> {
+    let lines: Vec<&str> = content.lines().filter(|l| first_token(l).is_some()).collect();
+    let include = match lines.as_slice() {
+        [ours, include] if is_our_line(ours) => include,
+        [ours, include, capture] if is_our_line(ours) && is_capture_line(capture) => include,
+        _ => return None,
+    };
+    match include.split_whitespace().collect::<Vec<_>>()[..] {
+        ["auth", "include", target] if !target.contains('/') => Some(target),
+        _ => None,
+    }
+}
+
+fn wrap_symlink(
+    dirs: &Dirs,
+    name: &str,
+    target: &str,
+    module_args: &[String],
+) -> Result<(), String> {
+    let target_path = dirs.etc.join(target);
+    let meta = fs::metadata(&target_path)
+        .map_err(|e| format!("cannot read {}: {e}", target_path.display()))?;
+    write_atomic(
+        &dirs.etc.join(name),
+        wrapper_content(module_args, target).as_bytes(),
+        meta.mode(),
+        Some((meta.uid(), meta.gid())),
+    )
+}
+
+fn restore_symlink(dirs: &Dirs, name: &str, target: &str) -> Result<(), String> {
+    let path = dirs.etc.join(name);
+    let temp = path.with_file_name(format!(".{name}.openhello.tmp"));
+    let _ = fs::remove_file(&temp);
+    std::os::unix::fs::symlink(target, &temp)
+        .and_then(|_| fs::rename(&temp, &path))
+        .map_err(|e| {
+            let _ = fs::remove_file(&temp);
+            format!("cannot restore {} as a symlink to {target}: {e}", path.display())
+        })
+}
+
+fn unwrap_if_wrapper(dirs: &Dirs, name: &str, content: &str) -> Result<Option<String>, String> {
+    let Some(target) = wrapped_target(content) else {
+        return Ok(None);
+    };
+    if !is_regular(&dirs.etc.join(target)) {
+        return Ok(None);
+    }
+    restore_symlink(dirs, name, target)?;
+    Ok(Some(format!("{name}: disabled, restored the symlink to {target}")))
 }
 
 fn legacy_services_file(dirs: &Dirs) -> PathBuf {
@@ -507,7 +678,12 @@ fn disable_everywhere(dirs: &Dirs, say: &mut dyn FnMut(String)) -> Result<(), St
         else {
             continue;
         };
-        let (kept, removed) = remove_lines(&content, is_our_line);
+        if let Some(message) = unwrap_if_wrapper(dirs, &name, &content)? {
+            say(message);
+            touched += 1;
+            continue;
+        }
+        let (kept, removed) = remove_lines(&content, is_any_line);
         if removed > 0 {
             rewrite(&path, &name, &kept)?;
             say(format!("{name}: disabled, removed {removed} line(s)"));
@@ -524,12 +700,16 @@ fn report_common_stack(dirs: &Dirs, say: &mut dyn FnMut(String)) {
     match discover_common_stack(dirs) {
         Ok(name) => {
             let path = dirs.etc.join(&name);
+            let text = read_service(dirs, &name).unwrap_or_default();
+            let capture = if text.lines().any(is_capture_line) {
+                "capture line present"
+            } else {
+                "capture line absent"
+            };
             let state = match fs::symlink_metadata(&path) {
-                Ok(m) if m.file_type().is_symlink() => "symlink (not editable)",
-                Ok(_) if read_service(dirs, &name).is_some_and(|t| t.lines().any(is_our_line)) => {
-                    "line present"
-                }
-                _ => "line absent",
+                Ok(m) if m.file_type().is_symlink() => "symlink (not editable)".to_string(),
+                Ok(_) if text.lines().any(is_our_line) => format!("line present, {capture}"),
+                _ => format!("line absent, {capture}"),
             };
             say(format!("common stack: {name}, {state}"));
         }

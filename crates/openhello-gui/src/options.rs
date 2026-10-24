@@ -5,6 +5,7 @@ pub struct DemoMode {
     pub hold: bool,
     pub fail: bool,
     pub cycle_tests: bool,
+    pub sudo_asks_root: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -25,6 +26,7 @@ impl Options {
                 "--demo-enrolled" => (demo, mode.enrolled) = (true, true),
                 "--demo-blocked" => (demo, mode.blocked) = (true, true),
                 "--demo-test" => (demo, mode.cycle_tests) = (true, true),
+                "--demo-sudo" => (demo, mode.sudo_asks_root) = (true, true),
                 "--hold" => mode.hold = true,
                 "--fail" => mode.fail = true,
                 "--stats" => options.stats = true,

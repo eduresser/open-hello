@@ -1,0 +1,75 @@
+{
+  "schema": 1,
+  "nextId": 4,
+  "lessons": [
+    {
+      "id": "L-001",
+      "text": "Simulate an unavailable dependency with a path that can never exist, not by hiding a tool, because installing the product puts the tool on the test host",
+      "key": "VERIFY_FAILED::simulate an unavailable dependency with a path that can never exist not by hiding a tool because installing the product puts the tool on the test host",
+      "signal": "VERIFY_FAILED",
+      "scope": "tests",
+      "status": "candidate",
+      "recurrence": 1,
+      "features": [
+        "login-secret-release"
+      ],
+      "evidence": [
+        {
+          "source": "AC-090",
+          "feature": "login-secret-release",
+          "at": "2026-10-24T03:14:28.086Z",
+          "gitRev": "641081d"
+        }
+      ],
+      "penalties": 0,
+      "createdAt": "2026-10-24T03:14:28.086Z",
+      "lastSeen": "2026-10-24T03:14:28.086Z"
+    },
+    {
+      "id": "L-002",
+      "text": "A task that deletes files removes them from every task Files line in the same commit",
+      "key": "FILE_NOT_FOUND::a task that deletes files removes them from every task files line in the same commit",
+      "signal": "FILE_NOT_FOUND",
+      "scope": "spec",
+      "status": "candidate",
+      "recurrence": 1,
+      "features": [
+        "credential-login-v1b"
+      ],
+      "evidence": [
+        {
+          "source": "T-050",
+          "feature": "credential-login-v1b",
+          "at": "2026-10-24T03:14:28.122Z",
+          "gitRev": "e96a14e"
+        }
+      ],
+      "penalties": 0,
+      "createdAt": "2026-10-24T03:14:28.122Z",
+      "lastSeen": "2026-10-24T03:14:28.122Z"
+    },
+    {
+      "id": "L-003",
+      "text": "Tag each test with the criterion it proves, not a neighbouring one, and recheck tags when a test is copied from another",
+      "key": "AC_WITHOUT_TEST::tag each test with the criterion it proves not a neighbouring one and recheck tags when a test is copied from another",
+      "signal": "AC_WITHOUT_TEST",
+      "scope": "tests",
+      "status": "candidate",
+      "recurrence": 1,
+      "features": [
+        "credential-login-v1b"
+      ],
+      "evidence": [
+        {
+          "source": "AC-046",
+          "feature": "credential-login-v1b",
+          "at": "2026-10-24T03:14:28.160Z",
+          "gitRev": "e96a14e"
+        }
+      ],
+      "penalties": 0,
+      "createdAt": "2026-10-24T03:14:28.160Z",
+      "lastSeen": "2026-10-24T03:14:28.160Z"
+    }
+  ]
+}
