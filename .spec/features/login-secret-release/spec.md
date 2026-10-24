@@ -49,7 +49,7 @@ As the owner, I want OpenHello to learn my password whenever I sign in with it, 
 #### AC-082 — A successful password sign-in seals the verified password
 
 - **Given** a user with an enrolled face and OpenHello's capture line placed after the password check
-- **When** a system sign-in service verifies their typed password and the whole authentication succeeds
+- **When** a system sign-in service verifies their typed password and ends the PAM transaction with success (pam_end), whether or not it calls pam_setcred
 - **Then** openhello-keyd holds that password sealed by the TPM for that user (no plaintext copy on disk), together with a fingerprint of their current /etc/shadow entry
 
 #### AC-083 — A new password replaces the sealed one
@@ -63,6 +63,12 @@ As the owner, I want OpenHello to learn my password whenever I sign in with it, 
 - **Given** a user with a sealed password
 - **When** a sign-in fails, or succeeds without a typed password (face only, or another module)
 - **Then** the sealed password is unchanged
+
+#### AC-091 — Enrolling the face teaches OpenHello the password
+
+- **Given** a user enrolling their face for the first time, who types their password at the system's authorization prompt (polkit) that the Open Hello window triggers
+- **When** that prompt succeeds (polkit's helper authenticates and ends the transaction without calling pam_setcred)
+- **Then** the password is sealed, so the very first face sign-in afterwards releases it and the keyrings open with no extra step
 
 ### US-027 — Only the system can obtain my password
 
@@ -97,7 +103,8 @@ As the owner, I want the sealed password released only to the system sign-in, so
 
 - **Given** a user with a sealed password
 - **When** they delete their face data (purge)
-- **Then** the sealed password can no longer be released, because its TPM key is destroyed
+- **Then** the sealed password can no longer be released, because its key lived only inside the TPM and is destroyed there
+- **And** restoring a backup of OpenHello's files taken before the purge does not bring it back
 
 ### US-028 — It works on the main distributions without asking for the password
 
@@ -125,8 +132,8 @@ As the owner, I want the release proven on real distribution PAM stacks before s
 |---|---|---|---|
 | ASM-025 | Linux-PAM calls `pam_sm_setcred` of every module in the auth stack after a successful authentication, with the typed password still in PAM_AUTHTOK, even when OpenHello returned "ignore" | invalidated | T-079 spike: setcred is called but PAM_AUTHTOK is empty on all four distributions; capture moves to a second auth line (owner, 2026-10-23) |
 | ASM-026 | The distribution password modules reuse a PAM_AUTHTOK set by an earlier module without prompting (try_first_pass/use_first_pass or pam_get_authtok behaviour) | confirmed | T-079 spike: a correct token is reused with zero prompts on openSUSE, Debian and Arch pam_unix, with or without try_first_pass; a wrong token fails with error 7 and no prompt |
-| ASM-027 | The login password is sealed with envelope encryption (AEAD under a TPM-sealed key, as P-006) because a TPM sealed object holds at most 128 bytes | open | — |
-| ASM-028 | Until the first password sign-in after this feature ships, a face login still asks for the keyring password once | open | — |
+| ASM-027 | The login password is sealed with envelope encryption (AEAD under a TPM-sealed key, as P-006) because a TPM sealed object holds at most 128 bytes | confirmed | T-080: XChaCha20-Poly1305 under a 64-byte TPM-sealed key; the key moves to a persistent TPM handle in T-084 (owner, 2026-10-24) |
+| ASM-028 | Until the first password sign-in after this feature ships, a face login still asks for the keyring password once | invalidated | Owner wants no extra step (2026-10-24): the enrollment's polkit prompt seals the password (AC-091). Users enrolled before this feature still need one typed password anywhere (for example Set up again) |
 | ASM-029 | A second OpenHello auth line appended after the password check of the common stack runs after pam_unix verified the typed password and still sees it, on openSUSE, Debian and Arch | confirmed | T-083 container run (`pam_release_stacks.rs`, tests/fixtures/pam-stacks/README.md): the line `pam enable` appends after the last auth line logged the typed `Correct-Horse-7` after the prompt on openSUSE (after `include common-auth-pc`), Debian (after `pam_permit.so`) and Arch (after `pam_faillock.so authsucc`); PAM_AUTHTOK is unset again in setcred, so the module stashes it during authenticate |
 
 ## Open questions
