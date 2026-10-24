@@ -7,6 +7,8 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use zeroize::Zeroizing;
+
 mod challenge;
 mod debug;
 mod session;
@@ -30,6 +32,8 @@ const PAM_RHOST: c_int = 4;
 const PAM_USER: c_int = 2;
 const PAM_AUTHTOK: c_int = 6;
 const INTERRUPT_POLL: Duration = Duration::from_millis(50);
+pub const RELEASED_DATA: &CStr = c"openhello_released";
+static RELEASED_MARK: u8 = 1;
 const HANDLED_SIGNALS: [c_int; 2] = [libc::SIGINT, libc::SIGTERM];
 
 static INTERRUPTION: AtomicI32 = AtomicI32::new(0);
@@ -145,6 +149,13 @@ extern "C" {
         authtok: *mut *const c_char,
         prompt: *const c_char,
     ) -> c_int;
+    fn pam_set_item(pamh: *mut c_void, item: c_int, value: *const c_void) -> c_int;
+    fn pam_set_data(
+        pamh: *mut c_void,
+        name: *const c_char,
+        data: *mut c_void,
+        cleanup: Option<unsafe extern "C" fn(*mut c_void, *mut c_void, c_int)>,
+    ) -> c_int;
 }
 
 #[no_mangle]
@@ -155,10 +166,7 @@ pub unsafe extern "C" fn pam_sm_authenticate(
     argv: *const *const c_char,
 ) -> c_int {
     let args = arguments(argc, argv);
-    let (code, reason) = match authenticate(pamh, &args) {
-        Ok(()) => (PAM_SUCCESS, Reason::Success),
-        Err(Exit { code, reason }) => (code, reason),
-    };
+    let Exit { code, reason } = authenticate(pamh, &args).unwrap_or_else(|exit| exit);
     let service = item_text(pamh, PAM_SERVICE).unwrap_or_default();
     debug::report(
         args.iter().any(|a| a == "debug"),
@@ -172,6 +180,13 @@ pub unsafe extern "C" fn pam_sm_authenticate(
 struct Exit {
     code: c_int,
     reason: Reason,
+}
+
+fn granted() -> Exit {
+    Exit {
+        code: PAM_SUCCESS,
+        reason: Reason::Success,
+    }
 }
 
 fn ignore(reason: Reason) -> Exit {
@@ -239,7 +254,7 @@ fn with_default_socket(
     })
 }
 
-unsafe fn authenticate(pamh: *mut c_void, args: &[String]) -> Result<(), Exit> {
+unsafe fn authenticate(pamh: *mut c_void, args: &[String]) -> Result<Exit, Exit> {
     let started = Instant::now();
     let (uid, service, key) = eligible(pamh, args)?;
     if login_manager_helper(pamh) && !password_left_empty(pamh) {
@@ -271,15 +286,50 @@ unsafe fn authenticate(pamh: *mut c_void, args: &[String]) -> Result<(), Exit> {
         None => return Err(ignore(Reason::OpenhellodUnavailable)),
     }
     match challenge::request_signature(&socket, uid, &service, &challenge, remaining()) {
-        Ok(signature)
-            if challenge::signature_is_valid(&key, uid, &service, &challenge, &signature) =>
+        Ok(signed)
+            if challenge::signature_is_valid(
+                &key,
+                uid,
+                &service,
+                &challenge,
+                &signed.signature,
+            ) =>
         {
-            Ok(())
+            Ok(hand_over(pamh, &signed.secret))
         }
         Ok(_) => Err(refuse(Reason::SignatureInvalid)),
         Err(SignError::Refused) => Err(refuse(Reason::FaceRefused)),
         Err(SignError::Unavailable) => Err(ignore(Reason::KeydUnavailable)),
     }
+}
+
+// The password module after us must verify a released password, so the face alone does not grant then.
+unsafe fn hand_over(pamh: *mut c_void, secret: &[u8]) -> Exit {
+    let Some(token) = released_token(secret) else {
+        return granted();
+    };
+    let marked = pam_set_data(
+        pamh,
+        RELEASED_DATA.as_ptr(),
+        (&RELEASED_MARK as *const u8).cast_mut().cast(),
+        None,
+    );
+    if marked != PAM_SUCCESS
+        || pam_set_item(pamh, PAM_AUTHTOK, token.as_ptr().cast()) != PAM_SUCCESS
+    {
+        return granted();
+    }
+    ignore(Reason::Released)
+}
+
+fn released_token(secret: &[u8]) -> Option<Zeroizing<Vec<u8>>> {
+    if secret.is_empty() || secret.contains(&0) {
+        return None;
+    }
+    let mut token = Zeroizing::new(Vec::with_capacity(secret.len() + 1));
+    token.extend_from_slice(secret);
+    token.push(0);
+    Some(token)
 }
 
 fn uid_of(user: &str) -> Option<u32> {
@@ -617,6 +667,16 @@ mod tests {
     fn the_module_waits_for_the_daemon_verdict_and_the_total_budget_covers_the_signature() {
         assert!(VERIFY_TIMEOUT > FACE_ATTEMPT_BUDGET + FACE_DECISION_BUDGET);
         assert!(BUDGET >= VERIFY_TIMEOUT + SIGN_TIMEOUT);
+    }
+
+    #[test]
+    fn only_a_non_empty_secret_without_nul_bytes_becomes_a_token() {
+        assert_eq!(
+            super::released_token(b"pwd").as_deref().map(Vec::as_slice),
+            Some(&b"pwd\0"[..])
+        );
+        assert!(super::released_token(b"").is_none());
+        assert!(super::released_token(b"p\0wd").is_none());
     }
 
     #[test]

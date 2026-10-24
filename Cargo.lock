@@ -3472,6 +3472,7 @@ dependencies = [
  "p256",
  "tempfile",
  "zbus",
+ "zeroize",
 ]
 
 [[package]]
