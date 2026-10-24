@@ -92,6 +92,14 @@ int main(int argc, char **argv) {
   printf("RESULT %d\n", rc);
   printf("SIGINT %d\n", (int)interrupted);
   pam_end(h, rc);
+  if (getenv("PAMTEST_REPEAT")) {
+    if (pam_start(argv[1], argv[2], &c, &h) != PAM_SUCCESS) return 2;
+    pam_set_item(h, PAM_TTY, tty ? tty : "/dev/pts/0");
+    pam_fail_delay(h, 0);
+    rc = pam_authenticate(h, 0);
+    printf("RESULT2 %d\n", rc);
+    pam_end(h, rc);
+  }
   return 0;
 }
 "#;
@@ -402,6 +410,7 @@ struct Stack {
     user: Option<&'static str>,
     interrupt_after: Option<Duration>,
     block_sigint: bool,
+    repeat: bool,
 }
 
 impl Stack {
@@ -418,6 +427,14 @@ impl Stack {
             user: None,
             interrupt_after: None,
             block_sigint: false,
+            repeat: false,
+        }
+    }
+
+    fn repeated(self) -> Self {
+        Self {
+            repeat: true,
+            ..self
         }
     }
 
@@ -460,6 +477,7 @@ impl Stack {
 
 struct Outcome {
     result: i32,
+    second_result: Option<i32>,
     reached: Vec<String>,
     prompts: Vec<(i32, String)>,
     elapsed: Duration,
@@ -605,6 +623,9 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
     if stack.block_sigint {
         client.env("PAMTEST_BLOCK_SIGINT", "1");
     }
+    if stack.repeat {
+        client.env("PAMTEST_REPEAT", "1");
+    }
     let child = client
         .args([
             service,
@@ -659,6 +680,10 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
         .collect();
     Outcome {
         result,
+        second_result: stdout
+            .lines()
+            .find_map(|l| l.strip_prefix("RESULT2 "))
+            .map(|v| v.parse().unwrap()),
         reached: std::fs::read_to_string(&reached_file)
             .unwrap_or_default()
             .lines()
@@ -1364,5 +1389,22 @@ fn a_face_already_decided_for_this_process_falls_through_to_the_password_without
         assert_eq!(outcome.verify_calls, 1);
         assert!(outcome.showed_no_message());
         assert!(outcome.elapsed < WITHIN_BUDGET, "{:?}", outcome.elapsed);
+    });
+}
+
+#[test]
+fn a_process_that_just_proved_the_face_is_answered_again_from_memory_without_a_new_request() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        let again = scenario(&rig, fixture, &services, Stack::face(Verify::Matches).repeated());
+        assert!(again.granted());
+        assert_eq!(again.second_result, Some(0));
+        assert_eq!(again.verify_calls, 1, "the second run never reaches openhellod or the camera");
+
+        let refused = scenario(&rig, fixture, &services, Stack::face(Verify::NoMatch).repeated().lenient());
+        assert!(!refused.granted());
+        assert_ne!(refused.second_result, Some(0), "only a proven success is remembered");
+        assert_eq!(refused.verify_calls, 2);
     });
 }
