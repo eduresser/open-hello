@@ -118,6 +118,7 @@ const SIGN_TIMEOUT: Duration = Duration::from_secs(3);
 const BUDGET: Duration = VERIFY_TIMEOUT.saturating_add(SIGN_TIMEOUT);
 const BUS_NAME: &str = "io.openhello.Biometrics1";
 const OBJECT_PATH: &str = "/io/openhello/Biometrics1";
+const ALREADY_DECIDED: &str = "io.openhello.Error.AlreadyDecided";
 const DEFAULT_AUTH_DIR: &str = "/etc/openhello/auth";
 const ROOT_UID: u32 = 0;
 const DENIED_SERVICES: [&str; 13] = [
@@ -263,8 +264,9 @@ unsafe fn authenticate(pamh: *mut c_void, args: &[String]) -> Result<(), Exit> {
         settings.bus_address.clone(),
         remaining().saturating_sub(SIGN_TIMEOUT).min(VERIFY_TIMEOUT),
     ) {
-        Some(true) => {}
-        Some(false) => return Err(refuse(Reason::FaceRefused)),
+        Some(FaceVerdict::Match) => {}
+        Some(FaceVerdict::NoMatch) => return Err(refuse(Reason::FaceRefused)),
+        Some(FaceVerdict::AlreadyDecided) => return Err(ignore(Reason::AlreadyDecided)),
         None if interrupted() => return Err(ignore(Reason::Interrupted)),
         None => return Err(ignore(Reason::OpenhellodUnavailable)),
     }
@@ -347,7 +349,13 @@ fn within<T: Send + 'static>(
 
 type SharedConnection = Arc<Mutex<Option<zbus::blocking::Connection>>>;
 
-fn verify_face(uid: u32, bus_address: Option<String>, timeout: Duration) -> Option<bool> {
+enum FaceVerdict {
+    Match,
+    NoMatch,
+    AlreadyDecided,
+}
+
+fn verify_face(uid: u32, bus_address: Option<String>, timeout: Duration) -> Option<FaceVerdict> {
     let link = SharedConnection::default();
     let worker = link.clone();
     let verdict = within(timeout, move || {
@@ -363,11 +371,16 @@ fn verify_face(uid: u32, bus_address: Option<String>, timeout: Duration) -> Opti
     verdict
 }
 
-fn call_verify(uid: u32, bus_address: Option<&str>, link: &SharedConnection) -> Option<bool> {
+fn call_verify(uid: u32, bus_address: Option<&str>, link: &SharedConnection) -> Option<FaceVerdict> {
     let connection = connect_bus(bus_address)?;
     *link.lock().ok()? = Some(connection.clone());
     let proxy = zbus::blocking::Proxy::new(&connection, BUS_NAME, OBJECT_PATH, BUS_NAME).ok()?;
-    proxy.call("Verify", &(uid,)).ok()
+    match proxy.call::<_, _, bool>("VerifyForSignIn", &(uid,)) {
+        Ok(true) => Some(FaceVerdict::Match),
+        Ok(false) => Some(FaceVerdict::NoMatch),
+        Err(zbus::Error::MethodError(name, _, _)) if name.as_str() == ALREADY_DECIDED => Some(FaceVerdict::AlreadyDecided),
+        Err(_) => None,
+    }
 }
 
 fn connect_bus(address: Option<&str>) -> Option<zbus::blocking::Connection> {

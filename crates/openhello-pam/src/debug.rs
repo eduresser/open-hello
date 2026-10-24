@@ -14,12 +14,13 @@ pub enum Reason {
     SignatureInvalid,
     PasswordTyped,
     Interrupted,
+    AlreadyDecided,
     Success,
 }
 
 impl Reason {
     #[cfg(test)]
-    pub const ALL: [Reason; 13] = [
+    pub const ALL: [Reason; 14] = [
         Reason::Remote,
         Reason::NotLocal,
         Reason::ServiceDenied,
@@ -32,6 +33,7 @@ impl Reason {
         Reason::SignatureInvalid,
         Reason::PasswordTyped,
         Reason::Interrupted,
+        Reason::AlreadyDecided,
         Reason::Success,
     ];
 
@@ -49,6 +51,7 @@ impl Reason {
             Reason::SignatureInvalid => "signature-invalid",
             Reason::PasswordTyped => "password-typed",
             Reason::Interrupted => "interrupted",
+            Reason::AlreadyDecided => "already-decided",
             Reason::Success => "success",
         }
     }

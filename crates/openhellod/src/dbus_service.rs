@@ -3,6 +3,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use futures_lite::StreamExt;
 
@@ -19,6 +20,10 @@ use crate::sudo_policy::{SudoPolicy, SudoPolicyStore};
 
 pub const BUS_NAME: &str = "io.openhello.Biometrics1";
 pub const OBJECT_PATH: &str = "/io/openhello/Biometrics1";
+// Lock screens re-run PAM every second while shown; one face decision per process in this window keeps the camera from looping.
+pub const SIGN_IN_COOLDOWN: Duration = Duration::from_secs(60);
+
+type ProcessKey = (u32, u64);
 
 #[derive(Debug)]
 pub enum ServiceError {
@@ -27,6 +32,7 @@ pub enum ServiceError {
     SensorStuck(String),
     NoCamera(String),
     TpmUnavailable(String),
+    AlreadyDecided(String),
 }
 
 impl ServiceError {
@@ -37,6 +43,7 @@ impl ServiceError {
             ServiceError::SensorStuck(message) => Some(("io.openhello.Error.SensorStuck", message)),
             ServiceError::NoCamera(message) => Some(("io.openhello.Error.NoCamera", message)),
             ServiceError::TpmUnavailable(message) => Some(("io.openhello.Error.TpmUnavailable", message)),
+            ServiceError::AlreadyDecided(message) => Some(("io.openhello.Error.AlreadyDecided", message)),
         }
     }
 }
@@ -143,6 +150,7 @@ pub struct Service {
     enrollment_owners: Arc<Mutex<HashMap<String, zbus::Task<()>>>>,
     sudo: Arc<SudoPolicyStore>,
     polkit_admin: Arc<PolkitAdminStore>,
+    sign_in_decisions: Arc<Mutex<HashMap<ProcessKey, Instant>>>,
 }
 
 struct CallerWatch {
@@ -196,7 +204,26 @@ impl Service {
             enrollment_owners: Arc::default(),
             sudo: Arc::new(SudoPolicyStore::system()),
             polkit_admin: Arc::new(PolkitAdminStore::system()),
+            sign_in_decisions: Arc::default(),
         }
+    }
+
+    fn decided_recently(&self, process: ProcessKey) -> bool {
+        let Ok(mut decisions) = self.sign_in_decisions.lock() else { return false };
+        decisions.retain(|_, at| at.elapsed() < SIGN_IN_COOLDOWN);
+        decisions.contains_key(&process)
+    }
+
+    fn remember_decision(&self, process: ProcessKey) {
+        if let Ok(mut decisions) = self.sign_in_decisions.lock() {
+            decisions.insert(process, Instant::now());
+        }
+    }
+
+    async fn verify_caller(&self, uid: u32, conn: &Connection, header: &Header<'_>) -> Result<bool, ServiceError> {
+        let watch = CallerWatch::start(conn, header).await;
+        let gone = watch.flag();
+        self.with_core(move |core| core.verify_cancellable(uid, &|| gone.load(Ordering::SeqCst))).await
     }
 
     pub fn with_polkit_admin(mut self, store: PolkitAdminStore) -> Self {
@@ -344,6 +371,18 @@ fn sealed_memory_file(pixels: &[u8]) -> std::io::Result<std::fs::File> {
     Ok(file)
 }
 
+async fn caller_process(conn: &Connection, header: &Header<'_>) -> Option<ProcessKey> {
+    let sender = header.sender()?;
+    let dbus = fdo::DBusProxy::new(conn).await.ok()?;
+    let pid = dbus.get_connection_unix_process_id(sender.clone().into()).await.ok()?;
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    Some((pid, process_start_time(&stat)?))
+}
+
+pub fn process_start_time(stat: &str) -> Option<u64> {
+    stat.rsplit_once(')')?.1.split_whitespace().nth(19)?.parse().ok()
+}
+
 async fn resolve_caller(conn: &Connection, header: &Header<'_>) -> fdo::Result<Caller> {
     let sender = header.sender().ok_or_else(|| fdo::Error::AuthFailed("message has no sender".into()))?;
     let dbus = fdo::DBusProxy::new(conn).await?;
@@ -422,9 +461,25 @@ impl Service {
         #[zbus(connection)] conn: &Connection,
         #[zbus(header)] header: Header<'_>,
     ) -> Result<bool, ServiceError> {
-        let watch = CallerWatch::start(conn, &header).await;
-        let gone = watch.flag();
-        self.with_core(move |core| core.verify_cancellable(uid, &|| gone.load(Ordering::SeqCst))).await
+        self.verify_caller(uid, conn, &header).await
+    }
+
+    async fn verify_for_sign_in(
+        &self,
+        uid: u32,
+        #[zbus(connection)] conn: &Connection,
+        #[zbus(header)] header: Header<'_>,
+    ) -> Result<bool, ServiceError> {
+        let process = caller_process(conn, &header).await;
+        if process.is_some_and(|p| self.decided_recently(p)) {
+            self.logger.log(Level::Info, "sign-in-repeat-skipped", &[("uid", Value::Uid(uid))]);
+            return Err(ServiceError::AlreadyDecided("face already checked for this sign-in; use the password".into()));
+        }
+        let verdict = self.verify_caller(uid, conn, &header).await?;
+        if let Some(process) = process {
+            self.remember_decision(process);
+        }
+        Ok(verdict)
     }
 
     async fn identify(
