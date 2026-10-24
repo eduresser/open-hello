@@ -38,8 +38,7 @@
 - Notes: owner decision 2026-10-24: real crypto-shred like the template key (persistent handle via evictcontrol), purge evicts it; a backup of key files must not release the secret afterwards. Reuse how storage-adapter-templates handles its persistent handle; existing sealed secrets migrate or are dropped (the next typed password reseals).
 - Effort: high
 
-## T-085 — PAM: seal on a successful pam_end so polkit prompts teach the password [pending]
-
+## T-085 — PAM: seal on a successful pam_end so polkit prompts teach the password [done]
 - Refs: US-026, AC-082, AC-091
 - Files: crates/openhello-pam/src/lib.rs, crates/openhello-cli/tests/pam_sudo.rs
 - Notes: the capture stash's pam_set_data cleanup seals when pam_end reports PAM_SUCCESS (not PAM_DATA_REPLACE); polkit-agent-helper-1 only calls authenticate, acct_mgmt and pam_end. Keep the setcred path or replace it, but seal at most once per transaction.
