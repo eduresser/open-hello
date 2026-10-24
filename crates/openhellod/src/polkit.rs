@@ -131,9 +131,27 @@ mod tests {
     #[test]
     fn every_action_has_a_polkit_rule_in_the_shipped_policy_file() {
         let policy = include_str!("../io.openhello.Biometrics1.policy");
-        for action in [Action::EnrollBegin, Action::EnrollCapture, Action::EnrollFrame, Action::EnrollCommit, Action::EnrollDiscard, Action::Purge] {
+        for action in [Action::EnrollBegin, Action::EnrollCapture, Action::EnrollFrame, Action::EnrollCommit, Action::EnrollDiscard, Action::Purge, Action::SudoOwnPassword] {
             assert!(policy.contains(&format!("<action id=\"{}\">", action.polkit_id())), "{action:?}");
         }
         assert!(!policy.contains("<allow_any>yes</allow_any>"));
+    }
+
+    // @spec:AC-093
+    #[test]
+    fn the_password_typed_to_start_an_enrollment_also_covers_creating_the_login_key() {
+        let policy = include_str!("../io.openhello.Biometrics1.policy");
+        let begin = policy.split("<action id=\"io.openhello.biometrics.enroll-begin\">").nth(1).unwrap();
+        let begin = &begin[..begin.find("</action>").unwrap()];
+        let implied = begin
+            .split("<annotate key=\"org.freedesktop.policykit.imply\">")
+            .nth(1)
+            .and_then(|rest| rest.split("</annotate>").next())
+            .unwrap();
+        let implied: Vec<&str> = implied.split_whitespace().collect();
+        assert!(implied.contains(&"io.openhello.keyd.provision"), "{implied:?}");
+        assert!(begin.contains("<allow_active>auth_self_keep</allow_active>"));
+        let keyd_policy = include_str!("../../openhello-keyd/io.openhello.Keyd1.policy");
+        assert!(keyd_policy.contains("<action id=\"io.openhello.keyd.provision\">"));
     }
 }

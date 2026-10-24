@@ -50,3 +50,9 @@
 - Files: crates/openhello-pam/src/lib.rs, crates/openhello-keyd/src/token_socket.rs, crates/openhello-keyd/src/login_secret.rs, crates/openhello-keyd/src/dbus_service.rs, crates/openhello-keyd/src/provision.rs, crates/openhello-keyd/tests/token_release.rs, crates/openhello-cli/tests/pam_sudo.rs
 - Notes: owner bug report 2026-10-24: after purge + re-enroll the polkit password was ignored because `capture` used the face-login eligibility (requires `<uid>.pub`). Capture must only require a local session, an allowed service and a non-root user. keyd seals at once when the user is provisioned; otherwise it keeps the password in memory (Zeroizing, 15 min TTL, one per uid, newest wins) and seals it when Provision for that uid succeeds. AC-091's test must run in the real order: no credential, polkit-like prompt, then provision, then face sign-in.
 - Effort: high
+
+## T-087 — One password prompt per enrollment [done]
+- Refs: US-026, AC-093
+- Files: crates/openhellod/io.openhello.Biometrics1.policy, crates/openhellod/src/polkit.rs
+- Notes: owner report 2026-10-24: enrollment asked for the password before and after. enroll-begin (auth_self_keep) now also implies io.openhello.keyd.provision.
+- Effort: low
