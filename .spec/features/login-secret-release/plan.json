@@ -1,0 +1,107 @@
+{
+  "runId": "open-hello-login-secret-release-mvlrk1e7",
+  "feature": "login-secret-release",
+  "agent": "claude",
+  "mode": "sequential",
+  "parallelize": null,
+  "forcedModel": null,
+  "forcedEffort": null,
+  "generatedAt": "2026-10-24 02:12",
+  "workBranch": "spec/login-secret-release",
+  "baseDir": ".spec/features/login-secret-release",
+  "specDir": ".spec",
+  "repoName": "open-hello",
+  "logsDir": "../onp-worktrees/open-hello-login-secret-release-logs",
+  "waves": [],
+  "tracks": [],
+  "sequentialTasks": [
+    {
+      "id": "T-079",
+      "title": "Spike: released token on real distribution PAM stacks",
+      "model": "claude-sonnet-5",
+      "effort": "high",
+      "files": [
+        "crates/openhello-cli/tests/pam_release_stacks.rs",
+        "tests/fixtures/pam-stacks/README.md"
+      ],
+      "refs": [
+        "US-028",
+        "AC-090"
+      ]
+    },
+    {
+      "id": "T-080",
+      "title": "keyd: TPM-protected login secret store",
+      "model": "claude-sonnet-5",
+      "effort": "high",
+      "files": [
+        "crates/openhello-keyd/src/login_secret.rs",
+        "crates/openhello-keyd/src/lib.rs",
+        "crates/openhello-keyd/src/purge.rs",
+        "crates/openhello-keyd/tests/login_secret.rs"
+      ],
+      "refs": [
+        "US-026",
+        "AC-082",
+        "AC-083",
+        "AC-088",
+        "AC-089"
+      ]
+    },
+    {
+      "id": "T-081",
+      "title": "keyd: seal and release operations on the token socket",
+      "model": "claude-sonnet-5",
+      "effort": "high",
+      "files": [
+        "crates/openhello-keyd/src/token_socket.rs",
+        "crates/openhello-auth-proto/src/lib.rs",
+        "crates/openhello-keyd/tests/token_release.rs"
+      ],
+      "refs": [
+        "US-027",
+        "AC-086",
+        "AC-087",
+        "AC-088"
+      ]
+    },
+    {
+      "id": "T-082",
+      "title": "PAM: release the sealed password after a face match",
+      "model": "claude-sonnet-5",
+      "effort": "high",
+      "files": [
+        "crates/openhello-pam/src/lib.rs",
+        "crates/openhello-pam/src/challenge.rs",
+        "crates/openhello-cli/tests/pam_release.rs"
+      ],
+      "refs": [
+        "US-025",
+        "AC-078",
+        "AC-079",
+        "AC-080",
+        "AC-081",
+        "AC-085"
+      ]
+    },
+    {
+      "id": "T-083",
+      "title": "PAM: seal the verified password on setcred",
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "files": [
+        "crates/openhello-pam/src/lib.rs",
+        "crates/openhello-pam/src/challenge.rs",
+        "crates/openhello-cli/tests/pam_release.rs"
+      ],
+      "refs": [
+        "US-026",
+        "AC-082",
+        "AC-083",
+        "AC-084"
+      ]
+    }
+  ],
+  "doneTasks": [],
+  "warnings": []
+}
