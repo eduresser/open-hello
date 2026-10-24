@@ -29,7 +29,7 @@ impl PolkitAdminStore {
         self.rule(uid).is_file()
     }
 
-    pub fn use_own_identity(&self, uid: u32) -> Result<(), String> {
+    pub fn use_own_identity(&self, uid: u32, keep_root: bool) -> Result<(), String> {
         let user = user_name(uid)
             .filter(|name| plain_user_name(name))
             .ok_or_else(|| format!("uid {uid} has no plain user name for a polkit rule"))?;
@@ -45,7 +45,7 @@ impl PolkitAdminStore {
             .create_new(true)
             .mode(0o644)
             .open(&staged)
-            .and_then(|mut file| file.write_all(admin_rule(&user).as_bytes()).and_then(|()| file.sync_all()))
+            .and_then(|mut file| file.write_all(admin_rule(&user, keep_root).as_bytes()).and_then(|()| file.sync_all()))
             .and_then(|()| fs::rename(&staged, self.rule(uid)));
         written.map_err(|e| {
             let _ = fs::remove_file(&staged);
@@ -62,9 +62,10 @@ impl PolkitAdminStore {
     }
 }
 
-pub fn admin_rule(user: &str) -> String {
+pub fn admin_rule(user: &str, keep_root: bool) -> String {
+    let root = if keep_root { ", \"unix-user:0\"" } else { "" };
     format!(
-        "polkit.addAdminRule(function(action, subject) {{\n    if (subject.user == \"{user}\") {{\n        return [\"unix-user:{user}\"];\n    }}\n}});\n"
+        "polkit.addAdminRule(function(action, subject) {{\n    if (subject.user == \"{user}\") {{\n        return [\"unix-user:{user}\"{root}];\n    }}\n}});\n"
     )
 }
 

@@ -15,7 +15,7 @@ use crate::backends::DaemonError;
 use crate::core::Biometrics;
 use crate::logging::{Level, Logger, Value};
 use crate::polkit_admin::PolkitAdminStore;
-use crate::sudo_policy::SudoPolicyStore;
+use crate::sudo_policy::{SudoPolicy, SudoPolicyStore};
 
 pub const BUS_NAME: &str = "io.openhello.Biometrics1";
 pub const OBJECT_PATH: &str = "/io/openhello/Biometrics1";
@@ -470,8 +470,9 @@ impl Service {
         self.authorize(conn, &header, Action::SudoOwnPassword, uid).await?;
         let (store, admin) = (self.sudo.clone(), self.polkit_admin.clone());
         let switched = blocking::unblock(move || {
+            let before = store.detect(uid);
             let policy = store.use_own_password(uid)?;
-            admin.use_own_identity(uid)?;
+            admin.use_own_identity(uid, before != SudoPolicy::OwnPassword)?;
             Ok::<_, String>(policy)
         });
         match switched.await {

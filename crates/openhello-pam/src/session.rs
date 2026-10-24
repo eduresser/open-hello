@@ -47,6 +47,29 @@ pub fn locate(probes: &Probes) -> Locality {
     }
 }
 
+pub fn describe(probes: &Probes) -> String {
+    let cgroup = (probes.cgroup)();
+    let unit = |cgroup: &Option<String>| {
+        cgroup
+            .as_deref()
+            .and_then(|text| text.trim().rsplit('/').next())
+            .unwrap_or("none")
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@'))
+            .take(80)
+            .collect::<String>()
+    };
+    let peer = socket_peer_pid(libc::STDIN_FILENO);
+    format!(
+        "locality cgroup={} peer_pid={} logind_remote={:?} rhost={} tty={}",
+        unit(&cgroup),
+        peer.map_or("none".to_string(), |pid| pid.to_string()),
+        logind_remote(probes),
+        probes.rhost,
+        probes.tty,
+    )
+}
+
 pub fn is_login_manager_helper(probes: &Probes) -> bool {
     let Some(cgroup) = (probes.cgroup)() else {
         return false;

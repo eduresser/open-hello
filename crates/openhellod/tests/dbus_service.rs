@@ -852,7 +852,8 @@ fn switching_sudo_to_the_own_password_needs_polkit_and_purge_restores_it() {
     let policy: String = proxy(&conn).call("UseOwnPasswordForSudo", &(my_uid(),)).unwrap();
     assert_eq!(policy, "own-password");
     assert!(fake.drop_in(my_uid()).exists());
-    assert!(polkit_rule(&fake).exists());
+    let rule = std::fs::read_to_string(polkit_rule(&fake)).unwrap();
+    assert!(rule.contains("\"unix-user:0\""), "sudo asked for root before, so root stays a choice: {rule}");
     assert_eq!(*polkit.asked.lock().unwrap(), vec!["io.openhello.biometrics.sudo-own-password"]);
     assert_eq!(proxy(&conn).call::<_, _, String>("GetSudoPolicy", &(my_uid(),)).unwrap(), "own-password");
 

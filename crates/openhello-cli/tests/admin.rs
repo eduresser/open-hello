@@ -29,7 +29,8 @@ fn status_own_password_and_restore_round_trip_through_sudo_and_polkit() {
     let status = |fake: &FakeSudo| cli(fake, &["status", &uid, "--root", &root]);
     assert_eq!(status(&fake), (0, "sudo: root-password\npolkit: system-default".into(), String::new()));
     assert_eq!(cli(&fake, &["own-password", &uid, "--root", &root]).1, "sudo: own-password\npolkit: own-password");
-    assert!(fake.drop_in(my_uid()).exists() && rule.exists());
+    assert!(fake.drop_in(my_uid()).exists());
+    assert!(std::fs::read_to_string(&rule).unwrap().contains("\"unix-user:0\""), "root password before, root kept");
     assert_eq!(status(&fake).1, "sudo: own-password\npolkit: own-password");
     assert_eq!(cli(&fake, &["restore", &uid, "--root", &root]).1, "sudo: restored\npolkit: restored");
     assert_eq!(cli(&fake, &["restore", &uid, "--root", &root]).1, "sudo: nothing to restore\npolkit: nothing to restore");
@@ -58,4 +59,14 @@ fn writing_the_real_directory_requires_root_and_bad_arguments_exit_two() {
         assert_eq!(cli(&fake, &args).0, 2, "{args:?}");
     }
     assert!(!fs::exists(fake.drop_in_dir()).unwrap());
+}
+
+#[test]
+fn an_administrator_whose_sudo_already_took_their_own_password_gets_a_polkit_rule_without_root() {
+    let fake = FakeSudo::new("    env_reset, use_pty", Visudo::Accepts, Reads::DropIns);
+    let (uid, root) = (my_uid().to_string(), fake.dir.path().to_str().unwrap().to_string());
+    assert_eq!(cli(&fake, &["own-password", &uid, "--root", &root]).1, "sudo: own-password\npolkit: own-password");
+    let rule = fs::read_to_string(fake.dir.path().join(format!("etc/polkit-1/rules.d/49-openhello-uid{uid}.rules"))).unwrap();
+    assert!(!rule.contains("unix-user:0"), "{rule}");
+    assert!(fake.entries().is_empty(), "no sudo drop-in is needed");
 }

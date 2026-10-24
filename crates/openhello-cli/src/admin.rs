@@ -2,7 +2,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use openhellod::polkit_admin::PolkitAdminStore;
-use openhellod::sudo_policy::SudoPolicyStore;
+use openhellod::sudo_policy::{SudoPolicy, SudoPolicyStore};
 
 pub const ADMIN_USAGE: &str = "usage: openhello-cli admin <status | own-password | restore> UID [--root DIR]";
 
@@ -62,8 +62,9 @@ pub fn run(args: &[String], out: &mut dyn Write) -> Result<(), AdminFailure> {
             say(format!("polkit: {}", polkit_state(polkit.is_own(uid))));
         }
         Action::OwnPassword => {
+            let before = sudo.detect(uid);
             let policy = sudo.use_own_password(uid).map_err(failed)?;
-            polkit.use_own_identity(uid).map_err(failed)?;
+            polkit.use_own_identity(uid, before != SudoPolicy::OwnPassword).map_err(failed)?;
             say(format!("sudo: {}", policy.as_str()));
             say(format!("polkit: {}", polkit_state(true)));
         }
