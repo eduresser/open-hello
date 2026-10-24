@@ -18,14 +18,13 @@ use crate::{validate_uid, KeydConfig, KeydError};
 const LOGIN_SECRETS_DIR: &str = "login-secrets";
 const KEY_FILE: &str = "key.blob";
 const SECRET_FILE: &str = "secret.bin";
-const SHADOW_FILE: &str = "/etc/shadow";
+pub(crate) const SHADOW_FILE: &str = "/etc/shadow";
 const MAGIC: &[u8; 4] = b"OHLS";
 const VERSION: u8 = 1;
 const KEY_LEN: usize = 32;
 const FINGERPRINT_LEN: usize = 32;
 const NONCE_LEN: usize = 24;
 const HEADER_LEN: usize = MAGIC.len() + 1 + FINGERPRINT_LEN + NONCE_LEN;
-const PASSWORD_MAX: usize = 512;
 
 struct Keys {
     material: Zeroizing<Vec<u8>>,
@@ -78,7 +77,10 @@ impl LoginSecrets {
 
     pub fn seal(&self, uid: u32, password: &str, shadow_entry: &str) -> Result<(), KeydError> {
         let uid = validate_uid(uid)?;
-        if password.is_empty() || password.len() > PASSWORD_MAX || password.contains('\0') {
+        if password.is_empty()
+            || password.len() > openhello_auth_proto::MAX_PASSWORD_LEN
+            || password.contains('\0')
+        {
             return Err(KeydError::InvalidPassword);
         }
         if shadow_entry.is_empty() {
@@ -181,7 +183,7 @@ impl LoginSecrets {
         let uid = validate_uid(uid)?;
         let resolve = self.config.user_name.unwrap_or(linux_user_name);
         match resolve(uid) {
-            Some(user) => read_shadow_entry(Path::new(SHADOW_FILE), &user),
+            Some(user) => read_shadow_entry(&self.config.shadow_file, &user),
             None => Ok(None),
         }
     }

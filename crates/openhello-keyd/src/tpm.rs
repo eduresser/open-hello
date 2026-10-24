@@ -90,6 +90,7 @@ pub struct KeydConfig {
     pub mapfile: PathBuf,
     pub auth_dir: PathBuf,
     pub user_name: Option<fn(u32) -> Option<String>>,
+    pub shadow_file: PathBuf,
 }
 
 impl KeydConfig {
@@ -103,6 +104,7 @@ impl KeydConfig {
             mapfile: PathBuf::from(crate::certificate::DEFAULT_MAPFILE),
             auth_dir: PathBuf::from(crate::auth_keys::DEFAULT_AUTH_DIR),
             user_name: None,
+            shadow_file: PathBuf::from(crate::login_secret::SHADOW_FILE),
         }
     }
 
