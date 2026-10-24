@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use openhello_ticket::{Ticket, TicketKey, Verifier, DEFAULT_TTL_MS, KEY_LEN};
 use zeroize::{Zeroize, Zeroizing};
 
+use crate::logging::{log, Level, Value};
 use crate::tpm::failure;
 use crate::{validate_uid, Keyd, KeydConfig, KeydError, LoginSecrets, Secret};
 
@@ -188,7 +189,44 @@ impl Protectors {
             let _ = std::fs::remove_dir_all(&dir);
             return Err(error);
         }
+        self.seal_pending_password(uid);
         Ok(RecoveryCode(code))
+    }
+
+    // Callers must check the root peer; false means it waits in memory for this uid's Provision.
+    pub fn learn_login_password(&self, uid: u32, password: &str) -> Result<bool, KeydError> {
+        let uid = validate_uid(uid)?;
+        let _store = self.store.lock().unwrap_or_else(PoisonError::into_inner);
+        let entry = self
+            .login_secrets
+            .shadow_entry(uid)?
+            .ok_or(KeydError::NoShadowEntry)?;
+        if self.is_provisioned(uid) {
+            self.login_secrets.seal(uid, password, &entry)?;
+            Ok(true)
+        } else {
+            self.login_secrets.hold(uid, password, &entry)?;
+            Ok(false)
+        }
+    }
+
+    fn seal_pending_password(&self, uid: u32) {
+        match self.login_secrets.seal_pending(uid) {
+            Ok(true) => log(
+                Level::Info,
+                "token-secret-sealed",
+                &[("uid", Value::Uid(uid))],
+            ),
+            Ok(false) => {}
+            Err(error) => log(
+                Level::Warn,
+                "pending-secret-not-sealed",
+                &[
+                    ("uid", Value::Uid(uid)),
+                    ("reason", Value::Reason(error.to_string())),
+                ],
+            ),
+        }
     }
 
     // Unseals K through the biometric Protector, so the caller must be authorized before this runs (dbus_service).

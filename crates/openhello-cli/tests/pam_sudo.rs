@@ -1782,11 +1782,12 @@ fn polkit_like(services: &Services, accepted: &'static str, typed: &'static str)
 
 // @spec:AC-091
 #[test]
-fn capture_seals_a_password_typed_at_a_polkit_like_prompt_and_the_next_face_releases_it() {
+fn capture_learns_the_password_at_a_polkit_prompt_before_enrollment_and_the_first_face_releases_it() {
     let rig = rig();
     with_fixture(&rig, |fixture| {
         let services = services(&rig, fixture);
-        fixture.protectors.login_secrets().purge(uid()).unwrap();
+        fixture.protectors.purge(uid()).unwrap();
+        assert!(!fixture.public_key_file().exists());
         let entry = fixture.write_shadow("saltsalt");
 
         let prompt = scenario(
@@ -1798,6 +1799,14 @@ fn capture_seals_a_password_typed_at_a_polkit_like_prompt_and_the_next_face_rele
         assert!(prompt.granted(), "{:?}", prompt.reached);
         assert_eq!(prompt.acct, Some(0));
         assert_eq!(prompt.setcred, None);
+        assert_eq!(
+            fixture.sealed(&entry),
+            None,
+            "nothing stored before enrolling"
+        );
+
+        fixture.protectors.provision_protectors(uid()).unwrap();
+        assert!(fixture.public_key_file().exists());
         assert_eq!(fixture.sealed(&entry).as_deref(), Some(NEW_PASSWORD));
 
         let released = scenario(

@@ -1,8 +1,10 @@
+use std::collections::HashMap;
 use std::fs::DirBuilder;
 use std::io::Write;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
@@ -28,6 +30,7 @@ const PERSISTENT_HANDLE_BASE: u32 = 0x8109_0000;
 const FINGERPRINT_LEN: usize = 32;
 const NONCE_LEN: usize = 24;
 const HEADER_LEN: usize = MAGIC.len() + 1 + FINGERPRINT_LEN + NONCE_LEN;
+pub(crate) const PENDING_PASSWORD_TTL: Duration = Duration::from_secs(15 * 60);
 
 struct Keys {
     material: Zeroizing<Vec<u8>>,
@@ -65,9 +68,16 @@ impl Keys {
     }
 }
 
+struct Pending {
+    password: Zeroizing<String>,
+    shadow_entry: Zeroizing<String>,
+    held: Instant,
+}
+
 pub struct LoginSecrets {
     config: KeydConfig,
     lock: Mutex<()>,
+    pending: Mutex<HashMap<u32, Pending>>,
 }
 
 impl LoginSecrets {
@@ -75,20 +85,13 @@ impl LoginSecrets {
         Self {
             config,
             lock: Mutex::new(()),
+            pending: Mutex::new(HashMap::new()),
         }
     }
 
     pub fn seal(&self, uid: u32, password: &str, shadow_entry: &str) -> Result<(), KeydError> {
         let uid = validate_uid(uid)?;
-        if password.is_empty()
-            || password.len() > openhello_auth_proto::MAX_PASSWORD_LEN
-            || password.contains('\0')
-        {
-            return Err(KeydError::InvalidPassword);
-        }
-        if shadow_entry.is_empty() {
-            return Err(KeydError::NoShadowEntry);
-        }
+        check_sealable(password, shadow_entry)?;
         let _lock = self.lock.lock().unwrap_or_else(PoisonError::into_inner);
         self.prepare_dir(uid)?;
         let dir = self.user_dir(uid);
@@ -177,8 +180,39 @@ impl LoginSecrets {
         }
     }
 
+    // Memory only: a user who never finishes enrolling leaves nothing on disk or in the TPM (AC-092).
+    pub fn hold(&self, uid: u32, password: &str, shadow_entry: &str) -> Result<(), KeydError> {
+        let uid = validate_uid(uid)?;
+        check_sealable(password, shadow_entry)?;
+        self.live_pending().insert(
+            uid,
+            Pending {
+                password: Zeroizing::new(password.to_string()),
+                shadow_entry: Zeroizing::new(shadow_entry.to_string()),
+                held: Instant::now(),
+            },
+        );
+        Ok(())
+    }
+
+    // A password changed since it was held is stale, so it is dropped instead of sealed.
+    pub fn seal_pending(&self, uid: u32) -> Result<bool, KeydError> {
+        let uid = validate_uid(uid)?;
+        let Some(held) = self.live_pending().remove(&uid) else {
+            return Ok(false);
+        };
+        match self.shadow_entry(uid)? {
+            Some(entry) if *entry == *held.shadow_entry => {
+                self.seal(uid, &held.password, &entry)?;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
     pub fn purge(&self, uid: u32) -> Result<(), KeydError> {
         let uid = validate_uid(uid)?;
+        self.live_pending().remove(&uid);
         let _lock = self.lock.lock().unwrap_or_else(PoisonError::into_inner);
         self.destroy(uid)
     }
@@ -190,6 +224,13 @@ impl LoginSecrets {
             Some(user) => read_shadow_entry(&self.config.shadow_file, &user),
             None => Ok(None),
         }
+    }
+
+    fn live_pending(&self) -> MutexGuard<'_, HashMap<u32, Pending>> {
+        let mut pending = self.pending.lock().unwrap_or_else(PoisonError::into_inner);
+        let ttl = self.config.pending_password_ttl;
+        pending.retain(|_, held| held.held.elapsed() < ttl);
+        pending
     }
 
     // The key goes first so that a crash mid-purge never leaves a decryptable secret behind (P-008).
@@ -229,6 +270,19 @@ impl LoginSecrets {
         }
         Ok(())
     }
+}
+
+fn check_sealable(password: &str, shadow_entry: &str) -> Result<(), KeydError> {
+    if password.is_empty()
+        || password.len() > openhello_auth_proto::MAX_PASSWORD_LEN
+        || password.contains('\0')
+    {
+        return Err(KeydError::InvalidPassword);
+    }
+    if shadow_entry.is_empty() {
+        return Err(KeydError::NoShadowEntry);
+    }
+    Ok(())
 }
 
 pub fn read_shadow_entry(

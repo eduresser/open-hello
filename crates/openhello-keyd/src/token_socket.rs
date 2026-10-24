@@ -610,14 +610,15 @@ impl Connection<'_> {
     fn seal_secret(&mut self, uid: u32, payload: &[u8]) -> Reply {
         let result = self.try_seal(uid, payload);
         let (level, event) = match result {
-            Ok(_) => (Level::Info, "token-secret-sealed"),
+            Ok(true) => (Level::Info, "token-secret-sealed"),
+            Ok(false) => (Level::Info, "token-secret-pending"),
             Err(_) => (Level::Warn, "token-seal-refused"),
         };
         log(level, event, &[("uid", Value::Uid(uid))]);
-        result
+        result.map(|_| Vec::new())
     }
 
-    fn try_seal(&mut self, uid: u32, payload: &[u8]) -> Reply {
+    fn try_seal(&mut self, uid: u32, payload: &[u8]) -> Result<bool, u8> {
         if self.peer != ROOT_UID {
             return Err(TOKEN_REFUSED);
         }
@@ -627,17 +628,14 @@ impl Connection<'_> {
             return Err(TOKEN_REFUSED);
         }
         let password = std::str::from_utf8(password).map_err(|_| TOKEN_REFUSED)?;
-        let secrets = self.protectors.login_secrets();
-        let entry = secrets
-            .shadow_entry(uid)
-            .ok()
-            .flatten()
-            .ok_or(TOKEN_REFUSED)?;
-        secrets.seal(uid, password, &entry).map_err(|e| match e {
-            KeydError::InvalidPassword | KeydError::NoShadowEntry => TOKEN_REFUSED,
-            _ => TOKEN_FAILED,
-        })?;
-        Ok(Vec::new())
+        self.protectors
+            .learn_login_password(uid, password)
+            .map_err(|e| match e {
+                KeydError::InvalidPassword
+                | KeydError::NoShadowEntry
+                | KeydError::InvalidUid(_) => TOKEN_REFUSED,
+                _ => TOKEN_FAILED,
+            })
     }
 
     fn signed_challenge(&mut self, uid: u32, payload: &[u8]) -> Reply {
