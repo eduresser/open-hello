@@ -99,10 +99,10 @@
 
 ## T-027 — Installer no longer calibrates; docs [done]
 - Refs: AC-036
-- Files: scripts/install.sh, evaluation/README.md, crates/openhellod/src/config.rs
+- Files: scripts/install.sh, crates/openhellod/src/config.rs
 - Model: claude-sonnet-5
 - Effort: low
-- Notes: depends on T-026. `install.sh` stops requiring calibration images (`--calibration-*` options stay as an optional override that writes `/var/lib/openhello/calibration.bin`); the daemon starts right after install. `openhellod` config makes the calibration path optional. The evaluation README explains how to regenerate the default calibration file from LFW or from infrared captures and where to record the results (`calibration-results.md`, the TOML provenance block).
+- Notes: depends on T-026. `install.sh` stops requiring calibration images (`--calibration-*` options stay as an optional override that writes `/var/lib/openhello/calibration.bin`); the daemon starts right after install. `openhellod` config makes the calibration path optional. Regenerating the default calibration file (`openhello-calibrate`) is recorded in `calibration-results.md` and the TOML provenance block. The `evaluation/` folder was removed on 2026-10-24.
 
 ## T-028 — CLI: provision the key after enrollment, set a PIN, show the recovery code [done]
 - Refs: AC-016, AC-025, AC-031

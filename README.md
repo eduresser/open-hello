@@ -127,7 +127,6 @@ flowchart TD
 | `crates/sensor-adapter-ir` | V4L2 capture and IR emitter |
 | `crates/engine-adapter-face` | Detection, embedding and calibration |
 | `crates/storage-adapter-templates` | Encrypted template storage |
-| `evaluation/` | Python accuracy evaluation (see `evaluation/README.md`) |
 | `packaging/` | systemd services, D-Bus policies and PAM snippets |
 | `.spec/` | Specifications, architecture and requirement traceability |
 

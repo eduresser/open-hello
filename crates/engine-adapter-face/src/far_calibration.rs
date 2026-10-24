@@ -384,7 +384,7 @@ mod tests {
     }
 
     #[test]
-    fn thresholds_match_the_golden_file_the_python_evaluation_also_checks() {
+    fn thresholds_match_the_golden_file() {
         let golden: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/calibration_golden.json")).unwrap();
         let hex = golden["calibration_hex"].as_str().unwrap();
         let bytes: Vec<u8> = (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect();
