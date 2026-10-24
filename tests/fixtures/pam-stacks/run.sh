@@ -46,6 +46,7 @@ run_all() {
   scenario "$1:release" "$password" ""
   scenario "$1:wrong-token" "Stale-Password-1" "$password"
   scenario "$1:typed" none "$password"
+  scenario "$1:typed-wrong" none "Wrong-Password-9"
 }
 
 case $distro in

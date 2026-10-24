@@ -127,7 +127,7 @@ As the owner, I want the release proven on real distribution PAM stacks before s
 | ASM-026 | The distribution password modules reuse a PAM_AUTHTOK set by an earlier module without prompting (try_first_pass/use_first_pass or pam_get_authtok behaviour) | confirmed | T-079 spike: a correct token is reused with zero prompts on openSUSE, Debian and Arch pam_unix, with or without try_first_pass; a wrong token fails with error 7 and no prompt |
 | ASM-027 | The login password is sealed with envelope encryption (AEAD under a TPM-sealed key, as P-006) because a TPM sealed object holds at most 128 bytes | open | — |
 | ASM-028 | Until the first password sign-in after this feature ships, a face login still asks for the keyring password once | open | — |
-| ASM-029 | A second OpenHello auth line appended after the password check of the common stack runs after pam_unix verified the typed password and still sees it, on openSUSE, Debian and Arch | open | — |
+| ASM-029 | A second OpenHello auth line appended after the password check of the common stack runs after pam_unix verified the typed password and still sees it, on openSUSE, Debian and Arch | confirmed | T-083 container run (`pam_release_stacks.rs`, tests/fixtures/pam-stacks/README.md): the line `pam enable` appends after the last auth line logged the typed `Correct-Horse-7` after the prompt on openSUSE (after `include common-auth-pc`), Debian (after `pam_permit.so`) and Arch (after `pam_faillock.so authsucc`); PAM_AUTHTOK is unset again in setcred, so the module stashes it during authenticate |
 
 ## Open questions
 

@@ -25,6 +25,8 @@ if [ ! -e "$PAM_DECIDED" ]; then
   else
     warn "could not enable face sign-in in the common PAM stack; passwords are untouched. Enable later with: sudo openhello-cli pam enable"
   fi
+else
+  openhello-cli pam upgrade >/dev/null 2>&1 || warn "could not add the password capture line to the common PAM stack; run: sudo openhello-cli pam upgrade"
 fi
 
 # Whoever ran the install through sudo or pkexec already proved they are an administrator.
