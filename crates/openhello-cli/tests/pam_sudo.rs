@@ -130,6 +130,13 @@ enum Verify {
     NoTicket,
     Slow,
     Hangs,
+    AlreadyDecided,
+}
+
+#[derive(Debug, zbus::DBusError)]
+#[zbus(prefix = "io.openhello.Error")]
+enum FakeError {
+    AlreadyDecided(String),
 }
 
 struct VerifyState {
@@ -144,14 +151,14 @@ struct FakeBiometrics;
 
 #[zbus::interface(name = "io.openhello.Biometrics1")]
 impl FakeBiometrics {
-    async fn verify(&self, uid: u32) -> bool {
+    async fn verify_for_sign_in(&self, uid: u32) -> Result<bool, FakeError> {
         let (mode, socket) = {
             let mut guard = VERIFY.lock().unwrap_or_else(PoisonError::into_inner);
             let state = guard.as_mut().expect("verify state set by the test");
             state.calls += 1;
             (state.mode, state.ticket_socket.clone())
         };
-        match mode {
+        Ok(match mode {
             Verify::NoMatch => false,
             Verify::NoTicket => true,
             Verify::Slow => {
@@ -163,7 +170,8 @@ impl FakeBiometrics {
                 false
             }
             Verify::Matches => deliver_ticket(&socket, uid),
-        }
+            Verify::AlreadyDecided => return Err(FakeError::AlreadyDecided("face already checked".into())),
+        })
     }
 }
 
@@ -1342,5 +1350,19 @@ fn an_interrupt_while_the_camera_waits_ends_the_module_at_once_and_hands_the_sig
             blocked.elapsed
         );
         assert!(blocked.sigint_seen, "the caller never saw its SIGINT");
+    });
+}
+
+#[test]
+fn a_face_already_decided_for_this_process_falls_through_to_the_password_without_a_message() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        let outcome = scenario(&rig, fixture, &services, Stack::face(Verify::AlreadyDecided));
+        assert!(!outcome.granted());
+        assert_eq!(outcome.reached, ["authtok=unset"]);
+        assert_eq!(outcome.verify_calls, 1);
+        assert!(outcome.showed_no_message());
+        assert!(outcome.elapsed < WITHIN_BUDGET, "{:?}", outcome.elapsed);
     });
 }

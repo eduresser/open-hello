@@ -891,3 +891,60 @@ fn a_failed_switch_returns_a_short_message_without_paths_or_tool_output() {
 fn polkit_rule(fake: &FakeSudo) -> std::path::PathBuf {
     fake.dir.path().join(format!("etc/polkit-1/rules.d/49-openhello-uid{}.rules", my_uid()))
 }
+
+fn enrolled_service(bus: &PrivateBus) -> zbus::blocking::Connection {
+    serve(bus, Arc::new(AllowAll));
+    let conn = client(bus);
+    let handle: String = proxy(&conn).call("EnrollBegin", &(1000u32,)).unwrap();
+    proxy(&conn).call::<_, _, (String, String, u32, u32)>("EnrollCapture", &(handle.as_str(),)).unwrap();
+    proxy(&conn).call::<_, _, bool>("EnrollCommit", &(handle.as_str(),)).unwrap();
+    conn
+}
+
+fn sign_in_from_another_process(bus: &PrivateBus) -> String {
+    let out = Command::new("dbus-send")
+        .arg(format!("--bus={}", bus.address))
+        .args(["--print-reply", "--dest=io.openhello.Biometrics1", "/io/openhello/Biometrics1", "io.openhello.Biometrics1.VerifyForSignIn", "uint32:1000"])
+        .output()
+        .expect("dbus-send must be installed");
+    format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
+}
+
+#[test]
+fn a_sign_in_process_gets_one_face_decision_and_then_the_password() {
+    let bus = PrivateBus::start();
+    let conn = enrolled_service(&bus);
+    assert!(proxy(&conn).call::<_, _, bool>("VerifyForSignIn", &(1000u32,)).unwrap());
+    let again = proxy(&conn).call::<_, _, bool>("VerifyForSignIn", &(1000u32,)).unwrap_err().to_string();
+    assert!(again.contains("io.openhello.Error.AlreadyDecided"), "{again}");
+    let fresh = client(&bus);
+    let same_process = proxy(&fresh).call::<_, _, bool>("VerifyForSignIn", &(1000u32,)).unwrap_err().to_string();
+    assert!(same_process.contains("AlreadyDecided"), "a new connection from the same process is the same sign-in: {same_process}");
+    assert!(sign_in_from_another_process(&bus).contains("boolean true"), "another process gets its own decision");
+}
+
+#[test]
+fn a_refused_face_also_ends_the_face_step_for_that_process() {
+    let bus = PrivateBus::start();
+    let conn = enrolled_service(&bus);
+    assert!(!proxy(&conn).call::<_, _, bool>("VerifyForSignIn", &(1001u32,)).unwrap());
+    let again = proxy(&conn).call::<_, _, bool>("VerifyForSignIn", &(1000u32,)).unwrap_err().to_string();
+    assert!(again.contains("AlreadyDecided"), "{again}");
+}
+
+#[test]
+fn the_window_test_button_keeps_verifying_as_often_as_asked() {
+    let bus = PrivateBus::start();
+    let conn = enrolled_service(&bus);
+    for _ in 0..3 {
+        assert!(proxy(&conn).call::<_, _, bool>("Verify", &(1000u32,)).unwrap());
+    }
+    assert!(proxy(&conn).call::<_, _, bool>("VerifyForSignIn", &(1000u32,)).unwrap());
+}
+
+#[test]
+fn the_process_start_time_is_read_past_a_command_name_with_spaces_and_parentheses() {
+    let stat = "4242 (kscreenlocker (greet)) S 1 4242 4242 0 -1 4194560 100 0 0 0 1 2 0 0 20 0 3 0 987654 1000 200 18446744073709551615";
+    assert_eq!(openhellod::dbus_service::process_start_time(stat), Some(987654));
+    assert_eq!(openhellod::dbus_service::process_start_time("garbage"), None);
+}
