@@ -15,6 +15,10 @@ openhello-cli pam disable || echo "openhello: could not remove pam_openhello fro
 rm -f "$STATE_DIR/pam-enabled-by-package" "$STATE_DIR/admin-own-password-by-package"
 rm -f "$SUDOERS_DIR"/openhello-uid* "$POLKIT_RULES_DIR"/49-openhello-uid*.rules
 
+if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled && command -v semodule >/dev/null 2>&1; then
+  semodule -r openhello 2>/dev/null || true
+fi
+
 if [ -d "$SYSTEMD_RUN_DIR" ]; then
   systemctl disable --now openhellod.service openhello-keyd.service || true
 fi
