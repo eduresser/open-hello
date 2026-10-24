@@ -127,6 +127,7 @@ fn outputs_and_errors_never_carry_secrets_key_blobs_or_paths() {
 
     let mut broken = rig.config.clone();
     broken.prefix = Some("/nonexistent/openhello-prefix".into());
+    broken.store_dir = "/nonexistent/openhello-store".into();
     let unavailable = Keyd::new(broken).key(1005).unwrap_err();
 
     let store = std::fs::read(rig.config.store_dir.join("tpm2_pkcs11.sqlite3")).unwrap();
@@ -151,7 +152,7 @@ fn outputs_and_errors_never_carry_secrets_key_blobs_or_paths() {
     ] {
         assert!(!shown.contains(forbidden), "output leaks {forbidden}");
     }
-    assert!(matches!(unavailable, KeydError::Tpm));
+    assert!(matches!(unavailable, KeydError::Tpm), "{unavailable:?}");
     assert_eq!(unavailable.to_string(), "TPM operation failed");
     assert!(!String::from_utf8_lossy(&signature).contains(SECRET));
 }
