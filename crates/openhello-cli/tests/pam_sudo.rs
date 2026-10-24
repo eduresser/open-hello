@@ -1483,7 +1483,7 @@ fn write_frame(stream: &mut UnixStream, tag: u8, body: &[u8]) -> std::io::Result
     stream.write_all(&frame)
 }
 
-// @spec:AC-041
+// @spec:AC-046
 #[test]
 fn an_interrupt_while_the_camera_waits_ends_the_module_at_once_and_hands_the_signal_back_to_the_caller() {
     let rig = rig();
