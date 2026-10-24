@@ -558,7 +558,7 @@ fn a_caller_that_disconnects_stops_the_capture_and_a_queued_call_of_a_dead_calle
     assert_eq!(probe.auth_ends.load(Ordering::SeqCst), 1);
 }
 
-// @spec:AC-040
+// @spec:AC-047
 #[test]
 fn an_enrollment_whose_owner_leaves_is_discarded_and_the_camera_is_released() {
     let bus = PrivateBus::start();
@@ -577,7 +577,7 @@ fn an_enrollment_whose_owner_leaves_is_discarded_and_the_camera_is_released() {
     assert!(error.contains("not valid in the current state"), "{error}");
 }
 
-// @spec:AC-040
+// @spec:AC-047
 #[test]
 fn an_enrollment_that_is_committed_or_discarded_by_its_owner_is_not_discarded_again_when_it_leaves() {
     let bus = PrivateBus::start();
