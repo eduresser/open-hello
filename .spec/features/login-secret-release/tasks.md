@@ -20,10 +20,9 @@
 - Notes: AUTH_RELEASE consumes the face ticket once; SEAL and the secret part of AUTH_RELEASE need a uid-0 peer.
 - Effort: high
 
-## T-082 — PAM: release the sealed password after a face match [pending]
-
+## T-082 — PAM: release the sealed password after a face match [done]
 - Refs: US-025, AC-078, AC-079, AC-080, AC-081, AC-085
-- Files: crates/openhello-pam/src/lib.rs, crates/openhello-pam/src/challenge.rs, crates/openhello-cli/tests/pam_release.rs
+- Files: crates/openhello-pam/src/lib.rs, crates/openhello-pam/src/challenge.rs, crates/openhello-pam/src/debug.rs, crates/openhello-cli/tests/pam_sudo.rs
 - Notes: depends on T-079 (go/no-go), T-081.
 - Effort: high
 

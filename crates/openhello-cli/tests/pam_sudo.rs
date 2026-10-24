@@ -44,7 +44,8 @@ const SLOW_VERIFY: Duration = Duration::from_secs(6);
 const MODULE_BUDGET: Duration = Duration::from_secs(30);
 const STRICT_CONTROL: &str = "[success=done ignore=ignore default=die]";
 const PAM_AUTH_ERR: i32 = 7;
-const AUTH_OP: u8 = 11;
+const AUTH_OP: u8 = openhello_auth_proto::OP_TOKEN_AUTH_RELEASE;
+const SEALED_PASSWORD: &str = "Correct-Horse-7-battery";
 
 const CLIENT_C: &str = r#"
 #include <security/pam_appl.h>
@@ -120,6 +121,67 @@ int pam_sm_authenticate(pam_handle_t *h, int flags, int argc, const char **argv)
 int pam_sm_setcred(pam_handle_t *h, int flags, int argc, const char **argv) {
   (void)h; (void)flags; (void)argc; (void)argv;
   return PAM_SUCCESS;
+}
+"#;
+
+const PASSWORD_CHECK_C: &str = r#"
+#include <security/pam_ext.h>
+#include <security/pam_modules.h>
+#include <stdio.h>
+#include <string.h>
+
+static const char *arg(int argc, const char **argv, const char *key) {
+  size_t n = strlen(key);
+  for (int i = 0; i < argc; i++)
+    if (strncmp(argv[i], key, n) == 0) return argv[i] + n;
+  return NULL;
+}
+
+int pam_sm_authenticate(pam_handle_t *h, int flags, int argc, const char **argv) {
+  const char *token = NULL;
+  const char *expected = arg(argc, argv, "password=");
+  const char *path = arg(argc, argv, "path=");
+  (void)flags;
+  int ok = pam_get_authtok(h, PAM_AUTHTOK, &token, NULL) == PAM_SUCCESS && token && expected &&
+           strcmp(token, expected) == 0;
+  FILE *f = path ? fopen(path, "a") : NULL;
+  if (f) {
+    fprintf(f, "password=%s\n", ok ? "accepted" : "rejected");
+    fclose(f);
+  }
+  return ok ? PAM_SUCCESS : PAM_AUTH_ERR;
+}
+
+int pam_sm_setcred(pam_handle_t *h, int flags, int argc, const char **argv) {
+  (void)h; (void)flags; (void)argc; (void)argv;
+  return PAM_SUCCESS;
+}
+"#;
+
+const KEYRING_C: &str = r#"
+#include <security/pam_modules.h>
+#include <stdio.h>
+#include <string.h>
+
+int pam_sm_authenticate(pam_handle_t *h, int flags, int argc, const char **argv) {
+  const void *token = NULL;
+  (void)flags;
+  for (int i = 0; i < argc; i++) {
+    if (strncmp(argv[i], "path=", 5) == 0) {
+      pam_get_item(h, PAM_AUTHTOK, &token);
+      FILE *f = fopen(argv[i] + 5, "a");
+      if (f) {
+        fprintf(f, "keyring=%s\n", token ? (const char *)token : "(unset)");
+        fclose(f);
+      }
+    }
+  }
+  return PAM_IGNORE;
+}
+
+int pam_sm_setcred(pam_handle_t *h, int flags, int argc, const char **argv) {
+  (void)h; (void)flags; (void)argc; (void)argv;
+  return PAM_IGNORE;
 }
 "#;
 
@@ -340,6 +402,8 @@ struct Fixture {
     protectors: Arc<Protectors>,
     client: PathBuf,
     recorder: PathBuf,
+    password_check: PathBuf,
+    keyring: PathBuf,
 }
 
 static FIXTURE: Mutex<Option<Fixture>> = Mutex::new(None);
@@ -359,6 +423,31 @@ impl Fixture {
     fn public_key_file(&self) -> PathBuf {
         self.config.auth_dir.join(format!("{}.pub", uid()))
     }
+
+    fn write_shadow(&self, salt: &str) -> String {
+        let entry = format!(
+            "{}:$6$rounds=5000${salt}$SGFzaEZvclRoZVRlc3RVc2Vy:20000:0:99999:7:::",
+            linux_user_name(uid()).unwrap()
+        );
+        std::fs::write(&self.config.shadow_file, format!("{entry}\n")).unwrap();
+        entry
+    }
+
+    fn seal_password(&self) -> String {
+        let secrets = self.protectors.login_secrets();
+        secrets.purge(uid()).unwrap();
+        let entry = self.write_shadow("saltsalt");
+        secrets.seal(uid(), SEALED_PASSWORD, &entry).unwrap();
+        entry
+    }
+
+    fn still_sealed(&self, entry: &str) -> bool {
+        self.protectors
+            .login_secrets()
+            .release(uid(), entry)
+            .unwrap()
+            .is_some_and(|secret| secret.as_str() == SEALED_PASSWORD)
+    }
 }
 
 fn with_fixture<R>(rig: &Rig, body: impl FnOnce(&Fixture) -> R) -> R {
@@ -375,18 +464,23 @@ fn build_fixture(rig: &Rig) -> Fixture {
     std::fs::create_dir_all(dir.path().join("etc")).unwrap();
     let mut config = rig.config.clone();
     config.user_name = Some(user_name_for);
+    config.shadow_file = dir.path().join("shadow");
     let protectors = Arc::new(Protectors::new(config.clone()).unwrap());
     protectors.provision_protectors(OTHER_UID).unwrap();
     protectors.provision_protectors(uid()).unwrap();
 
     let client = compile(rig, dir.path(), "pamtest", CLIENT_C, false);
     let recorder = compile(rig, dir.path(), "recorder", RECORDER_C, true);
+    let password_check = compile(rig, dir.path(), "password_check", PASSWORD_CHECK_C, true);
+    let keyring = compile(rig, dir.path(), "keyring", KEYRING_C, true);
     Fixture {
         dir,
         config,
         protectors,
         client,
         recorder,
+        password_check,
+        keyring,
     }
 }
 
@@ -402,6 +496,7 @@ struct Stack {
     user: Option<&'static str>,
     interrupt_after: Option<Duration>,
     block_sigint: bool,
+    password_after: Option<&'static str>,
 }
 
 impl Stack {
@@ -418,6 +513,14 @@ impl Stack {
             user: None,
             interrupt_after: None,
             block_sigint: false,
+            password_after: None,
+        }
+    }
+
+    fn password_after(verify: Verify, accepted: &'static str) -> Self {
+        Self {
+            password_after: Some(accepted),
+            ..Self::common(verify, SERVICE)
         }
     }
 
@@ -572,11 +675,21 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
     let services = fixture.dir.path().join("services");
     std::fs::create_dir_all(&services).unwrap();
     let stack_text = service_text(stack, &hooks_conf, &fixture.config.auth_dir, &etc);
-    let recorder = format!(
-        "auth required {} path={}\n",
-        fixture.recorder.display(),
-        fixture.dir.path().join("reached").display()
-    );
+    let reached_file = fixture.dir.path().join("reached");
+    let recorder = match stack.password_after {
+        Some(accepted) => format!(
+            "auth required {} path={} password={accepted}\nauth optional {} path={}\n",
+            fixture.password_check.display(),
+            reached_file.display(),
+            fixture.keyring.display(),
+            reached_file.display()
+        ),
+        None => format!(
+            "auth required {} path={}\n",
+            fixture.recorder.display(),
+            reached_file.display()
+        ),
+    };
     let service = if let Some(name) = stack.direct {
         std::fs::write(services.join(name), stack_text + &recorder).unwrap();
         name
@@ -589,7 +702,6 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
         .unwrap();
         SERVICE
     };
-    let reached_file = fixture.dir.path().join("reached");
     let _ = std::fs::remove_file(&reached_file);
     set_verify(stack.verify, 0);
 
@@ -691,8 +803,10 @@ fn verify_calls() -> u32 {
 
 struct Services {
     token_path: PathBuf,
+    root_token_path: PathBuf,
     _ticket: TicketSocket,
     _token: TokenSocket,
+    _root_token: TokenSocket,
     _dir: tempfile::TempDir,
 }
 
@@ -716,6 +830,15 @@ fn services(rig: &Rig, fixture: &Fixture) -> Services {
         },
     )
     .unwrap();
+    let root_token_path = dir.path().join("root-token.sock");
+    let root_token = TokenSocket::bind_with_peer_uid(
+        fixture.protectors.clone(),
+        TokenSocketConfig {
+            path: root_token_path.clone(),
+        },
+        0,
+    )
+    .unwrap();
     serve_fake_biometrics(&rig.config.env[0].1);
     *VERIFY.lock().unwrap_or_else(PoisonError::into_inner) = Some(VerifyState {
         ticket_socket: ticket_path,
@@ -724,8 +847,10 @@ fn services(rig: &Rig, fixture: &Fixture) -> Services {
     });
     Services {
         token_path,
+        root_token_path,
         _ticket: ticket,
         _token: token,
+        _root_token: root_token,
         _dir: dir,
     }
 }
@@ -1364,5 +1489,147 @@ fn a_face_already_decided_for_this_process_falls_through_to_the_password_without
         assert_eq!(outcome.verify_calls, 1);
         assert!(outcome.showed_no_message());
         assert!(outcome.elapsed < WITHIN_BUDGET, "{:?}", outcome.elapsed);
+    });
+}
+
+fn released_to_root(services: &Services, accepted: &'static str) -> Stack {
+    Stack {
+        token_socket: Some(services.root_token_path.clone()),
+        ..Stack::password_after(Verify::Matches, accepted)
+    }
+}
+
+// @spec:AC-078
+#[test]
+fn release_after_a_face_match_hands_the_keyring_module_exactly_the_sealed_password() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        fixture.seal_password();
+
+        let outcome = scenario(
+            &rig,
+            fixture,
+            &services,
+            released_to_root(&services, SEALED_PASSWORD),
+        );
+
+        assert!(outcome.granted(), "{:?}", outcome.reached);
+        assert_eq!(
+            outcome.reached,
+            [
+                "password=accepted".to_string(),
+                format!("keyring={SEALED_PASSWORD}")
+            ]
+        );
+    });
+}
+
+// @spec:AC-079
+#[test]
+fn release_after_a_face_match_ignores_and_lets_the_password_module_grant_without_a_prompt() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        fixture.seal_password();
+
+        let accepted = scenario(
+            &rig,
+            fixture,
+            &services,
+            released_to_root(&services, SEALED_PASSWORD),
+        );
+        assert!(accepted.granted());
+        assert_eq!(accepted.reached[0], "password=accepted");
+        assert!(accepted.prompts.is_empty(), "{:?}", accepted.prompts);
+        assert_eq!(accepted.verify_calls, 1);
+
+        let rejected = scenario(
+            &rig,
+            fixture,
+            &services,
+            released_to_root(&services, "Other-Password-1"),
+        );
+        assert!(
+            !rejected.granted(),
+            "OpenHello must not grant a released sign-in by itself"
+        );
+        assert_eq!(rejected.reached[0], "password=rejected");
+        assert!(rejected.prompts.is_empty(), "{:?}", rejected.prompts);
+    });
+}
+
+// @spec:AC-081
+#[test]
+fn release_without_a_sealed_password_grants_by_face_alone_before_the_password_module() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        fixture.protectors.login_secrets().purge(uid()).unwrap();
+        fixture.write_shadow("saltsalt");
+
+        let outcome = scenario(
+            &rig,
+            fixture,
+            &services,
+            released_to_root(&services, SEALED_PASSWORD),
+        );
+
+        assert!(outcome.granted());
+        assert!(outcome.reached.is_empty(), "{:?}", outcome.reached);
+        assert!(outcome.prompts.is_empty(), "{:?}", outcome.prompts);
+        assert_eq!(outcome.verify_calls, 1);
+    });
+}
+
+// @spec:AC-085
+#[test]
+fn release_is_withheld_from_a_non_root_caller_and_the_face_signs_in_as_today() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        let entry = fixture.seal_password();
+
+        let outcome = scenario(
+            &rig,
+            fixture,
+            &services,
+            Stack::password_after(Verify::Matches, SEALED_PASSWORD),
+        );
+
+        assert!(outcome.granted());
+        assert!(outcome.reached.is_empty(), "{:?}", outcome.reached);
+        assert!(outcome.prompts.is_empty(), "{:?}", outcome.prompts);
+        assert!(
+            fixture.still_sealed(&entry),
+            "a non-root caller must not discard the secret"
+        );
+    });
+}
+
+// @spec:AC-080
+#[test]
+fn release_after_a_password_change_withholds_and_discards_the_secret_and_the_face_signs_in_alone() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        let entry = fixture.seal_password();
+        fixture.write_shadow("changed1");
+
+        let outcome = scenario(
+            &rig,
+            fixture,
+            &services,
+            released_to_root(&services, SEALED_PASSWORD),
+        );
+
+        assert!(outcome.granted());
+        assert!(outcome.reached.is_empty(), "{:?}", outcome.reached);
+        assert!(outcome.prompts.is_empty(), "{:?}", outcome.prompts);
+        fixture.write_shadow("saltsalt");
+        assert!(
+            !fixture.still_sealed(&entry),
+            "the stale secret must be discarded"
+        );
     });
 }

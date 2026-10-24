@@ -16,11 +16,12 @@ pub enum Reason {
     Interrupted,
     AlreadyDecided,
     Success,
+    Released,
 }
 
 impl Reason {
     #[cfg(test)]
-    pub const ALL: [Reason; 14] = [
+    pub const ALL: [Reason; 15] = [
         Reason::Remote,
         Reason::NotLocal,
         Reason::ServiceDenied,
@@ -35,6 +36,7 @@ impl Reason {
         Reason::Interrupted,
         Reason::AlreadyDecided,
         Reason::Success,
+        Reason::Released,
     ];
 
     pub fn code(self) -> &'static str {
@@ -53,6 +55,7 @@ impl Reason {
             Reason::Interrupted => "interrupted",
             Reason::AlreadyDecided => "already-decided",
             Reason::Success => "success",
+            Reason::Released => "released",
         }
     }
 }
