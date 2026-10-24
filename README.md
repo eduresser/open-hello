@@ -21,8 +21,6 @@ The script builds the project, downloads the models and ONNX Runtime with checks
 
 The face recognition window is optional: when the fontconfig and FreeType development files are installed, the script also builds it and installs the `openhello-gui` command and a menu entry; otherwise it skips the window, names the packages to install for your distribution, and everything else works.
 
-When a click in the window seems to be lost, run `openhello-gui --trace-input` and send the lines it prints on stderr: each pointer event, button click, worker command and screen change with its time in milliseconds, and no image data.
-
 Options:
 
 | Option | Effect |
@@ -31,6 +29,36 @@ Options:
 | `--skip-checks` | Skips the requirements check |
 | `--no-pam` | Installs without enabling PAM |
 | `--no-gui` | Skips the face recognition window |
+
+## Face recognition window
+
+Open **Open Hello** from the application menu, or run `openhello-gui`.
+
+<p align="center">
+  <img src="docs/screenshots/welcome.png" width="32%" alt="Welcome screen with the Get started button">
+  <img src="docs/screenshots/capture.png" width="32%" alt="Capture screen with the camera preview, the face oval and the progress bar">
+  <img src="docs/screenshots/saving.png" width="32%" alt="Saving screen shown after the last sample">
+</p>
+<p align="center">
+  <img src="docs/screenshots/done.png" width="32%" alt="All set screen with the admin prompts switch">
+  <img src="docs/screenshots/home.png" width="32%" alt="Main screen with a successful test and the admin prompts switch turned on">
+</p>
+
+1. **Get started** asks for your password once, through polkit.
+2. Look at the camera. The oval turns green when a sample is accepted, and the bar shows the progress.
+3. After the last sample, the window shows **Saving your face…** while the face is stored and the login key is created in the TPM. This can take a few seconds.
+4. **Test** checks that the face is recognized. The result appears below the text: green when it worked, red with the reason when it did not.
+
+The main screen, shown whenever a face is set up, offers **Test**, **Set up again** and **Delete face data**.
+
+**Use my face for admin prompts.** Some distributions, such as openSUSE, make `sudo` and `pkexec` ask for the root password; a face cannot answer that prompt. On those systems the window shows a switch, after setup and on the main screen:
+
+- On: OpenHello adds a sudoers drop-in and a polkit rule for your user only, so admin prompts accept your face or your own password.
+- Off: both files are removed and admin prompts ask for the root password again.
+
+Each change asks for administrator authentication. If the prompt is closed or refused, the switch stays where it was and the reason is shown. Deleting the face data also turns it off. The switch is hidden where `sudo` already asks for your own password.
+
+Demo mode runs the window without a camera, TPM or daemon: `openhello-gui --demo` (add `--demo-enrolled` for the main screen, `--demo-sudo` for the switch). When a click seems to be lost, run `openhello-gui --trace-input` and send the lines it prints on stderr: each pointer event, button click, worker command and screen change with its time in milliseconds, and no image data.
 
 ## Usage
 
@@ -43,6 +71,10 @@ openhello-cli purge         # erase biometric data and the key
 sudo openhello-cli pam status    # show where the module is enabled
 sudo openhello-cli pam enable    # enable in the common authentication stack
 sudo openhello-cli pam disable   # undo
+
+sudo openhello-cli admin status UID         # whose password sudo and pkexec ask for
+sudo openhello-cli admin own-password UID   # same as turning the window switch on
+sudo openhello-cli admin restore UID        # same as turning it off
 ```
 
 Enroll from an active graphical session: polkit requires a local session to authorize the operation.
@@ -91,6 +123,8 @@ recognition       PKCS#11 tokens
 | `crates/openhello-pam` | PAM module |
 | `crates/openhello-pkcs11` | Intermediate PKCS#11 module |
 | `crates/openhello-cli` | Command line |
+| `crates/openhello-gui` | Face recognition window (Slint) |
+| `crates/openhello-gui-core` | Window logic: setup flow, texts, daemon client |
 | `crates/sensor-adapter-ir` | V4L2 capture and IR emitter |
 | `crates/engine-adapter-face` | Detection, embedding and calibration |
 | `crates/storage-adapter-templates` | Encrypted template storage |
