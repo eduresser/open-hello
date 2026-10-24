@@ -372,3 +372,140 @@ fn a_non_root_peer_gets_the_same_reply_shape_with_or_without_a_secret() {
     assert_eq!(with, without);
     assert_eq!(served.released_with_fresh_grant(), PASSWORD.as_bytes());
 }
+
+const NEVER_ENROLLED_UID: u32 = 2990;
+const RESTARTED_UID: u32 = 2991;
+const NEWEST_UID: u32 = 2992;
+
+struct Fresh {
+    protectors: Arc<Protectors>,
+    root: TokenSocket,
+    _dir: tempfile::TempDir,
+}
+
+fn unprovisioned(rig: &Rig, ttl: Duration, uids: &[u32]) -> Fresh {
+    rig.clear_lockout();
+    let lines: String = uids
+        .iter()
+        .map(|uid| {
+            format!(
+                "user{uid}:$6$rounds=5000$saltsalt$SGFzaEZvclRoZVRlc3RVc2Vy:20000:0:99999:7:::\n"
+            )
+        })
+        .collect();
+    std::fs::write(shadow_path(rig), lines).unwrap();
+    let mut config = rig.config.clone();
+    config.shadow_file = shadow_path(rig);
+    config.pending_password_ttl = ttl;
+    let protectors = Arc::new(Protectors::new(config).unwrap());
+    let dir = tempfile::tempdir().unwrap();
+    let root = TokenSocket::bind_with_peer_uid(
+        protectors.clone(),
+        TokenSocketConfig {
+            path: dir.path().join("root.sock"),
+        },
+        0,
+    )
+    .unwrap();
+    Fresh {
+        protectors,
+        root,
+        _dir: dir,
+    }
+}
+
+impl Fresh {
+    fn seal(&self, uid: u32, password: &[u8]) -> u8 {
+        let payload = [uid.to_be_bytes().to_vec(), password.to_vec()].concat();
+        TokenClient::connect(self.root.path(), uid)
+            .send(OP_TOKEN_SEAL_SECRET, &payload)
+            .expect("keyd answers")
+            .0
+    }
+}
+
+fn nothing_stored_for(rig: &Rig, uid: u32) -> bool {
+    let out = rig.tpm2("tpm2_getcap", &["handles-persistent"]);
+    assert!(out.status.success());
+    let handle = format!("0x{:x}", 0x8109_0000u32 | uid);
+    !String::from_utf8_lossy(&out.stdout)
+        .to_ascii_lowercase()
+        .contains(&handle)
+        && !rig
+            .config
+            .store_dir
+            .join("login-secrets")
+            .join(uid.to_string())
+            .exists()
+}
+
+fn released_for(protectors: &Protectors, uid: u32) -> Option<String> {
+    let secrets = protectors.login_secrets();
+    let entry = secrets.shadow_entry(uid).unwrap().unwrap();
+    secrets
+        .release(uid, &entry)
+        .unwrap()
+        .map(|secret| secret.as_str().to_string())
+}
+
+// @spec:AC-092
+#[test]
+fn a_password_for_a_user_who_never_finishes_enrolling_lives_only_in_memory_and_expires() {
+    let rig = rig();
+    let expiring = unprovisioned(&rig, Duration::from_millis(300), &[NEVER_ENROLLED_UID]);
+
+    assert_eq!(
+        expiring.seal(NEVER_ENROLLED_UID, PASSWORD.as_bytes()),
+        TOKEN_OK
+    );
+    assert!(nothing_stored_for(&rig, NEVER_ENROLLED_UID));
+    assert!(!files_contain(&rig.config.store_dir, PASSWORD.as_bytes()));
+    std::thread::sleep(Duration::from_millis(400));
+    expiring
+        .protectors
+        .provision_protectors(NEVER_ENROLLED_UID)
+        .unwrap();
+    assert!(nothing_stored_for(&rig, NEVER_ENROLLED_UID), "expired");
+    assert_eq!(released_for(&expiring.protectors, NEVER_ENROLLED_UID), None);
+    drop(expiring);
+
+    let before = unprovisioned(&rig, Duration::from_secs(900), &[RESTARTED_UID]);
+    assert_eq!(before.seal(RESTARTED_UID, PASSWORD.as_bytes()), TOKEN_OK);
+    drop(before);
+    let restarted = unprovisioned(&rig, Duration::from_secs(900), &[RESTARTED_UID]);
+    restarted
+        .protectors
+        .provision_protectors(RESTARTED_UID)
+        .unwrap();
+    assert!(nothing_stored_for(&rig, RESTARTED_UID), "keyd restarted");
+    assert_eq!(released_for(&restarted.protectors, RESTARTED_UID), None);
+}
+
+#[test]
+fn the_newest_pending_password_is_sealed_when_the_user_is_provisioned() {
+    let rig = rig();
+    let fresh = unprovisioned(&rig, Duration::from_secs(900), &[NEWEST_UID]);
+
+    assert_eq!(fresh.seal(NEWEST_UID, b"Older-Password-1"), TOKEN_OK);
+    assert_eq!(fresh.seal(NEWEST_UID, PASSWORD.as_bytes()), TOKEN_OK);
+    assert!(nothing_stored_for(&rig, NEWEST_UID));
+
+    fresh.protectors.provision_protectors(NEWEST_UID).unwrap();
+    assert_eq!(
+        released_for(&fresh.protectors, NEWEST_UID).as_deref(),
+        Some(PASSWORD)
+    );
+    assert!(!files_contain(&rig.config.store_dir, PASSWORD.as_bytes()));
+}
+
+#[test]
+fn a_provisioned_user_is_sealed_at_once() {
+    let rig = rig();
+    let served = served(&rig);
+    assert_eq!(served.seal(true, uid(), PASSWORD.as_bytes()), TOKEN_OK);
+    assert!(secret_dir(&rig).join("secret.bin").exists());
+    assert_eq!(
+        released_for(&served.protectors, uid()).as_deref(),
+        Some(PASSWORD)
+    );
+}

@@ -217,6 +217,12 @@ unsafe fn eligible(
     pamh: *mut c_void,
     args: &[String],
 ) -> Result<(u32, String, p256::ecdsa::VerifyingKey), Exit> {
+    let (uid, service) = local_target(pamh, args)?;
+    let key = registered_key(args, uid).map_err(ignore)?;
+    Ok((uid, service, key))
+}
+
+unsafe fn local_target(pamh: *mut c_void, args: &[String]) -> Result<(u32, String), Exit> {
     local_session_allowed(pamh).map_err(|reason| {
         let text = with_probes(pamh, session::describe);
         debug::report_text(args.iter().any(|a| a == "debug"), &debug::syslog, &text);
@@ -233,8 +239,7 @@ unsafe fn eligible(
     if uid == ROOT_UID {
         return Err(ignore(Reason::NoCredentialFile));
     }
-    let key = registered_key(args, uid).map_err(ignore)?;
-    Ok((uid, service, key))
+    Ok((uid, service))
 }
 
 fn module_settings(args: &[String]) -> Result<Settings, ()> {
@@ -366,11 +371,12 @@ unsafe fn data_present(pamh: *mut c_void, name: &CStr) -> Option<*const c_void> 
 }
 
 // Runs after the password module, so PAM_AUTHTOK is the typed password; libpam wipes it before setcred.
+// No registered credential needed: the enrollment's own polkit prompt comes before the credential exists.
 unsafe fn capture(pamh: *mut c_void, args: &[String]) {
     if data_present(pamh, RELEASED_DATA).is_some() {
         return;
     }
-    let Ok((uid, _, _)) = eligible(pamh, args) else {
+    let Ok((uid, _)) = local_target(pamh, args) else {
         return;
     };
     let Some(socket) = module_settings(args).ok().and_then(|s| s.token_socket) else {
