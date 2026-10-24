@@ -3,6 +3,7 @@ mod certificate;
 pub mod config;
 pub mod dbus_service;
 pub mod logging;
+mod login_secret;
 pub mod polkit;
 mod protector;
 mod provision;
@@ -12,6 +13,7 @@ mod token_socket;
 mod tpm;
 mod unlock_socket;
 
+pub use login_secret::{read_shadow_entry, LoginSecrets};
 pub use protector::{
     parse_da_state, DaState, LockoutOutcome, LockoutPolicy, Protectors, RecoveryCode,
 };
@@ -56,6 +58,12 @@ pub enum KeydError {
     Refused,
     #[error("TPM operation failed")]
     Tpm,
+    #[error("password must be 1 to 512 bytes without NUL characters")]
+    InvalidPassword,
+    #[error("this account has no local password entry")]
+    NoShadowEntry,
+    #[error("the stored login secret is damaged and was refused")]
+    LoginSecretDamaged,
 }
 
 pub struct Secret(Zeroizing<String>);

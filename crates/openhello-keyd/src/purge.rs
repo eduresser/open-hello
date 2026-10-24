@@ -16,6 +16,7 @@ impl Protectors {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(&uid);
+        self.login_secrets().purge(uid)?;
         self.shred_protectors(uid)?;
         self.remove_token(uid)?;
         let _guard = lock();
