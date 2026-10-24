@@ -1,7 +1,7 @@
 # Spec: Login secret release
 
 > feature: login-secret-release
-> status: implemented
+> status: draft
 
 ## Context
 
@@ -66,9 +66,15 @@ As the owner, I want OpenHello to learn my password whenever I sign in with it, 
 
 #### AC-091 — Enrolling the face teaches OpenHello the password
 
-- **Given** a user enrolling their face for the first time, who types their password at the system's authorization prompt (polkit) that the Open Hello window triggers
+- **Given** a user with no face enrolled (first enrollment, or after deleting their face data), who types their password at the system's authorization prompt (polkit) that the Open Hello window triggers before the enrollment exists
 - **When** that prompt succeeds (polkit's helper authenticates and ends the transaction without calling pam_setcred)
 - **Then** the password is sealed, so the very first face sign-in afterwards releases it and the keyrings open with no extra step
+
+#### AC-092 — A password typed by someone who never finishes enrolling is never stored
+
+- **Given** a user with no face enrolled who types their password at a system sign-in or authorization prompt
+- **When** they do not finish a face enrollment within 15 minutes, or openhello-keyd restarts first
+- **Then** the password is never sealed and no TPM storage is used for them; it lived only in openhello-keyd's memory and is gone
 
 ### US-027 — Only the system can obtain my password
 
