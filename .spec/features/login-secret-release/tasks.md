@@ -31,3 +31,17 @@
 - Files: crates/openhello-pam/src/lib.rs, crates/openhello-pam/src/challenge.rs, crates/openhello-cli/src/pam_enable.rs, crates/openhello-cli/tests/pam_enable.rs, crates/openhello-cli/tests/pam_sudo.rs, crates/openhello-cli/tests/pam_release_stacks.rs, packaging/package/postinstall.sh, crates/openhello-cli/tests/packaging.rs
 - Notes: first prove ASM-029 on the T-079 container stacks; `pam enable`/`disable`/`status` place and remove the capture line (`auth optional pam_openhello.so capture`) after the password check; the capture line stashes the token and seals it in setcred only when the whole authentication succeeded and OpenHello did not release it itself; package upgrades add the capture line wherever OpenHello's first line is present (never re-enable after a `pam disable`). Depends on T-081; runs after T-082 (shared files).
 - Effort: medium
+
+## T-084 — keyd: login secret key lives in a persistent TPM handle [pending]
+
+- Refs: US-027, AC-089
+- Files: crates/openhello-keyd/src/login_secret.rs, crates/openhello-keyd/src/protector.rs, crates/openhello-keyd/tests/login_secret.rs
+- Notes: owner decision 2026-10-24: real crypto-shred like the template key (persistent handle via evictcontrol), purge evicts it; a backup of key files must not release the secret afterwards. Reuse how storage-adapter-templates handles its persistent handle; existing sealed secrets migrate or are dropped (the next typed password reseals).
+- Effort: high
+
+## T-085 — PAM: seal on a successful pam_end so polkit prompts teach the password [pending]
+
+- Refs: US-026, AC-082, AC-091
+- Files: crates/openhello-pam/src/lib.rs, crates/openhello-cli/tests/pam_sudo.rs
+- Notes: the capture stash's pam_set_data cleanup seals when pam_end reports PAM_SUCCESS (not PAM_DATA_REPLACE); polkit-agent-helper-1 only calls authenticate, acct_mgmt and pam_end. Keep the setcred path or replace it, but seal at most once per transaction.
+- Effort: medium
