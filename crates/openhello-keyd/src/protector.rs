@@ -420,8 +420,119 @@ pub(crate) fn seal_object(
     no_da: bool,
 ) -> Result<Vec<u8>, KeydError> {
     let work = WorkDir::new(config)?;
+    create_sealed(config, &work, data, auth, no_da)?;
+    let read = |name: &str| {
+        std::fs::read(work.path(name))
+            .map_err(|e| failure("reading the sealed object", &e.to_string(), &[]))
+    };
+    Ok(encode_blob(&read("seal.pub")?, &read("seal.priv")?))
+}
+
+pub(crate) fn seal_persistent(
+    config: &KeydConfig,
+    data: &[u8],
+    handle: u32,
+) -> Result<(), KeydError> {
+    let work = WorkDir::new(config)?;
+    create_sealed(config, &work, data, None, true)?;
+    load_sealed(config, &work)?;
+    let run = run_tool(
+        config,
+        "tpm2_evictcontrol",
+        &[
+            "-C".into(),
+            "o".into(),
+            "-c".into(),
+            work.path("seal.ctx").into(),
+            format!("0x{handle:X}").into(),
+        ],
+        &[],
+        None,
+    )?;
+    if run.success {
+        Ok(())
+    } else {
+        Err(failure(
+            "storing a sealed object in a persistent handle",
+            &run.last_error(),
+            &[],
+        ))
+    }
+}
+
+pub(crate) fn unseal_persistent(
+    config: &KeydConfig,
+    handle: u32,
+) -> Result<Zeroizing<Vec<u8>>, KeydError> {
+    let run = run_tool(
+        config,
+        "tpm2_unseal",
+        &["-c".into(), format!("0x{handle:X}").into()],
+        &[],
+        None,
+    )?;
+    if !run.success {
+        return Err(classify_unseal(&run, &[]));
+    }
+    Ok(run.stdout)
+}
+
+pub(crate) fn persistent_exists(config: &KeydConfig, handle: u32) -> Result<bool, KeydError> {
+    let run = run_tool(
+        config,
+        "tpm2_getcap",
+        &["handles-persistent".into()],
+        &[],
+        None,
+    )?;
+    if !run.success {
+        return Err(failure(
+            "listing persistent handles",
+            &run.last_error(),
+            &[],
+        ));
+    }
+    let wanted = format!("0x{handle:X}");
+    Ok(String::from_utf8_lossy(&run.stdout).lines().any(|line| {
+        line.trim_start_matches("- ")
+            .trim()
+            .eq_ignore_ascii_case(&wanted)
+    }))
+}
+
+pub(crate) fn evict_persistent(config: &KeydConfig, handle: u32) -> Result<(), KeydError> {
+    let run = run_tool(
+        config,
+        "tpm2_evictcontrol",
+        &[
+            "-C".into(),
+            "o".into(),
+            "-c".into(),
+            format!("0x{handle:X}").into(),
+        ],
+        &[],
+        None,
+    )?;
+    if run.success {
+        Ok(())
+    } else {
+        Err(failure(
+            "evicting a persistent handle",
+            &run.last_error(),
+            &[],
+        ))
+    }
+}
+
+fn create_sealed(
+    config: &KeydConfig,
+    work: &WorkDir,
+    data: &[u8],
+    auth: Option<&str>,
+    no_da: bool,
+) -> Result<(), KeydError> {
     let secrets: Vec<&str> = auth.into_iter().collect();
-    create_primary(config, &work)?;
+    create_primary(config, work)?;
     let attributes = if no_da {
         format!("{SEAL_ATTRIBUTES}|noda")
     } else {
@@ -446,29 +557,14 @@ pub(crate) fn seal_object(
     }
     let run = run_tool(config, "tpm2_create", &args, &secrets, Some(data))?;
     drop(auth_fd);
-    if !run.success {
-        return Err(failure("sealing an object", &run.last_error(), &secrets));
+    if run.success {
+        Ok(())
+    } else {
+        Err(failure("sealing an object", &run.last_error(), &secrets))
     }
-    let read = |name: &str| {
-        std::fs::read(work.path(name))
-            .map_err(|e| failure("reading the sealed object", &e.to_string(), &[]))
-    };
-    Ok(encode_blob(&read("seal.pub")?, &read("seal.priv")?))
 }
 
-pub(crate) fn unseal_object(
-    config: &KeydConfig,
-    blob: &[u8],
-    auth: Option<&str>,
-) -> Result<Zeroizing<Vec<u8>>, KeydError> {
-    let (public, private) = decode_blob(blob)
-        .ok_or_else(|| failure("reading a sealed object", "corrupt sealed object", &[]))?;
-    let work = WorkDir::new(config)?;
-    let secrets: Vec<&str> = auth.into_iter().collect();
-    std::fs::write(work.path("seal.pub"), public)
-        .and_then(|_| std::fs::write(work.path("seal.priv"), private))
-        .map_err(|e| failure("staging a sealed object", &e.to_string(), &[]))?;
-    create_primary(config, &work)?;
+fn load_sealed(config: &KeydConfig, work: &WorkDir) -> Result<(), KeydError> {
     let loaded = run_tool(
         config,
         "tpm2_load",
@@ -485,13 +581,31 @@ pub(crate) fn unseal_object(
         &[],
         None,
     )?;
-    if !loaded.success {
-        return Err(failure(
+    if loaded.success {
+        Ok(())
+    } else {
+        Err(failure(
             "loading a sealed object",
             &loaded.last_error(),
             &[],
-        ));
+        ))
     }
+}
+
+pub(crate) fn unseal_object(
+    config: &KeydConfig,
+    blob: &[u8],
+    auth: Option<&str>,
+) -> Result<Zeroizing<Vec<u8>>, KeydError> {
+    let (public, private) = decode_blob(blob)
+        .ok_or_else(|| failure("reading a sealed object", "corrupt sealed object", &[]))?;
+    let work = WorkDir::new(config)?;
+    let secrets: Vec<&str> = auth.into_iter().collect();
+    std::fs::write(work.path("seal.pub"), public)
+        .and_then(|_| std::fs::write(work.path("seal.priv"), private))
+        .map_err(|e| failure("staging a sealed object", &e.to_string(), &[]))?;
+    create_primary(config, &work)?;
+    load_sealed(config, &work)?;
     let mut args: Vec<OsString> = vec!["-c".into(), work.path("seal.ctx").into()];
     if auth.is_some() {
         args.push("-p".into());
