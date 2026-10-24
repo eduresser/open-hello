@@ -8,16 +8,43 @@ It works with `sudo`, the lock screen and any service that authenticates through
 
 - An infrared (IR) camera exposed as a V4L2 node, the "Windows Hello certified" kind.
 - TPM 2.0.
-- Linux with systemd, D-Bus and PAM. No dependency on a specific distribution or desktop environment.
-- `tpm2-tools`, `tpm2-pkcs11` (PKCS#11 module and `tpm2_ptool`), `polkit` and a C compiler. The installer checks each item and lists what is missing; it does not install packages.
+- Linux (x86_64) with systemd, D-Bus and PAM. No dependency on a specific distribution or desktop environment.
+
+The packages declare their own dependencies (`tpm2-tools`, `tpm2-pkcs11`, `polkit` and others), and the package manager installs them.
 
 ## Installation
+
+Download the package for your distribution from the [latest release](https://github.com/eduresser/open-hello/releases/latest) and install it with the package manager:
+
+| Distribution | Package | Command |
+|---|---|---|
+| Debian, Ubuntu | `openhello_<version>-1_amd64.deb` | `sudo apt install ./openhello_*.deb` |
+| Fedora, RHEL and derivatives | `openhello-<version>-1.x86_64.rpm` | `sudo dnf install ./openhello-*.rpm` |
+| openSUSE | `openhello-<version>-1.x86_64.rpm` | `sudo zypper install --allow-unsigned-rpm ./openhello-*.rpm` |
+| Arch Linux | `openhello-<version>-1-x86_64.pkg.tar.zst` | `sudo pacman -U ./openhello-*.pkg.tar.zst` |
+
+The packages are not signed. To check the download, compare it with the `SHA256SUMS` file of the release: `sha256sum -c --ignore-missing SHA256SUMS`.
+
+Installing the package:
+
+- installs the services, the models and ONNX Runtime, and starts the daemons;
+- enables the PAM module in the common authentication stack on the first install, and keeps your choice on upgrades;
+- lets the administrator who ran the install use their own face or password for `sudo` and `pkexec` where the distribution asks for the root password;
+- loads the SELinux module when SELinux is enabled.
+
+After installing, set `OPENHELLO_DEVICE` in `/etc/openhello/openhello.env` to your IR camera node (the default is `/dev/video2`), restart the services with `sudo systemctl restart openhellod openhello-keyd`, and open **Open Hello** to enroll your face.
+
+To remove, use the package manager (`sudo apt remove openhello`, `sudo dnf remove openhello`, `sudo zypper remove openhello` or `sudo pacman -R openhello`). Removal disables the PAM module and the services. Run `openhello-cli purge` before removing if you also want to erase your face data and the key.
+
+### From source
+
+Use the script on a distribution without a package, or to run a build from the repository. It needs `tpm2-tools`, `tpm2-pkcs11` (PKCS#11 module and `tpm2_ptool`), `polkit` and a C compiler; it checks each item and lists what is missing, but does not install packages.
 
 ```bash
 sudo scripts/install.sh
 ```
 
-The script builds the project, downloads the models and ONNX Runtime with checksum verification, installs the services and enables the PAM module in the common authentication stack.
+The script builds the project, downloads the models and ONNX Runtime with checksum verification, installs the services and enables the PAM module in the common authentication stack. Do not mix it with the package: the package warns when a copy from the script is still in `/usr/local/bin`.
 
 The face recognition window is optional: when the fontconfig and FreeType development files are installed, the script also builds it and installs the `openhello-gui` command and a menu entry; otherwise it skips the window, names the packages to install for your distribution, and everything else works.
 
@@ -128,7 +155,7 @@ flowchart TD
 | `crates/engine-adapter-face` | Detection, embedding and calibration |
 | `crates/storage-adapter-templates` | Encrypted template storage |
 | `packaging/` | systemd services, D-Bus policies and PAM snippets |
-| `.spec/` | Specifications, architecture and requirement traceability |
+| `.spec/` | Specifications and requirement traceability |
 
 ## Development
 
@@ -139,7 +166,7 @@ cargo test --workspace
 
 Some tests use a simulated TPM (`swtpm`) and need the `libtss2-tcti-swtpm` library. If it is not installed on the system, point `OPENHELLO_SWTPM_TCTI_LIB` to the `libtss2-tcti-swtpm.so.0` file.
 
-The detailed architecture is in `.spec/docs/arquitetura-linux.md`.
+Packages (deb, rpm and Arch) are built from one `nfpm` definition with `scripts/package.sh <version>`; publishing a GitHub release runs the same build and installs each package on minimal images of the supported distributions.
 
 ## License
 
