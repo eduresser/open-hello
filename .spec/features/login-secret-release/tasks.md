@@ -2,8 +2,7 @@
 
 > feature: login-secret-release
 
-## T-079 — Spike: released token on real distribution PAM stacks [pending]
-
+## T-079 — Spike: released token on real distribution PAM stacks [done]
 - Refs: US-028, AC-090
 - Files: crates/openhello-cli/tests/pam_release_stacks.rs, tests/fixtures/pam-stacks/README.md
 - Notes: copy the unmodified login-manager and common auth files of openSUSE Tumbleweed, Fedora, Debian/Ubuntu and Arch into fixtures; run them under pam_wrapper with OpenHello enabled as the package does, a fake keyd that releases a known password, a password-check stub with each distro's options, and a keyring stub. Settles ASM-025 and ASM-026; any stack that prompts goes to the owner (Q-006) before T-082.
