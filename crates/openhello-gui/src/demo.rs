@@ -156,6 +156,7 @@ impl EnrollClient for DemoClient {
     }
 
     fn enroll_commit(&mut self, _handle: &str) -> ClientResult<()> {
+        self.sleep(PAUSE);
         self.face.store(true, Ordering::Relaxed);
         Ok(())
     }
@@ -180,7 +181,16 @@ impl ManageClient for DemoClient {
         if self.mode.fail {
             return Err(ClientError::new(ClientErrorKind::AuthDenied, "demo"));
         }
-        self.sudo = SudoAccess::OwnPassword;
+        self.sudo = SudoAccess::Switched;
+        Ok(SudoAccess::OwnPassword)
+    }
+
+    fn restore_root_password_for_sudo(&mut self, _uid: u32) -> ClientResult<SudoAccess> {
+        self.sleep(PAUSE);
+        if self.mode.fail {
+            return Err(ClientError::new(ClientErrorKind::AuthDenied, "demo"));
+        }
+        self.sudo = SudoAccess::RootPassword;
         Ok(self.sudo)
     }
 

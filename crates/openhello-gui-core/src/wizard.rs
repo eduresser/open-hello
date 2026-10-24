@@ -238,6 +238,10 @@ impl<C: EnrollClient> EnrollmentFlow<C> {
     }
 
     pub fn tick(&mut self) -> Option<CaptureUpdate> {
+        self.tick_with(|_| {})
+    }
+
+    pub fn tick_with(&mut self, before_commit: impl FnOnce(&CaptureUpdate)) -> Option<CaptureUpdate> {
         if self.step() != Step::Capture {
             return None;
         }
@@ -250,12 +254,17 @@ impl<C: EnrollClient> EnrollmentFlow<C> {
             }
         };
         let frame = self.client.enroll_frame(&handle).ok();
-        match progress.state.as_str() {
-            "complete" => self.finish_capture(&handle),
+        let state = progress.state.clone();
+        let update = self.update(progress, frame);
+        match state.as_str() {
+            "complete" => {
+                before_commit(&update);
+                self.finish_capture(&handle);
+            }
             "failed" => self.abort(FailureCause::Timeout),
             _ => {}
         }
-        Some(self.update(progress, frame))
+        Some(update)
     }
 
     pub fn retry(&mut self) {

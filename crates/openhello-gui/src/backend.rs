@@ -2,7 +2,7 @@ use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use openhello_gui_core::{ClientResult, EnrollClient, EnrollmentFlow, FailureCause, Language, ManageClient, Manager, RemoveOutcome, Step, TestOutcome};
+use openhello_gui_core::{ClientResult, EnrollClient, EnrollmentFlow, FailureCause, Language, ManageClient, Manager, RemoveOutcome, Step, SudoAccess, TestOutcome};
 
 use crate::capture::CaptureView;
 use crate::trace;
@@ -17,6 +17,7 @@ pub enum Command {
     Test,
     Remove,
     UseOwnSudo,
+    RestoreRootSudo,
     Shutdown,
 }
 
@@ -29,6 +30,7 @@ impl Command {
             Command::Test => "test",
             Command::Remove => "remove",
             Command::UseOwnSudo => "use own sudo",
+            Command::RestoreRootSudo => "restore root sudo",
             Command::Shutdown => "shutdown",
         }
     }
@@ -39,12 +41,13 @@ pub enum Event {
     Identity,
     CaptureStarted,
     Capture(CaptureView),
+    Saving,
     Done,
     Failed(FailureCause),
     Manage { blocked: Option<FailureCause> },
     TestResult(TestOutcome),
-    SudoNotice(bool),
-    SudoChanged(Result<(), FailureCause>),
+    SudoNotice(SudoAccess),
+    SudoChanged(Result<SudoAccess, FailureCause>),
 }
 
 impl Event {
@@ -55,6 +58,7 @@ impl Event {
             Event::Identity => "identity",
             Event::CaptureStarted => "capture",
             Event::Capture(_) => "capture-frame",
+            Event::Saving => "saving",
             Event::Done => "done",
             Event::Failed(_) => "failed",
             Event::Manage { blocked: None } => "manage",
@@ -62,9 +66,11 @@ impl Event {
             Event::TestResult(TestOutcome::Recognized) => "recognized",
             Event::TestResult(TestOutcome::NotRecognized) => "not-recognized",
             Event::TestResult(TestOutcome::Failed(_)) => "test-failed",
-            Event::SudoNotice(true) => "sudo-asks-root",
-            Event::SudoNotice(false) => "sudo-ok",
-            Event::SudoChanged(Ok(())) => "sudo-changed",
+            Event::SudoNotice(SudoAccess::RootPassword) => "sudo-asks-root",
+            Event::SudoNotice(SudoAccess::Switched) => "sudo-switched",
+            Event::SudoNotice(_) => "sudo-ok",
+            Event::SudoChanged(Ok(SudoAccess::RootPassword)) => "sudo-restored",
+            Event::SudoChanged(Ok(_)) => "sudo-changed",
             Event::SudoChanged(Err(_)) => "sudo-change-failed",
         }
     }
@@ -107,7 +113,7 @@ where
 fn run<C: EnrollClient + ManageClient>(factory: &impl Fn() -> ClientResult<C>, uid: u32, language: Language, emit: &impl Fn(Event) -> bool, inbox: &Receiver<Command>) {
     loop {
         match connect(factory, uid, language) {
-            Ok((flow, manager)) => return Worker { flow, manager, emit, inbox, stopped: false, begun: false, face: false, sudo_asks_root: false }.serve(),
+            Ok((flow, manager)) => return Worker { flow, manager, emit, inbox, stopped: false, begun: false, face: false, sudo: SudoAccess::Unavailable }.serve(),
             Err(error) => {
                 if !emit(Event::Failed(error.kind.into())) || !wait_for_retry(inbox) {
                     return;
@@ -139,7 +145,7 @@ struct Worker<'a, C: EnrollClient + ManageClient, E: Fn(Event) -> bool> {
     stopped: bool,
     begun: bool,
     face: bool,
-    sudo_asks_root: bool,
+    sudo: SudoAccess,
 }
 
 impl<C: EnrollClient + ManageClient, E: Fn(Event) -> bool> Worker<'_, C, E> {
@@ -169,6 +175,7 @@ impl<C: EnrollClient + ManageClient, E: Fn(Event) -> bool> Worker<'_, C, E> {
             Command::Test => self.test(),
             Command::Remove => self.remove(),
             Command::UseOwnSudo => self.use_own_sudo(),
+            Command::RestoreRootSudo => self.restore_root_sudo(),
             Command::Shutdown => self.stop(),
         }
     }
@@ -240,15 +247,21 @@ impl<C: EnrollClient + ManageClient, E: Fn(Event) -> bool> Worker<'_, C, E> {
     }
 
     fn send_sudo_notice(&mut self) {
-        let asks_root = self.manager.sudo_asks_root();
-        if asks_root != self.sudo_asks_root {
-            self.sudo_asks_root = asks_root;
-            self.send(Event::SudoNotice(asks_root));
+        let access = self.manager.sudo_access();
+        if access != self.sudo {
+            self.sudo = access;
+            self.send(Event::SudoNotice(access));
         }
     }
 
     fn use_own_sudo(&mut self) {
-        let outcome = self.manager.use_own_password_for_sudo().map(|_| ()).map_err(|error| error.kind.into());
+        let outcome = self.manager.use_own_password_for_sudo().map_err(|error| error.kind.into());
+        self.send(Event::SudoChanged(outcome));
+        self.send_sudo_notice();
+    }
+
+    fn restore_root_sudo(&mut self) {
+        let outcome = self.manager.restore_root_password_for_sudo().map_err(|error| error.kind.into());
         self.send(Event::SudoChanged(outcome));
         self.send_sudo_notice();
     }
@@ -285,8 +298,17 @@ impl<C: EnrollClient + ManageClient, E: Fn(Event) -> bool> Worker<'_, C, E> {
             if self.interrupted() {
                 return false;
             }
-            let Some(update) = self.flow.tick() else { break };
-            self.send(Event::Capture(CaptureView::new(update, &strings)));
+            let emit = self.emit;
+            let Some(update) = self.flow.tick_with(|last| {
+                emit(Event::Capture(CaptureView::new(last.clone(), &strings)));
+                trace::log("worker emits saving");
+                emit(Event::Saving);
+            }) else {
+                break;
+            };
+            if self.flow.step() == Step::Capture {
+                self.send(Event::Capture(CaptureView::new(update, &strings)));
+            }
         }
         self.flow.step() != Step::Capture
     }
@@ -463,6 +485,7 @@ mod tests {
     }
 
     // @spec:AC-058
+    // @spec:AC-094
     #[test]
     fn the_worker_walks_welcome_identity_capture_and_done() {
         let mut harness = harness(DemoMode::default());
@@ -470,7 +493,7 @@ mod tests {
         harness.send(Command::Start);
         seen.extend(harness.until(|event| matches!(event, Event::Done)));
         harness.backend.shutdown();
-        assert_eq!(names(&seen), ["welcome", "identity", "capture", "capture-frame", "done"]);
+        assert_eq!(names(&seen), ["welcome", "identity", "capture", "capture-frame", "saving", "done"]);
     }
 
     // @spec:AC-062
@@ -579,7 +602,7 @@ mod tests {
         harness.send(Command::Start);
         let seen = harness.until(|event| matches!(event, Event::Done));
         harness.backend.shutdown();
-        assert_eq!(names(&seen), ["identity", "capture", "capture-frame", "done"]);
+        assert_eq!(names(&seen), ["identity", "capture", "capture-frame", "saving", "done"]);
     }
 
     // @spec:AC-071
@@ -641,7 +664,7 @@ mod tests {
         harness.send(Command::Start);
         let again = harness.until(|event| matches!(event, Event::Done));
         harness.backend.shutdown();
-        assert_eq!(names(&again), ["identity", "capture", "capture-frame", "done"]);
+        assert_eq!(names(&again), ["identity", "capture", "capture-frame", "saving", "done"]);
     }
 
     #[test]
@@ -651,7 +674,23 @@ mod tests {
         harness.send(Command::UseOwnSudo);
         let after = harness.until(|event| matches!(event, Event::SudoNotice(_)));
         harness.backend.shutdown();
-        assert_eq!(names(&after), ["sudo-changed", "sudo-ok"]);
+        assert_eq!(names(&after), ["sudo-changed", "sudo-switched"]);
+    }
+
+    // @spec:AC-095
+    #[test]
+    fn the_home_switch_turns_admin_prompts_off_again_and_back_on() {
+        let mut harness = harness(DemoMode { enrolled: true, sudo_asks_root: true, ..DemoMode::default() });
+        harness.until(|event| matches!(event, Event::SudoNotice(_)));
+        harness.send(Command::UseOwnSudo);
+        harness.until(|event| matches!(event, Event::SudoNotice(_)));
+        harness.send(Command::RestoreRootSudo);
+        let off = harness.until(|event| matches!(event, Event::SudoNotice(_)));
+        harness.send(Command::UseOwnSudo);
+        let on = harness.until(|event| matches!(event, Event::SudoNotice(_)));
+        harness.backend.shutdown();
+        assert_eq!(names(&off), ["sudo-restored", "sudo-asks-root"]);
+        assert_eq!(names(&on), ["sudo-changed", "sudo-switched"]);
     }
 
     #[test]
@@ -718,6 +757,10 @@ mod tests {
         }
 
         fn use_own_password_for_sudo(&mut self, _uid: u32) -> ClientResult<SudoAccess> {
+            Err(ClientError::new(ClientErrorKind::AuthDenied, "demo"))
+        }
+
+        fn restore_root_password_for_sudo(&mut self, _uid: u32) -> ClientResult<SudoAccess> {
             Err(ClientError::new(ClientErrorKind::AuthDenied, "demo"))
         }
     }

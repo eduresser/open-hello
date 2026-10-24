@@ -7,8 +7,9 @@ import { DonePage } from "done.slint";
 import { ErrorPage } from "error.slint";
 import { ManagePage } from "manage.slint";
 import { ConfirmRemoval } from "confirm.slint";
+import { Tone } from "components.slint";
 
-export { T }
+export { T, Tone }
 
 export enum Page { welcome, identity, capture, done, error, manage }
 
@@ -21,14 +22,18 @@ export component MainWindow inherits Window {
     in property <string> guidance;
     in property <float> progress;
     in property <bool> accepted;
+    in property <bool> saving;
     in property <string> error-title;
     in property <string> error-body;
     in property <bool> busy;
     in property <bool> testing;
     in property <string> test-result;
+    in property <Tone> test-tone;
     in-out property <bool> confirming;
     in property <bool> sudo-asks-root;
+    in property <bool> sudo-switched;
     in property <string> sudo-message;
+    in property <Tone> sudo-tone;
 
     callback get-started();
     callback retry();
@@ -37,6 +42,7 @@ export component MainWindow inherits Window {
     callback delete();
     callback set-up-again();
     callback use-own-sudo();
+    callback restore-root-sudo();
 
     title: T.window-title;
     icon: @image-url("../../../packaging/openhello.svg");
@@ -62,6 +68,7 @@ export component MainWindow inherits Window {
         guidance: root.guidance;
         progress: root.progress;
         accepted: root.accepted;
+        saving: root.saving;
         busy: root.busy;
         cancel => { root.cancel(); }
     }
@@ -71,6 +78,9 @@ export component MainWindow inherits Window {
         testing: root.testing;
         sudo-asks-root: root.sudo-asks-root;
         sudo-message: root.sudo-message;
+        sudo-tone: root.sudo-tone;
+        sudo-switched: root.sudo-switched;
+        restore-root-sudo => { root.restore-root-sudo(); }
         use-own-sudo => { root.use-own-sudo(); }
         test => { root.test(); }
         set-up-again => { root.set-up-again(); }
@@ -88,12 +98,16 @@ export component MainWindow inherits Window {
         busy: root.busy;
         testing: root.testing;
         result: root.test-result;
+        tone: root.test-tone;
         blocked: root.blocked;
         blocked-title: root.blocked-title;
         blocked-body: root.blocked-body;
         confirming <=> root.confirming;
         sudo-asks-root: root.sudo-asks-root;
         sudo-message: root.sudo-message;
+        sudo-tone: root.sudo-tone;
+        sudo-switched: root.sudo-switched;
+        restore-root-sudo => { root.restore-root-sudo(); }
         use-own-sudo => { root.use-own-sudo(); }
         test => { root.test(); }
         set-up-again => { root.set-up-again(); }

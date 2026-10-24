@@ -100,6 +100,11 @@ impl ManageClient for DaemonClient {
         let policy: String = self.biometrics.call("UseOwnPasswordForSudo", &(uid,)).map_err(classify)?;
         Ok(SudoAccess::parse(&policy))
     }
+
+    fn restore_root_password_for_sudo(&mut self, uid: u32) -> ClientResult<SudoAccess> {
+        let policy: String = self.biometrics.call("RestoreRootPasswordForSudo", &(uid,)).map_err(classify)?;
+        Ok(SudoAccess::parse(&policy))
+    }
 }
 
 #[cfg(test)]

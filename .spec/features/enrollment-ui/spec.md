@@ -115,6 +115,18 @@ As a laptop owner, I want to test and delete my face from the same app, so that 
 - **When** the user clicks it once
 - **Then** the click is handled (a synthetic pointer move refreshes the target after every screen change, only when the screen, busy or blocked changed and the pointer is inside the window, and `--trace-input` prints `synthetic pointer move at X,Y`)
 
+#### AC-094 — Saving after the last sample shows a saving state
+
+- **Given** the capture reached its last sample
+- **When** OpenHello commits the face and creates the login key, which can take several seconds
+- **Then** the capture screen shows "Saving your face…" with a spinner, a dimmed preview, a full progress bar and Cancel disabled before the commit starts, and the worker emits `saving` before `done`; test results and the admin prompt notice show a green check or a red alert next to their message, below the screen text
+
+#### AC-095 — Admin prompts can be switched on and off after setup and from the main screen
+
+- **Given** a user with a face whose sudo asked for the root password, either still (`root-password`) or switched by OpenHello (`switched`: OpenHello's sudoers drop-in is present)
+- **When** they finish setting up or open the main screen
+- **Then** it shows a "Use my face for admin prompts" switch with one line saying what sudo and pkexec ask for; turning it on calls `UseOwnPasswordForSudo` (polkit `sudo-own-password`), turning it off calls `RestoreRootPasswordForSudo` (polkit `sudo-root-password`, removes both OpenHello rules); a refused or failed change keeps the switch where it was, shows the reason and leaves every button usable; the switch is hidden when sudo already asks for the user's own password natively or the state is unknown; both screens show the same switch and no other admin prompt notice or button, a change that succeeds shows no message (the switch itself moves) and a failure shows the reason in a red status line
+
 #### AC-066 — Deleting the face asks for confirmation and reauthentication
 
 - **Given** a user with a face set up

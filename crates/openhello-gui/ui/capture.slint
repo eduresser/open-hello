@@ -1,10 +1,11 @@
-import { Palette } from "std-widgets.slint";
-import { ActionButton, Brand, Footer, Heading, Spacer } from "components.slint";
+import { Palette, Spinner } from "std-widgets.slint";
+import { ActionButton, Body, Brand, Footer, Heading, Spacer } from "components.slint";
 import { T } from "texts.slint";
 
 component Preview inherits Rectangle {
     in property <image> frame;
     in property <bool> accepted;
+    in property <bool> saving;
 
     property <length> vw: 560px;
     property <length> vh: 315px;
@@ -28,6 +29,12 @@ component Preview inherits Rectangle {
         transform-scale-x: -1;
     }
 
+    Rectangle {
+        background: #000000;
+        opacity: root.saving ? 0.55 : 0;
+        animate opacity { duration: 320ms; easing: ease-out; }
+    }
+
     Path {
         width: parent.width;
         height: parent.height;
@@ -43,7 +50,7 @@ component Preview inherits Rectangle {
         height: parent.height;
         viewbox-width: root.vw / 1px;
         viewbox-height: root.vh / 1px;
-        stroke: root.accepted ? Brand.accepted : #ffffffd0;
+        stroke: root.accepted || root.saving ? Brand.accepted : #ffffffd0;
         stroke-width: 3px;
         animate stroke { duration: 250ms; }
         commands: root.oval;
@@ -74,6 +81,7 @@ export component CapturePage inherits VerticalLayout {
     in property <string> guidance;
     in property <float> progress;
     in property <bool> accepted;
+    in property <bool> saving;
     in property <bool> busy;
     callback cancel();
 
@@ -83,7 +91,7 @@ export component CapturePage inherits VerticalLayout {
         padding: 24px;
         spacing: 16px;
 
-        Heading { text: T.capture-title; }
+        Heading { text: root.saving ? T.saving : T.capture-title; }
 
         HorizontalLayout {
             alignment: center;
@@ -92,12 +100,13 @@ export component CapturePage inherits VerticalLayout {
                 Preview {
                     frame: root.frame;
                     accepted: root.accepted;
+                    saving: root.saving;
                 }
-                ProgressBar { progress: root.progress; }
+                ProgressBar { progress: root.saving ? 1 : root.progress; }
             }
         }
 
-        Text {
+        if !root.saving: Text {
             text: root.guidance;
             font-size: 17px;
             font-weight: 600;
@@ -105,6 +114,24 @@ export component CapturePage inherits VerticalLayout {
             horizontal-alignment: center;
             wrap: word-wrap;
             min-height: 44px;
+        }
+
+        if root.saving: HorizontalLayout {
+            alignment: center;
+            spacing: 10px;
+            min-height: 44px;
+            VerticalLayout {
+                alignment: center;
+                Spinner {
+                    indeterminate: true;
+                    width: 20px;
+                    height: 20px;
+                }
+            }
+            Body {
+                text: T.saving-body;
+                vertical-alignment: center;
+            }
         }
     }
     Footer {
