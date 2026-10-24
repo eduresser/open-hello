@@ -43,3 +43,10 @@
 - Files: crates/openhello-pam/src/lib.rs, crates/openhello-cli/tests/pam_sudo.rs
 - Notes: the capture stash's pam_set_data cleanup seals when pam_end reports PAM_SUCCESS (not PAM_DATA_REPLACE); polkit-agent-helper-1 only calls authenticate, acct_mgmt and pam_end. Keep the setcred path or replace it, but seal at most once per transaction.
 - Effort: medium
+
+## T-086 — Learn the password at enrollment for users without a face yet [pending]
+
+- Refs: US-026, AC-091, AC-092
+- Files: crates/openhello-pam/src/lib.rs, crates/openhello-keyd/src/token_socket.rs, crates/openhello-keyd/src/login_secret.rs, crates/openhello-keyd/src/dbus_service.rs, crates/openhello-keyd/src/provision.rs, crates/openhello-keyd/tests/token_release.rs, crates/openhello-cli/tests/pam_sudo.rs
+- Notes: owner bug report 2026-10-24: after purge + re-enroll the polkit password was ignored because `capture` used the face-login eligibility (requires `<uid>.pub`). Capture must only require a local session, an allowed service and a non-root user. keyd seals at once when the user is provisioned; otherwise it keeps the password in memory (Zeroizing, 15 min TTL, one per uid, newest wins) and seals it when Provision for that uid succeeds. AC-091's test must run in the real order: no credential, polkit-like prompt, then provision, then face sign-in.
+- Effort: high
