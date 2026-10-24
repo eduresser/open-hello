@@ -364,3 +364,17 @@ fn set_up_again_from_the_final_screen_restarts_the_enrollment_from_the_start() {
     assert_eq!(flow.step(), Step::Done);
     assert_eq!((calls.borrow().begins, calls.borrow().commits), (2, 2));
 }
+
+// @spec:AC-094
+#[test]
+fn the_last_update_is_handed_over_before_the_commit_and_only_once() {
+    let (mut flow, calls) = open(fresh(), vec![step("accepted", "in-progress", 5), step("accepted", "complete", 6)]);
+    reach_capture(&mut flow);
+    let mut seen = Vec::new();
+    flow.tick_with(|update| seen.push((update.filled, calls.borrow().commits)));
+    assert!(seen.is_empty());
+    flow.tick_with(|update| seen.push((update.filled, calls.borrow().commits)));
+    assert_eq!(seen, [(6, 0)]);
+    assert_eq!(calls.borrow().commits, 1);
+    assert_eq!(flow.step(), Step::Done);
+}

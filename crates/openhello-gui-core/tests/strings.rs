@@ -116,8 +116,8 @@ fn a_test_that_could_not_run_names_the_cause_in_plain_words() {
 #[test]
 fn recognized_and_not_recognized_have_short_sentences_and_the_final_screen_invites_a_test() {
     let strings = Strings::new(Language::English);
-    assert_eq!(strings.test_message(&TestOutcome::Recognized), "It recognized you.");
-    assert_eq!(strings.test_message(&TestOutcome::NotRecognized), "Your face was not recognized. Test again or set it up again.");
+    assert_eq!(strings.test_message(&TestOutcome::Recognized), "Recognized. Face sign-in is working.");
+    assert_eq!(strings.test_message(&TestOutcome::NotRecognized), "Not recognized. Test again, or set up again if it keeps failing.");
     assert_eq!(strings.get(Text::DoneBody), "Test it now to make sure it recognizes you.");
     assert_eq!(strings.get(Text::SetUpAgain), "Set up again");
     assert_eq!(strings.get(Text::SetUp), "Get started");

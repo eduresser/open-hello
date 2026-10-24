@@ -164,6 +164,7 @@ export component ActionButton inherits Rectangle {
 
     scope := FocusScope {
         enabled: root.enabled;
+        focus-on-click: false;
         focus-gained(reason) => { root.keyboard-focus = reason != FocusReason.pointer-click; }
         key-pressed(event) => {
             if (event.text == Key.Return || event.text == " ") {
@@ -211,6 +212,7 @@ export component LinkButton inherits Rectangle {
     }
 
     scope := FocusScope {
+        focus-on-click: false;
         focus-gained(reason) => { root.keyboard-focus = reason != FocusReason.pointer-click; }
         key-pressed(event) => {
             if (event.text == Key.Return || event.text == " ") {
@@ -222,82 +224,205 @@ export component LinkButton inherits Rectangle {
     }
 }
 
+export enum Tone { neutral, positive, negative }
+
+export component StatusGlyph inherits Rectangle {
+    in property <Tone> tone;
+
+    width: 20px;
+    height: 20px;
+    border-radius: self.width / 2;
+    background: root.tone == Tone.positive ? Brand.accepted : Brand.danger;
+
+    Path {
+        width: parent.width;
+        height: parent.height;
+        viewbox-width: 20;
+        viewbox-height: 20;
+        stroke: #ffffff;
+        stroke-width: 2.2px;
+        stroke-line-cap: round;
+        commands: root.tone == Tone.positive ? "M 6 10.4 L 8.8 13.2 L 14.2 7.2" : "M 10 5.6 V 11 M 10 14.3 V 14.4";
+    }
+}
+
 export component TestStatus inherits Rectangle {
     in property <bool> busy;
     in property <bool> testing;
     in property <string> result;
+    in property <Tone> tone;
 
     property <bool> shown: root.testing || root.result != "";
+    property <color> hue: root.testing ? Palette.foreground : root.tone == Tone.positive ? Brand.accepted : root.tone == Tone.negative ? Brand.danger : Palette.foreground;
 
-    min-height: 40px;
-    border-radius: 6px;
-    background: root.shown ? Palette.foreground.with-alpha(0.06) : transparent;
+    min-height: 44px;
+    border-radius: 8px;
+    background: root.shown ? root.hue.with-alpha(root.hue == Palette.foreground ? 0.06 : 0.12) : transparent;
     border-width: root.shown ? 1px : 0px;
-    border-color: Palette.foreground.with-alpha(0.08);
+    border-color: root.hue.with-alpha(root.hue == Palette.foreground ? 0.08 : 0.32);
+    animate background, border-color { duration: 160ms; }
+    accessible-role: text;
+    accessible-label: label.text;
 
     HorizontalLayout {
         alignment: center;
         padding-left: 16px;
         padding-right: 16px;
-        padding-top: 8px;
-        padding-bottom: 8px;
+        padding-top: 10px;
+        padding-bottom: 10px;
         spacing: 10px;
-        if root.busy: Spinner {
-            indeterminate: true;
-            width: 20px;
-            height: 20px;
+        if root.busy && root.testing: VerticalLayout {
+            alignment: center;
+            Spinner {
+                indeterminate: true;
+                width: 18px;
+                height: 18px;
+            }
         }
-        Text {
+        if !root.testing && root.result != "" && root.tone != Tone.neutral: VerticalLayout {
+            alignment: center;
+            StatusGlyph {
+                tone: root.tone;
+            }
+        }
+        label := Text {
             text: root.testing ? T.testing : root.result;
             font-size: 15px;
             font-weight: 600;
             color: Palette.foreground;
-            horizontal-alignment: center;
             vertical-alignment: center;
             wrap: word-wrap;
         }
     }
 }
 
-export component SudoNotice inherits Rectangle {
-    in property <bool> asks-root;
-    in property <string> message;
+component Toggle inherits Rectangle {
+    in property <string> text;
+    in property <bool> on;
     in property <bool> enabled: true;
-    callback use-own();
+    callback toggled();
 
-    property <bool> shown: root.asks-root || root.message != "";
+    property <bool> keyboard-focus;
+
+    preferred-width: layout.preferred-width;
+    horizontal-stretch: 0;
+    height: 40px;
+    border-radius: 8px;
+    border-width: root.keyboard-focus && scope.has-focus ? 2px : 0px;
+    border-color: Palette.foreground;
+    background: root.enabled && touch.has-hover ? Palette.foreground.with-alpha(0.05) : transparent;
+    animate background { duration: 120ms; }
+    accessible-role: switch;
+    accessible-checked: root.on;
+    accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    accessible-action-default => {
+        if (root.enabled) {
+            root.toggled();
+        }
+    }
+
+    layout := HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 14px;
+        Text {
+            text: root.text;
+            font-size: 15px;
+            font-weight: 600;
+            color: root.enabled ? Palette.foreground : Palette.foreground.with-alpha(0.38);
+            vertical-alignment: center;
+        }
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 40px;
+                height: 22px;
+                border-radius: self.height / 2;
+                background: !root.enabled ? Palette.foreground.with-alpha(0.1) : root.on ? Brand.accent : Palette.foreground.with-alpha(0.2);
+                animate background { duration: 160ms; }
+
+                Rectangle {
+                    x: root.on ? parent.width - self.width - 2px : 2px;
+                    y: 2px;
+                    width: 18px;
+                    height: 18px;
+                    border-radius: self.height / 2;
+                    background: root.enabled ? #ffffff : #ffffff80;
+                    animate x { duration: 180ms; easing: ease-out; }
+                }
+            }
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.toggled(); }
+    }
+
+    scope := FocusScope {
+        enabled: root.enabled;
+        focus-on-click: false;
+        focus-gained(reason) => { root.keyboard-focus = reason != FocusReason.pointer-click; }
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") {
+                root.toggled();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}
+
+export component AdminSwitch inherits VerticalLayout {
+    in property <bool> shown;
+    in property <bool> on;
+    in property <bool> enabled: true;
+    in property <string> message;
+    in property <Tone> tone;
+    callback turn-on();
+    callback turn-off();
 
     visible: root.shown;
-    height: root.shown ? layout.preferred-height : 0px;
-    border-radius: 6px;
-    background: Palette.foreground.with-alpha(0.04);
-    border-width: 1px;
-    border-color: Palette.foreground.with-alpha(0.08);
+    spacing: 4px;
 
-    layout := VerticalLayout {
-        padding: 14px;
-        spacing: 10px;
-        if root.message != "": Text {
-            text: root.message;
-            font-size: 14px;
-            font-weight: 600;
-            color: Palette.foreground;
-            wrap: word-wrap;
+    if root.shown: HorizontalLayout {
+        alignment: center;
+        padding-bottom: 12px;
+        Rectangle {
+            width: 48px;
+            height: 1px;
+            background: Palette.foreground.with-alpha(0.14);
         }
-        if root.asks-root: Text {
-            text: T.sudo-notice;
-            font-size: 14px;
-            color: Palette.foreground.with-alpha(0.8);
-            wrap: word-wrap;
-        }
-        if root.asks-root: HorizontalLayout {
-            alignment: start;
-            ActionButton {
-                text: T.sudo-use-own;
-                secondary: true;
-                enabled: root.enabled;
-                clicked => { root.use-own(); }
+    }
+    if root.shown: HorizontalLayout {
+        alignment: center;
+        Toggle {
+            text: T.sudo-use-own;
+            on: root.on;
+            enabled: root.enabled;
+            toggled => {
+                if (root.on) {
+                    root.turn-off();
+                } else {
+                    root.turn-on();
+                }
             }
+        }
+    }
+    if root.shown: Text {
+        text: root.on ? T.sudo-toggle-on : T.sudo-toggle-off;
+        font-size: 13px;
+        color: Palette.foreground.with-alpha(0.66);
+        horizontal-alignment: center;
+        wrap: word-wrap;
+    }
+    if root.shown && root.message != "" && root.tone == Tone.negative: VerticalLayout {
+        padding-top: 8px;
+        TestStatus {
+            result: root.message;
+            tone: root.tone;
         }
     }
 }

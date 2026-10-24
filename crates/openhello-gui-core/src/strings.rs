@@ -24,6 +24,8 @@ pub enum Text {
     IdentityTitle,
     IdentityBody,
     CaptureTitle,
+    Saving,
+    SavingBody,
     DoneTitle,
     DoneBody,
     GuidanceAccepted,
@@ -74,14 +76,14 @@ pub enum Text {
     ReasonTpm,
     ReasonAuthDenied,
     ReasonOther,
-    SudoNotice,
     SudoUseOwn,
-    SudoChanged,
     SudoFailedPrefix,
+    SudoToggleOff,
+    SudoToggleOn,
 }
 
 impl Text {
-    pub const ALL: [Text; 64] = [
+    pub const ALL: [Text; 66] = [
         Text::WelcomeTitle,
         Text::WelcomeBody,
         Text::BlockedTitle,
@@ -92,6 +94,8 @@ impl Text {
         Text::IdentityTitle,
         Text::IdentityBody,
         Text::CaptureTitle,
+        Text::Saving,
+        Text::SavingBody,
         Text::DoneTitle,
         Text::DoneBody,
         Text::GuidanceAccepted,
@@ -142,10 +146,10 @@ impl Text {
         Text::ReasonTpm,
         Text::ReasonAuthDenied,
         Text::ReasonOther,
-        Text::SudoNotice,
         Text::SudoUseOwn,
-        Text::SudoChanged,
         Text::SudoFailedPrefix,
+        Text::SudoToggleOff,
+        Text::SudoToggleOn,
     ];
 
     fn english(self) -> &'static str {
@@ -160,6 +164,8 @@ impl Text {
             Text::IdentityTitle => "Confirm it’s you",
             Text::IdentityBody => "Enter your password when the system asks for it.",
             Text::CaptureTitle => "Look at the camera",
+            Text::Saving => "Saving your face…",
+            Text::SavingBody => "This can take a few seconds.",
             Text::DoneTitle => "All set",
             Text::DoneBody => "Test it now to make sure it recognizes you.",
             Text::GuidanceAccepted => "Hold still and look at the camera",
@@ -196,8 +202,8 @@ impl Text {
             Text::ManageBody => "Face recognition is set up for your account.",
             Text::TestFace => "Test",
             Text::Testing => "Look at the camera…",
-            Text::Recognized => "It recognized you.",
-            Text::NotRecognized => "Your face was not recognized. Test again or set it up again.",
+            Text::Recognized => "Recognized. Face sign-in is working.",
+            Text::NotRecognized => "Not recognized. Test again, or set up again if it keeps failing.",
             Text::DeleteFace => "Delete",
             Text::DeleteFaceData => "Delete face data",
             Text::DeleteConfirmTitle => "Delete face recognition?",
@@ -210,10 +216,10 @@ impl Text {
             Text::ReasonTpm => "the security chip is unavailable",
             Text::ReasonAuthDenied => "the system did not authorize the request",
             Text::ReasonOther => "something went wrong",
-            Text::SudoNotice => "Your face works for sign-in and the lock screen. Administrator prompts on this computer, such as sudo and pkexec, ask for the root password, so they cannot use your face.",
             Text::SudoUseOwn => "Use my face for admin prompts",
-            Text::SudoChanged => "Administrator prompts now accept your face or your own password.",
-            Text::SudoFailedPrefix => "Administrator prompts were not changed: ",
+            Text::SudoFailedPrefix => "Not changed: ",
+            Text::SudoToggleOff => "sudo and pkexec ask for the root password.",
+            Text::SudoToggleOn => "sudo and pkexec accept your face or your own password.",
         }
     }
 }
