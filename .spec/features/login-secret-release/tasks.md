@@ -8,8 +8,7 @@
 - Notes: copy the unmodified login-manager and common auth files of openSUSE Tumbleweed, Fedora, Debian/Ubuntu and Arch into fixtures; run them under pam_wrapper with OpenHello enabled as the package does, a fake keyd that releases a known password, a password-check stub with each distro's options, and a keyring stub. Settles ASM-025 and ASM-026; any stack that prompts goes to the owner (Q-006) before T-082.
 - Effort: high
 
-## T-080 — keyd: TPM-protected login secret store [pending]
-
+## T-080 — keyd: TPM-protected login secret store [done]
 - Refs: US-026, AC-082, AC-083, AC-088, AC-089
 - Files: crates/openhello-keyd/src/login_secret.rs, crates/openhello-keyd/src/lib.rs, crates/openhello-keyd/src/purge.rs, crates/openhello-keyd/tests/login_secret.rs
 - Notes: envelope encryption under a TPM-sealed key (ASM-027); atomic replace; purge destroys the key first; store a fingerprint (keyed hash) of the user's /etc/shadow entry with the secret and refuse/discard on mismatch (AC-080).
