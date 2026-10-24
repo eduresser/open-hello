@@ -335,11 +335,23 @@ unsafe fn hand_over(pamh: *mut c_void, secret: &[u8]) -> Exit {
 struct Captured {
     uid: u32,
     password: Zeroizing<Vec<u8>>,
+    socket: PathBuf,
 }
 
-unsafe extern "C" fn wipe_captured(_pamh: *mut c_void, data: *mut c_void, _status: c_int) {
-    if !data.is_null() {
-        drop(Box::from_raw(data.cast::<Captured>()));
+impl Captured {
+    fn seal(&self) {
+        let _ = challenge::seal_secret(&self.socket, self.uid, &self.password, SIGN_TIMEOUT);
+    }
+}
+
+// polkit-agent-helper-1 never calls pam_setcred, so a successful pam_end seals too; PAM_DATA_REPLACE or a forked child's PAM_DATA_SILENT makes status non-zero and only wipes.
+unsafe extern "C" fn end_captured(_pamh: *mut c_void, data: *mut c_void, status: c_int) {
+    if data.is_null() {
+        return;
+    }
+    let captured = Box::from_raw(data.cast::<Captured>());
+    if status == PAM_SUCCESS {
+        captured.seal();
     }
 }
 
@@ -361,11 +373,23 @@ unsafe fn capture(pamh: *mut c_void, args: &[String]) {
     let Ok((uid, _, _)) = eligible(pamh, args) else {
         return;
     };
+    let Some(socket) = module_settings(args).ok().and_then(|s| s.token_socket) else {
+        return;
+    };
     let Some(password) = typed_password(pamh) else {
         return;
     };
-    let stash = Box::into_raw(Box::new(Captured { uid, password }));
-    if pam_set_data(pamh, CAPTURED_DATA.as_ptr(), stash.cast(), Some(wipe_captured)) != PAM_SUCCESS
+    let stash = Box::into_raw(Box::new(Captured {
+        uid,
+        password,
+        socket,
+    }));
+    if pam_set_data(
+        pamh,
+        CAPTURED_DATA.as_ptr(),
+        stash.cast(),
+        Some(end_captured),
+    ) != PAM_SUCCESS
     {
         drop(Box::from_raw(stash));
     }
@@ -381,15 +405,12 @@ unsafe fn typed_password(pamh: *mut c_void) -> Option<Zeroizing<Vec<u8>>> {
         .then(|| Zeroizing::new(bytes.to_vec()))
 }
 
-unsafe fn seal_captured(pamh: *mut c_void, args: &[String]) {
+unsafe fn seal_captured(pamh: *mut c_void) {
     let Some(data) = data_present(pamh, CAPTURED_DATA) else {
         return;
     };
-    let captured = &*data.cast::<Captured>();
-    let Some(socket) = module_settings(args).ok().and_then(|s| s.token_socket) else {
-        return;
-    };
-    let _ = challenge::seal_secret(&socket, captured.uid, &captured.password, SIGN_TIMEOUT);
+    (*data.cast::<Captured>()).seal();
+    forget_captured(pamh);
 }
 
 fn released_token(secret: &[u8]) -> Option<Zeroizing<Vec<u8>>> {
@@ -576,9 +597,8 @@ pub unsafe extern "C" fn pam_sm_setcred(
         return PAM_IGNORE;
     }
     if flags & (PAM_ESTABLISH_CRED | PAM_REINITIALIZE_CRED) != 0 {
-        seal_captured(pamh, &args);
+        seal_captured(pamh);
     }
-    forget_captured(pamh);
     PAM_IGNORE
 }
 

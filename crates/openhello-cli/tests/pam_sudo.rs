@@ -2,15 +2,16 @@
 mod support;
 
 use std::io::{Read, Write};
-use std::os::unix::net::UnixStream;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use openhello_keyd::{
     Protectors, TicketSocket, TicketSocketConfig, TokenSocket, TokenSocketConfig, OP_TICKET,
-    OP_TICKET_KEY, STATUS_ACCEPTED,
+    OP_TICKET_KEY, OP_TOKEN_SEAL_SECRET, STATUS_ACCEPTED,
 };
 use openhello_ticket::{Issuer, TicketKey, KEY_LEN};
 use support::{rig, Rig};
@@ -94,6 +95,10 @@ int main(int argc, char **argv) {
   printf("SIGINT %d\n", (int)interrupted);
   if (rc == PAM_SUCCESS && getenv("PAMTEST_SETCRED"))
     printf("SETCRED %d\n", pam_setcred(h, PAM_ESTABLISH_CRED));
+  if (rc == PAM_SUCCESS && getenv("PAMTEST_POLKIT")) {
+    rc = pam_acct_mgmt(h, 0);
+    printf("ACCT %d\n", rc);
+  }
   pam_end(h, rc);
   return 0;
 }
@@ -155,6 +160,11 @@ int pam_sm_authenticate(pam_handle_t *h, int flags, int argc, const char **argv)
 }
 
 int pam_sm_setcred(pam_handle_t *h, int flags, int argc, const char **argv) {
+  (void)h; (void)flags; (void)argc; (void)argv;
+  return PAM_SUCCESS;
+}
+
+int pam_sm_acct_mgmt(pam_handle_t *h, int flags, int argc, const char **argv) {
   (void)h; (void)flags; (void)argc; (void)argv;
   return PAM_SUCCESS;
 }
@@ -517,6 +527,7 @@ struct Stack {
     capture: bool,
     typed: Option<&'static str>,
     setcred: bool,
+    polkit: bool,
 }
 
 impl Stack {
@@ -537,6 +548,7 @@ impl Stack {
             capture: false,
             typed: None,
             setcred: false,
+            polkit: false,
         }
     }
 
@@ -592,6 +604,7 @@ struct Outcome {
     verify_calls: u32,
     sigint_seen: bool,
     setcred: Option<i32>,
+    acct: Option<i32>,
 }
 
 impl Outcome {
@@ -713,11 +726,13 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
     };
     let recorder = match stack.password_after {
         Some(accepted) => format!(
-            "auth required {} path={} password={accepted}\nauth optional {} path={}\n{capture}",
+            "auth required {} path={} password={accepted}\nauth optional {} path={}\n{capture}\
+             account required {}\n",
             fixture.password_check.display(),
             reached_file.display(),
             fixture.keyring.display(),
-            reached_file.display()
+            reached_file.display(),
+            fixture.password_check.display()
         ),
         None => format!(
             "auth required {} path={}\n",
@@ -757,6 +772,9 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
     }
     if stack.setcred {
         client.env("PAMTEST_SETCRED", "1");
+    }
+    if stack.polkit {
+        client.env("PAMTEST_POLKIT", "1");
     }
     let child = client
         .args([
@@ -824,6 +842,10 @@ fn run_stack(rig: &Rig, fixture: &Fixture, stack: &Stack) -> Outcome {
         setcred: stdout
             .lines()
             .find_map(|l| l.strip_prefix("SETCRED "))
+            .map(|rc| rc.parse().unwrap()),
+        acct: stdout
+            .lines()
+            .find_map(|l| l.strip_prefix("ACCT "))
             .map(|rc| rc.parse().unwrap()),
     }
 }
@@ -1695,10 +1717,161 @@ fn typed_with_capture(
 }
 
 const NEW_PASSWORD: &str = "New-Password-2";
+const THIRD_PASSWORD: &str = "Third-Password-3";
+
+struct SealCounter {
+    path: PathBuf,
+    seals: Arc<AtomicU32>,
+    _dir: tempfile::TempDir,
+}
+
+impl SealCounter {
+    fn seals(&self) -> u32 {
+        self.seals.load(Ordering::SeqCst)
+    }
+}
+
+fn seal_counter(upstream: &Path) -> SealCounter {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("counted-token.sock");
+    let listener = UnixListener::bind(&path).unwrap();
+    let seals = Arc::new(AtomicU32::new(0));
+    let (counted, upstream) = (seals.clone(), upstream.to_path_buf());
+    std::thread::spawn(move || {
+        for client in listener.incoming().flatten() {
+            let (seals, upstream) = (counted.clone(), upstream.clone());
+            std::thread::spawn(move || relay(client, &upstream, &seals));
+        }
+    });
+    SealCounter {
+        path,
+        seals,
+        _dir: dir,
+    }
+}
+
+fn relay(mut client: UnixStream, upstream: &Path, seals: &AtomicU32) {
+    let Ok(mut keyd) = UnixStream::connect(upstream) else {
+        return;
+    };
+    let forward = |from: &mut UnixStream, to: &mut UnixStream| -> std::io::Result<u8> {
+        let mut header = [0u8; 3];
+        from.read_exact(&mut header)?;
+        let mut body = vec![0u8; usize::from(u16::from_be_bytes([header[1], header[2]]))];
+        from.read_exact(&mut body)?;
+        to.write_all(&header)?;
+        to.write_all(&body)?;
+        Ok(header[0])
+    };
+    while let Ok(op) = forward(&mut client, &mut keyd) {
+        if op == OP_TOKEN_SEAL_SECRET {
+            seals.fetch_add(1, Ordering::SeqCst);
+        }
+        if forward(&mut keyd, &mut client).is_err() {
+            return;
+        }
+    }
+}
+
+fn polkit_like(services: &Services, accepted: &'static str, typed: &'static str) -> Stack {
+    Stack {
+        polkit: true,
+        ..typed_with_capture(services, accepted, typed, false)
+    }
+}
+
+// @spec:AC-091
+#[test]
+fn capture_seals_a_password_typed_at_a_polkit_like_prompt_and_the_next_face_releases_it() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        fixture.protectors.login_secrets().purge(uid()).unwrap();
+        let entry = fixture.write_shadow("saltsalt");
+
+        let prompt = scenario(
+            &rig,
+            fixture,
+            &services,
+            polkit_like(&services, NEW_PASSWORD, NEW_PASSWORD),
+        );
+        assert!(prompt.granted(), "{:?}", prompt.reached);
+        assert_eq!(prompt.acct, Some(0));
+        assert_eq!(prompt.setcred, None);
+        assert_eq!(fixture.sealed(&entry).as_deref(), Some(NEW_PASSWORD));
+
+        let released = scenario(
+            &rig,
+            fixture,
+            &services,
+            released_to_root(&services, NEW_PASSWORD),
+        );
+        assert!(released.granted(), "{:?}", released.reached);
+        assert!(released.prompts.is_empty(), "{:?}", released.prompts);
+        assert_eq!(
+            released.reached,
+            [
+                "password=accepted".to_string(),
+                format!("keyring={NEW_PASSWORD}")
+            ]
+        );
+    });
+}
+
+#[test]
+fn capture_seals_nothing_when_a_polkit_like_prompt_ends_with_a_wrong_password() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        fixture.protectors.login_secrets().purge(uid()).unwrap();
+        let entry = fixture.write_shadow("saltsalt");
+        let counter = seal_counter(&services.root_token_path);
+
+        let prompt = scenario(
+            &rig,
+            fixture,
+            &services,
+            Stack {
+                token_socket: Some(counter.path.clone()),
+                ..polkit_like(&services, NEW_PASSWORD, "Wrong-Password-9")
+            },
+        );
+        assert!(!prompt.granted());
+        assert_eq!(prompt.reached[0], "password=rejected");
+        assert_eq!(prompt.acct, None);
+        assert_eq!(counter.seals(), 0);
+        assert_eq!(fixture.sealed(&entry), None);
+    });
+}
+
+#[test]
+fn capture_seals_exactly_once_when_setcred_runs_before_pam_end() {
+    let rig = rig();
+    with_fixture(&rig, |fixture| {
+        let services = services(&rig, fixture);
+        fixture.protectors.login_secrets().purge(uid()).unwrap();
+        let entry = fixture.write_shadow("saltsalt");
+        let counter = seal_counter(&services.root_token_path);
+
+        let outcome = scenario(
+            &rig,
+            fixture,
+            &services,
+            Stack {
+                token_socket: Some(counter.path.clone()),
+                ..typed_with_capture(&services, NEW_PASSWORD, NEW_PASSWORD, true)
+            },
+        );
+        assert!(outcome.granted(), "{:?}", outcome.reached);
+        assert_eq!(outcome.setcred, Some(0));
+        assert_eq!(counter.seals(), 1);
+        assert_eq!(fixture.sealed(&entry).as_deref(), Some(NEW_PASSWORD));
+    });
+}
 
 // @spec:AC-082
 #[test]
-fn capture_seals_a_typed_password_once_the_sign_in_and_setcred_succeed() {
+fn capture_seals_a_typed_password_once_the_sign_in_succeeds_with_or_without_setcred() {
     let rig = rig();
     with_fixture(&rig, |fixture| {
         let services = services(&rig, fixture);
@@ -1720,6 +1893,16 @@ fn capture_seals_a_typed_password_once_the_sign_in_and_setcred_succeed() {
         assert!(!stored
             .windows(NEW_PASSWORD.len())
             .any(|w| w == NEW_PASSWORD.as_bytes()));
+
+        let without_setcred = scenario(
+            &rig,
+            fixture,
+            &services,
+            typed_with_capture(&services, THIRD_PASSWORD, THIRD_PASSWORD, false),
+        );
+        assert!(without_setcred.granted(), "{:?}", without_setcred.reached);
+        assert_eq!(without_setcred.setcred, None);
+        assert_eq!(fixture.sealed(&entry).as_deref(), Some(THIRD_PASSWORD));
     });
 }
 
@@ -1760,7 +1943,7 @@ fn capture_replaces_the_sealed_password_with_a_new_one_and_the_next_face_sign_in
 
 // @spec:AC-084
 #[test]
-fn capture_leaves_the_sealed_password_after_a_failed_a_setcred_less_or_a_released_sign_in() {
+fn capture_leaves_the_sealed_password_after_a_failed_or_a_released_sign_in() {
     let rig = rig();
     with_fixture(&rig, |fixture| {
         let services = services(&rig, fixture);
@@ -1776,16 +1959,6 @@ fn capture_leaves_the_sealed_password_after_a_failed_a_setcred_less_or_a_release
         assert!(!failed.granted());
         assert_eq!(failed.reached[0], "password=rejected");
         assert_eq!(fixture.sealed_bytes(), before, "a failed sign-in");
-
-        let without_setcred = scenario(
-            &rig,
-            fixture,
-            &services,
-            typed_with_capture(&services, NEW_PASSWORD, NEW_PASSWORD, false),
-        );
-        assert!(without_setcred.granted());
-        assert_eq!(without_setcred.setcred, None);
-        assert_eq!(fixture.sealed_bytes(), before, "a sign-in without setcred");
 
         let released = scenario(
             &rig,
