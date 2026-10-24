@@ -892,13 +892,26 @@ fn polkit_rule(fake: &FakeSudo) -> std::path::PathBuf {
     fake.dir.path().join(format!("etc/polkit-1/rules.d/49-openhello-uid{}.rules", my_uid()))
 }
 
-fn enrolled_service(bus: &PrivateBus) -> zbus::blocking::Connection {
-    serve(bus, Arc::new(AllowAll));
+struct CountingSensor(Arc<AtomicUsize>);
+
+impl SensorBackend for CountingSensor {
+    fn capture(&mut self) -> Result<CapturedFrame, DaemonError> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Ok(CapturedFrame { width: 1, height: 1, pixels: vec![0] })
+    }
+}
+
+fn enrolled_service(bus: &PrivateBus) -> (zbus::blocking::Connection, Arc<AtomicUsize>) {
+    let captures = Arc::new(AtomicUsize::new(0));
+    let engine = Engine { begins: Arc::default(), candidates: Vec::new() };
+    let core = Biometrics::new(Box::new(CountingSensor(captures.clone())), Box::new(engine), Box::new(Storage::default()), DEFAULT_TARGET_FAR);
+    serve_core(bus, Arc::new(AllowAll), core);
     let conn = client(bus);
     let handle: String = proxy(&conn).call("EnrollBegin", &(1000u32,)).unwrap();
     proxy(&conn).call::<_, _, (String, String, u32, u32)>("EnrollCapture", &(handle.as_str(),)).unwrap();
     proxy(&conn).call::<_, _, bool>("EnrollCommit", &(handle.as_str(),)).unwrap();
-    conn
+    captures.store(0, Ordering::SeqCst);
+    (conn, captures)
 }
 
 fn sign_in_from_another_process(bus: &PrivateBus) -> String {
@@ -911,35 +924,49 @@ fn sign_in_from_another_process(bus: &PrivateBus) -> String {
 }
 
 #[test]
-fn a_sign_in_process_gets_one_face_decision_and_then_the_password() {
+fn a_sign_in_process_keeps_its_match_without_the_camera_and_others_get_their_own() {
     let bus = PrivateBus::start();
-    let conn = enrolled_service(&bus);
+    let (conn, captures) = enrolled_service(&bus);
     assert!(proxy(&conn).call::<_, _, bool>("VerifyForSignIn", &(1000u32,)).unwrap());
-    let again = proxy(&conn).call::<_, _, bool>("VerifyForSignIn", &(1000u32,)).unwrap_err().to_string();
-    assert!(again.contains("io.openhello.Error.AlreadyDecided"), "{again}");
+    let first = captures.load(Ordering::SeqCst);
+    assert!(first > 0);
+    assert!(proxy(&conn).call::<_, _, bool>("VerifyForSignIn", &(1000u32,)).unwrap(), "a lock screen re-asking keeps its unlock");
     let fresh = client(&bus);
-    let same_process = proxy(&fresh).call::<_, _, bool>("VerifyForSignIn", &(1000u32,)).unwrap_err().to_string();
-    assert!(same_process.contains("AlreadyDecided"), "a new connection from the same process is the same sign-in: {same_process}");
-    assert!(sign_in_from_another_process(&bus).contains("boolean true"), "another process gets its own decision");
+    assert!(proxy(&fresh).call::<_, _, bool>("VerifyForSignIn", &(1000u32,)).unwrap());
+    assert_eq!(captures.load(Ordering::SeqCst), first, "the camera stays off for the same process");
+    assert!(sign_in_from_another_process(&bus).contains("boolean true"));
+    assert!(captures.load(Ordering::SeqCst) > first, "another process is checked afresh");
 }
 
 #[test]
-fn a_refused_face_also_ends_the_face_step_for_that_process() {
+fn a_refused_face_sends_that_process_to_the_password_without_the_camera() {
     let bus = PrivateBus::start();
-    let conn = enrolled_service(&bus);
+    let (conn, captures) = enrolled_service(&bus);
     assert!(!proxy(&conn).call::<_, _, bool>("VerifyForSignIn", &(1001u32,)).unwrap());
-    let again = proxy(&conn).call::<_, _, bool>("VerifyForSignIn", &(1000u32,)).unwrap_err().to_string();
-    assert!(again.contains("AlreadyDecided"), "{again}");
+    let first = captures.load(Ordering::SeqCst);
+    let again = proxy(&conn).call::<_, _, bool>("VerifyForSignIn", &(1001u32,)).unwrap_err().to_string();
+    assert!(again.contains("io.openhello.Error.AlreadyDecided"), "{again}");
+    assert_eq!(captures.load(Ordering::SeqCst), first);
+}
+
+#[test]
+fn a_decision_belongs_to_the_user_it_was_made_for() {
+    let bus = PrivateBus::start();
+    let (conn, captures) = enrolled_service(&bus);
+    assert!(!proxy(&conn).call::<_, _, bool>("VerifyForSignIn", &(1001u32,)).unwrap());
+    let first = captures.load(Ordering::SeqCst);
+    assert!(proxy(&conn).call::<_, _, bool>("VerifyForSignIn", &(1000u32,)).unwrap());
+    assert!(captures.load(Ordering::SeqCst) > first, "a refusal for one user never answers for another");
 }
 
 #[test]
 fn the_window_test_button_keeps_verifying_as_often_as_asked() {
     let bus = PrivateBus::start();
-    let conn = enrolled_service(&bus);
-    for _ in 0..3 {
+    let (conn, captures) = enrolled_service(&bus);
+    for round in 1..=3 {
         assert!(proxy(&conn).call::<_, _, bool>("Verify", &(1000u32,)).unwrap());
+        assert!(captures.load(Ordering::SeqCst) >= round);
     }
-    assert!(proxy(&conn).call::<_, _, bool>("VerifyForSignIn", &(1000u32,)).unwrap());
 }
 
 #[test]
