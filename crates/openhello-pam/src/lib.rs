@@ -191,7 +191,11 @@ unsafe fn eligible(
     pamh: *mut c_void,
     args: &[String],
 ) -> Result<(u32, String, p256::ecdsa::VerifyingKey), Exit> {
-    local_session_allowed(pamh).map_err(ignore)?;
+    local_session_allowed(pamh).map_err(|reason| {
+        let text = with_probes(pamh, session::describe);
+        debug::report_text(args.iter().any(|a| a == "debug"), &debug::syslog, &text);
+        ignore(reason)
+    })?;
     let user = item_text(pamh, PAM_USER)
         .filter(|u| !u.is_empty())
         .ok_or(ignore(Reason::NoUser))?;
