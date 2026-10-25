@@ -1,0 +1,7 @@
+FROM docker.io/library/almalinux:8
+ENV RUSTUP_HOME=/opt/rustup CARGO_HOME=/opt/cargo PATH=/opt/rh/gcc-toolset-13/root/usr/bin:/opt/cargo/bin:/usr/local/bin:/usr/bin:/bin
+RUN dnf -y install dnf-plugins-core && dnf config-manager --set-enabled powertools && dnf -y install \
+      gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ gcc-toolset-13-binutils make cmake pkgconf-pkg-config curl ca-certificates git \
+      fontconfig-devel freetype-devel pam-devel openssl-devel systemd-devel libxkbcommon-devel \
+    && dnf clean all
+RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
